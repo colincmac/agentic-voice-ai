@@ -12,9 +12,48 @@ public sealed class IvrWorkflowState
     private readonly ConcurrentDictionary<string, object?> _data = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _timestamps = new();
     private readonly List<string> _completedSteps = [];
+    private readonly List<ChatMessage> _transcript = [];
     private readonly Lock _lock = new();
 
-    public readonly List<ChatMessage> Transcript = [];
+    /// <summary>
+    /// Gets a thread-safe snapshot of the transcript messages.
+    /// </summary>
+    public IReadOnlyList<ChatMessage> Transcript
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return [.. _transcript];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a message to the transcript in a thread-safe manner.
+    /// </summary>
+    public void AddTranscriptMessage(ChatMessage message)
+    {
+        lock (_lock)
+        {
+            _transcript.Add(message);
+        }
+
+        LastModifiedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Adds multiple messages to the transcript in a thread-safe manner.
+    /// </summary>
+    public void AddTranscriptMessages(IEnumerable<ChatMessage> messages)
+    {
+        lock (_lock)
+        {
+            _transcript.AddRange(messages);
+        }
+
+        LastModifiedAt = DateTimeOffset.UtcNow;
+    }
     /// <summary>
     /// Gets the unique identifier for this workflow state instance.
     /// </summary>

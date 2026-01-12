@@ -73,8 +73,8 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
             AllowSynchronousContinuations = true
         });
 
-        // Wire up coordinator events
-        _coordinator.OnStepChanged += HandleStepChangedAsync;
+        // Wire up coordinator events - directly use ApplyStepConfigurationAsync
+        _coordinator.OnStepChanged += ApplyStepConfigurationAsync;
     }
 
     public string ChannelId => Metadata.ContactId;
@@ -283,13 +283,6 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
         {
             _configUpdateLock.Release();
         }
-    }
-
-    private async Task HandleStepChangedAsync(
-        RealtimeIvrStepConfiguration config,
-        CancellationToken cancellationToken)
-    {
-        await ApplyStepConfigurationAsync(config, cancellationToken);
     }
 
     private static ChatResponseUpdate AsChatResponseUpdate(AgentRunResponseUpdate responseUpdate)

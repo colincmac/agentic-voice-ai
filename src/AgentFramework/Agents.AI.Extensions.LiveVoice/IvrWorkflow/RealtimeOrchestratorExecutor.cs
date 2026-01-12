@@ -113,7 +113,32 @@ public sealed class RealtimeIvrOrchestratorExecutor : StatefulExecutor<IvrWorkfl
     private readonly ILogger<RealtimeIvrOrchestratorExecutor> _logger;
     private readonly ChatOptions _chatOptions;
     private readonly JsonSerializerOptions _jsonOptions = LiveVoiceJsonUtilities.DefaultOptions;
-    private static readonly Func<IvrWorkflowState> initFunction = () => new IvrWorkflowState();
+    private static readonly Func<IvrWorkflowState> initializeState = () => new IvrWorkflowState();
+
+    /// <summary>
+    /// Maximum number of transcript messages to include in context.
+    /// </summary>
+    private const int MaxTranscriptMessages = 15;
+
+    /// <summary>
+    /// Approximate token limit for conversation context to avoid exceeding model limits.
+    /// </summary>
+    private const int MaxContextTokenEstimate = 2000;
+
+    /// <summary>
+    /// Static orchestrator role preamble (cached to avoid reconstruction).
+    /// </summary>
+    private const string OrchestratorRolePreamble = """
+        # Role
+        You are a workflow orchestrator analyzing voice conversations to determine step transitions.
+        Your job is to observe the conversation and decide when the current step's goals have been met.
+
+        # Decision Guidelines
+        - Only recommend transitions when exit conditions are clearly satisfied
+        - Extract data accurately from user responses
+        - Flag escalation only for explicit requests or significant frustration
+        - Be conservative with transitions - prefer staying in current step if uncertain
+        """;
 
     public RealtimeIvrOrchestratorExecutor(
         string id,
@@ -159,10 +184,9 @@ public sealed class RealtimeIvrOrchestratorExecutor : StatefulExecutor<IvrWorkfl
             IWorkflowContext ctx,
             CancellationToken ct)
         {
-            state ??= initFunction();
+            state ??= initializeState();
 
-            // Update transcript
-            state.Transcript.AddRange(turn.TranscriptionMessages);
+            state.AddTranscriptMessages(turn.TranscriptionMessages);
 
             var currentStep = state.CurrentStepName is not null
                 ? _workflow.GetStep(state.CurrentStepName)
@@ -220,78 +244,59 @@ public sealed class RealtimeIvrOrchestratorExecutor : StatefulExecutor<IvrWorkfl
 
     private string BuildOrchestratorSystemPrompt(RealtimeIvrWorkflowStep currentStep)
     {
-        var sb = new StringBuilder();
+        // Use interpolated string for better performance with the static preamble
+        return $"""
+            {OrchestratorRolePreamble}
 
-        sb.AppendLine("# Role");
-        sb.AppendLine("You are a workflow orchestrator analyzing voice conversations to determine step transitions.");
-        sb.AppendLine();
+            # Current Step
+            - ID: {currentStep.Id}
+            - Description: {currentStep.ConversationState.Description}
+            {(currentStep.ConversationState.Goal is not null ? $"- Goal: {currentStep.ConversationState.Goal}" : "")}
+            {(currentStep.ConversationState.ExitWhen is not null ? $"- Exit Condition: {currentStep.ConversationState.ExitWhen}" : "")}
 
-        sb.AppendLine("# Current Step");
-        sb.AppendLine($"- ID: {currentStep.Id}");
-        sb.AppendLine($"- Description: {currentStep.ConversationState.Description}");
+            # Required Data to Collect
+            {FormatRequiredDataKeys(currentStep)}
 
-        if (currentStep.ConversationState.Goal is not null)
+            # Valid Transitions
+            {FormatTransitions(currentStep)}
+            """;
+    }
+
+    private static string FormatRequiredDataKeys(RealtimeIvrWorkflowStep step)
+    {
+        if (step.RequiredStateKeys.Count == 0)
         {
-            sb.AppendLine($"- Goal: {currentStep.ConversationState.Goal}");
+            return "- None specified";
         }
 
-        if (currentStep.ConversationState.ExitWhen is not null)
+        return string.Join(Environment.NewLine, step.RequiredStateKeys.Select(k => $"- {k}"));
+    }
+
+    private static string FormatTransitions(RealtimeIvrWorkflowStep step)
+    {
+        if (step.ConversationState.Transitions is not { Count: > 0 })
         {
-            sb.AppendLine($"- Exit Condition: {currentStep.ConversationState.ExitWhen}");
+            return "- No transitions defined (final step)";
         }
 
-        sb.AppendLine();
-
-        sb.AppendLine("# Required Data to Collect");
-        if (currentStep.RequiredStateKeys.Count > 0)
-        {
-            foreach (var key in currentStep.RequiredStateKeys)
-            {
-                sb.AppendLine($"- {key}");
-            }
-        }
-        else
-        {
-            sb.AppendLine("- None specified");
-        }
-
-        sb.AppendLine();
-
-        sb.AppendLine("# Valid Transitions");
-        if (currentStep.ConversationState.Transitions is { Count: > 0 })
-        {
-            foreach (var transition in currentStep.ConversationState.Transitions)
-            {
-                sb.AppendLine($"- {transition.NextStep}: {transition.Condition}");
-            }
-        }
-        else
-        {
-            sb.AppendLine("- No transitions defined (final step)");
-        }
-
-        sb.AppendLine();
-
-        sb.AppendLine("# Instructions");
-        sb.AppendLine("1. Analyze the conversation to determine if the exit condition is met");
-        sb.AppendLine("2. Extract any required data from the user's responses");
-        sb.AppendLine("3. Recommend a transition if conditions are satisfied");
-        sb.AppendLine("4. Flag for escalation if user is frustrated or requests human assistance");
-
-        return sb.ToString();
+        return string.Join(
+            Environment.NewLine,
+            step.ConversationState.Transitions.Select(t => $"- {t.NextStep}: {t.Condition}"));
     }
 
     private string BuildConversationContext(IvrWorkflowState state, RealtimeVoiceAgentTurn turn)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(MaxContextTokenEstimate);
+
+        // Get recent messages with token-aware truncation
+        var recentMessages = GetRecentMessagesWithinTokenLimit(state.Transcript, MaxTranscriptMessages);
 
         sb.AppendLine("# Recent Conversation");
-        var recentMessages = state.Transcript.TakeLast(10);
         foreach (var msg in recentMessages)
         {
             var role = msg.Role == ChatRole.User ? "User" : "Agent";
             var text = msg.Text ?? "(audio)";
-            sb.AppendLine($"{role}: {text}");
+            sb.Append(role).Append(": ").AppendLine(text);
         }
 
         sb.AppendLine();
@@ -300,19 +305,19 @@ public sealed class RealtimeIvrOrchestratorExecutor : StatefulExecutor<IvrWorkfl
         {
             var role = msg.Role == ChatRole.User ? "User" : "Agent";
             var text = msg.Text ?? "(audio)";
-            sb.AppendLine($"{role}: {text}");
+            sb.Append(role).Append(": ").AppendLine(text);
         }
 
         sb.AppendLine();
         sb.AppendLine("# Already Collected Data");
         var allKeys = state.Keys;
-        if (allKeys.Any())
+        if (allKeys.Count > 0)
         {
             foreach (var key in allKeys)
             {
                 if (state.TryGet<object>(key, out var value))
                 {
-                    sb.AppendLine($"- {key}: {value}");
+                    sb.Append("- ").Append(key).Append(": ").AppendLine(value?.ToString() ?? "(null)");
                 }
             }
         }
@@ -322,6 +327,30 @@ public sealed class RealtimeIvrOrchestratorExecutor : StatefulExecutor<IvrWorkfl
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Gets recent messages while staying within an estimated token budget.
+    /// </summary>
+    private static IEnumerable<ChatMessage> GetRecentMessagesWithinTokenLimit(
+        IReadOnlyList<ChatMessage> transcript,
+        int maxMessages)
+    {
+        if (transcript.Count <= maxMessages)
+        {
+            return transcript;
+        }
+
+        // Take last N messages, prioritizing recent context
+        var startIndex = Math.Max(0, transcript.Count - maxMessages);
+        var result = new List<ChatMessage>(maxMessages);
+
+        for (var i = startIndex; i < transcript.Count; i++)
+        {
+            result.Add(transcript[i]);
+        }
+
+        return result;
     }
 
     private async Task ApplyDecisionAsync(

@@ -30,6 +30,7 @@ public sealed class RealtimeIvrWorkflowCoordinator : IAsyncDisposable
     private readonly AuthorizingRealtimeAIAgent _realtimeAgent;
     private readonly RealtimeIvrWorkflowDefinition _workflowDefinition;
     private readonly AIAgent _orchestratorAgent;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RealtimeIvrWorkflowCoordinator> _logger;
     private readonly RealtimeIvrWorkflowController _controller;
     private readonly CancellationTokenSource _cts = new();
@@ -61,17 +62,19 @@ public sealed class RealtimeIvrWorkflowCoordinator : IAsyncDisposable
         AuthorizingRealtimeAIAgent realtimeAgent,
         RealtimeIvrWorkflowDefinition workflowDefinition,
         AIAgent orchestratorAgent,
-        ILogger<RealtimeIvrWorkflowCoordinator>? logger = null)
+        ILoggerFactory? loggerFactory = null)
     {
         _realtimeAgent = realtimeAgent;
         _workflowDefinition = workflowDefinition;
         _orchestratorAgent = orchestratorAgent;
-        _logger = logger ?? NullLogger<RealtimeIvrWorkflowCoordinator>.Instance;
+
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _logger = _loggerFactory.CreateLogger<RealtimeIvrWorkflowCoordinator>();
 
         _controller = new RealtimeIvrWorkflowController(
             realtimeAgent,
             workflowDefinition,
-            logger is null ? null : NullLoggerFactory.Instance.CreateLogger<RealtimeIvrWorkflowController>());
+            _loggerFactory.CreateLogger<RealtimeIvrWorkflowController>());
 
         WireUpControllerEvents();
     }
@@ -188,30 +191,35 @@ public sealed class RealtimeIvrWorkflowCoordinator : IAsyncDisposable
 
     private Workflow BuildOrchestratorWorkflow()
     {
-        // Create the orchestrator executor
+        // Create the orchestrator executor with proper logging
         var orchestratorExecutor = new RealtimeIvrOrchestratorExecutor(
             "ivr-orchestrator",
             _orchestratorAgent,
             _workflowDefinition,
-            _logger is NullLogger<RealtimeIvrWorkflowCoordinator>
-                ? null
-                : NullLoggerFactory.Instance.CreateLogger<RealtimeIvrOrchestratorExecutor>());
+            _loggerFactory.CreateLogger<RealtimeIvrOrchestratorExecutor>());
 
         // Build a simple single-executor workflow
         // The orchestrator receives turns and outputs decisions
         var workflow = new WorkflowBuilder(orchestratorExecutor)
             .WithOutputFrom(orchestratorExecutor)
             .Build();
-
+        
         return workflow;
     }
 
     private void WireUpControllerEvents()
     {
+        // Forward controller events to coordinator subscribers
+        // Only invoke if there are actual subscribers to avoid unnecessary async machinery
         _controller.OnStepChanged += async (stepId, prompt, ct) =>
         {
+            if (OnStepChanged is null)
+            {
+                return;
+            }
+
             var step = _workflowDefinition.GetStep(stepId);
-            if (step is not null && OnStepChanged is not null)
+            if (step is not null)
             {
                 var config = new RealtimeIvrStepConfiguration
                 {
@@ -219,33 +227,18 @@ public sealed class RealtimeIvrWorkflowCoordinator : IAsyncDisposable
                     SystemPrompt = prompt,
                     AvailableTools = step.AvailableTools ?? []
                 };
-                await OnStepChanged(config, ct);
+                await OnStepChanged(config, ct).ConfigureAwait(false);
             }
         };
 
-        _controller.OnWorkflowCompleted += async (state, message, ct) =>
-        {
-            if (OnWorkflowCompleted is not null)
-            {
-                await OnWorkflowCompleted(state, message, ct);
-            }
-        };
+        _controller.OnWorkflowCompleted += (state, message, ct) =>
+            OnWorkflowCompleted?.Invoke(state, message, ct) ?? Task.CompletedTask;
 
-        _controller.OnWorkflowFailed += async (state, error, ct) =>
-        {
-            if (OnWorkflowFailed is not null)
-            {
-                await OnWorkflowFailed(state, error, ct);
-            }
-        };
+        _controller.OnWorkflowFailed += (state, error, ct) =>
+            OnWorkflowFailed?.Invoke(state, error, ct) ?? Task.CompletedTask;
 
-        _controller.OnEscalationRequested += async (reason, ct) =>
-        {
-            if (OnEscalationRequested is not null)
-            {
-                await OnEscalationRequested(reason, ct);
-            }
-        };
+        _controller.OnEscalationRequested += (reason, ct) =>
+            OnEscalationRequested?.Invoke(reason, ct) ?? Task.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
@@ -298,12 +291,11 @@ public sealed class RealtimeIvrWorkflowCoordinatorFactory : IRealtimeIvrWorkflow
         RealtimeIvrWorkflowDefinition workflowDefinition)
     {
         var orchestratorAgent = _orchestratorAgentFactory();
-        var logger = _loggerFactory.CreateLogger<RealtimeIvrWorkflowCoordinator>();
 
         return new RealtimeIvrWorkflowCoordinator(
             realtimeAgent,
             workflowDefinition,
             orchestratorAgent,
-            logger);
+            _loggerFactory);
     }
 }

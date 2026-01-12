@@ -23,7 +23,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
     private readonly ILogger<RealtimeIvrWorkflowController> _logger;
     private readonly SemaphoreSlim _stateLock = new(1, 1);
 
-    private RealtimeIvrControllerState _state;
+    private readonly RealtimeIvrControllerState _state;
     private ConversationSessionThread? _thread;
     private bool _isStarted;
     private bool _disposed;
@@ -252,6 +252,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
         }
     }
 
+
     /// <summary>
     /// Adds a transcript message to the workflow state.
     /// </summary>
@@ -262,7 +263,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
         await _stateLock.WaitAsync(cancellationToken);
         try
         {
-            _state.WorkflowState.Transcript.Add(message);
+            _state.WorkflowState.AddTranscriptMessage(message);
             _state.WorkflowState.TotalTurns++;
         }
         finally
@@ -270,6 +271,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
             _stateLock.Release();
         }
     }
+
 
     /// <summary>
     /// Completes the workflow successfully.
@@ -394,7 +396,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
         };
     }
 
-    private async Task<IvrGuardResult> EvaluateGuardsAsync(
+    private static async Task<IvrGuardResult> EvaluateGuardsAsync(
         RealtimeIvrWorkflowStep step,
         IvrWorkflowState state,
         CancellationToken cancellationToken)
@@ -419,7 +421,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
         return IvrGuardResult.Pass();
     }
 
-    private async Task<bool> ValidateStepAsync(
+    private static async Task<bool> ValidateStepAsync(
         RealtimeIvrWorkflowStep step,
         IvrWorkflowState state,
         CancellationToken cancellationToken)
