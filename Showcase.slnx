@@ -1,0 +1,77 @@
+<Solution>
+  <Folder Name="/.github/">
+    <Folder Name="/workflows/">
+      <File Path=".github/workflows/copilot-setup-steps.yml" />
+    </Folder>
+    <Folder Name="/actions/">
+    </Folder>
+    <File Path=".github/copilot-instructions.md" />
+  </Folder>
+
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.targets" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path=".editorconfig" />
+    <File Path="NuGet.config" />
+    <File Path="playground.ipynb" />
+
+  </Folder>
+  <Folder Name="/Solution Items/Agents/">
+    <File Path="src/AgentFramework/Directory.Packages.props" />
+  </Folder>
+  <Folder Name="/Solution Items/Playground/" />
+  <Folder Name="/Solution Items/test/">
+    <File Path="test/Directory.Build.targets" />
+    <File Path="test/Directory.Packages.props" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Agents.AI.Extensions.Tests/Agents.AI.Extensions.Tests.csproj" />
+    <Project Path="test/Agents.AI.RealtimeVoice.Azure.Tests/Agents.AI.RealtimeVoice.Azure.Tests.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="test/AI.TestingFramework/AI.TestingFramework.csproj" Id="dea5a116-fe7d-44d4-8bfe-a666c8382c96" />
+    <Project Path="test/Showcase.Authentication.Tests/Showcase.Authentication.Tests.csproj" Id="ba6141fc-b68a-4fbc-a017-087da2a554d4">
+      <BuildDependency Project="src/Shared/Showcase.Authentication/Showcase.Authentication.csproj" />
+    </Project>
+    <Project Path="test/Showcase.EnterpriseMcp.Tests/Showcase.EnterpriseMcp.Tests.csproj" Id="572e4d5b-2102-4c05-b999-67c8d0af265a" />
+  </Folder>
+  <Folder Name="/AgentFramework/">
+    <Project Path="src/AgentFramework/Agents.AI.Extensions.LiveVoice/Agents.AI.Extensions.LiveVoice.csproj" Id="b5a73c19-bb07-443b-b104-053272fbae8d" />
+    <Project Path="src/AgentFramework/Agents.AI.Extensions/Agents.AI.Extensions.csproj" Id="bc13d9e5-23c5-4e53-a58d-fdd97d228377" />
+    <Project Path="src/AgentFramework/Agents.AI.RealtimeVoice.Azure/Agents.AI.RealtimeVoice.Azure.csproj" Id="fb0c81ed-e07c-42d8-ac95-af2d4428cb84" />
+    <Project Path="src/AgentFramework/Agents.AI.RealtimeVoice.Teams/Agents.AI.RealtimeVoice.Teams.csproj" Id="9cc10d62-861c-4046-9705-8881fda413ca" />
+    <Project Path="src/AgentFramework/Agents.AI/Agents.AI.csproj" Id="99613f2c-8456-4d20-a29f-7e963d0a7fe8" />
+    <Project Path="src/AgentFramework/Extensions.AI/Extensions.AI.csproj" Id="a0a31bc0-8e72-45df-a14b-26d864a26ab7" />
+  </Folder>
+  <Folder Name="/Agents/">
+    <Project Path="M365Agent/M365Agent.atkproj" Type="a9e3f50b-275e-4af7-adce-8be12d41e305">
+      <Deploy />
+    </Project>
+    <Project Path="src/Agents/Showcase.Agent.VoiceAgent/Showcase.Agent.VoiceAgent.csproj" />
+  </Folder>
+
+  <Folder Name="/Enterprise MCP/">
+    <Project Path="src/enterprise-mcp/Showcase.EnterpriseMcp.Server/Showcase.EnterpriseMcp.Server.csproj" />
+    <Project Path="src/enterprise-mcp/TestApp/TestApp.csproj" />
+  </Folder>
+  <Folder Name="/Playground/">
+    <Project Path="src/Playground/Agents.AI.Playground.Console/Agents.AI.Playground.ConsoleApp.csproj" Id="ea6360d0-4045-4c9f-94c1-cda2dbbdc1b9" />
+    <Project Path="src/Playground/Showcase.ConsolePlayground/Showcase.ConsolePlayground.csproj" />
+  </Folder>
+
+  <Folder Name="/Shared/">
+    <Project Path="src/python-services/voice-biometrics/voice-biometrics.pyproj" Type="888888a0-9f3d-457c-b088-3a5042f75d52" Id="4ad25420-a451-43ba-93af-c77ec0438d5e" />
+    <Project Path="src/Shared/Showcase.AppHost/Showcase.AppHost.csproj" />
+    <Project Path="src/Shared/Showcase.Authentication/Showcase.Authentication.csproj" />
+    <Project Path="src/Shared/Showcase.ServiceDefaults/Showcase.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/Web/">
+    <Project Path="src/Web/ag-ui-frontend/ag-ui-frontend.esproj">
+      <Build />
+      <Deploy />
+    </Project>
+  </Folder>
+
+
+</Solution>

@@ -1,0 +1,27 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove(Directory.Packages.props, $(MSBuildThisFileDirectory)../..))" />
+  <ItemGroup>
+    <PackageVersion Include="AdaptiveCards" Version="3.1.0" />
+    <PackageVersion Include="AdaptiveCards.Templating" Version="2.0.5" />
+    <PackageVersion Include="GitHub.Octokit.SDK" Version="0.0.31" />
+
+    <PackageVersion Include="Microsoft.Teams.Api" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Apps" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Cards" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Common" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Extensions.Hosting" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Plugins.AspNetCore" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.Teams.Plugins.AspNetCore.DevTools" Version="2.0.0-preview.7" />
+    <PackageVersion Include="Microsoft.TeamsFx" Version="3.0.0" />
+    <PackageVersion Include="Octokit" Version="14.0.0" />
+    <PackageVersion Include="Octokit.Reactive" Version="14.0.0" />
+    <PackageVersion Include="Octokit.Webhooks.AspNetCore" Version="2.5.1" />
+    <!-- Workflows -->
+
+    <PackageVersion Include="Microsoft.Bot.ObjectModel" Version="1.2025.1003.2" />
+    <PackageVersion Include="Microsoft.Bot.ObjectModel.Json" Version="1.2025.1003.2" />
+    <PackageVersion Include="Microsoft.Bot.ObjectModel.PowerFx" Version="1.2025.1003.2" />
+    <PackageVersion Include="Microsoft.PowerFx.Interpreter" Version="1.4.0" />
+
+  </ItemGroup>
+</Project>

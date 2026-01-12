@@ -1,0 +1,6 @@
+@Showcase.Agent.VoiceAgent_HostAddress = http://localhost:5221
+
+GET {{Showcase.Agent.VoiceAgent_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

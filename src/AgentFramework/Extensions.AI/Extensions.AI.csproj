@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>
+      $(NoWarn);SKEXP0001,SKEXP0010,SKEXP0040,SKEXP0050,SKEXP0060,SKEXP0080,SKEXP0081,SKEXP0101,SKEXP0110,OPENAI001,OPENAI002,MEAI001
+    </NoWarn>
+    <InjectSharedThrow>true</InjectSharedThrow>
+
+  </PropertyGroup>
+  <ItemGroup>
+
+    <PackageReference Include="Azure.AI.OpenAI" />
+    <PackageReference Include="Azure.AI.VoiceLive" />
+
+
+
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.AI.AzureAIInference" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+    <PackageReference Include="Microsoft.Extensions.Azure" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="ModelContextProtocol.Core" />
+
+  </ItemGroup>
+
+</Project>

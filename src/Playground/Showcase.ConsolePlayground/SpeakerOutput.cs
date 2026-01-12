@@ -1,0 +1,55 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
+using NAudio.Wave;
+
+namespace Showcase.ConsolePlayground;
+
+/// <summary>
+/// Uses the NAudio library (https://github.com/naudio/NAudio) to provide a rudimentary abstraction to output
+/// BinaryData audio segments to the default output (speaker/headphone) device.
+/// </summary>
+public class SpeakerOutput : IDisposable
+{
+    BufferedWaveProvider _waveProvider;
+    WaveOutEvent _waveOutEvent;
+
+    public SpeakerOutput()
+    {
+        WaveFormat outputAudioFormat = new(
+            rate: 24000,
+            bits: 16,
+            channels: 1);
+        _waveProvider = new(outputAudioFormat)
+        {
+            BufferDuration = TimeSpan.FromMinutes(2),
+        };
+        _waveOutEvent = new();
+        _waveOutEvent.Init(_waveProvider);
+        _waveOutEvent.Play();
+    }
+
+    public void EnqueueForPlayback(BinaryData audioData)
+    {
+        byte[] buffer = audioData.ToArray();
+        _waveProvider.AddSamples(buffer, 0, buffer.Length);
+    }
+    public void EnqueueForPlayback(DataContent audioContent)
+    {
+        byte[] buffer = audioContent.Data.ToArray();
+        _waveProvider.AddSamples(buffer, 0, buffer.Length);
+    }
+
+    public void ClearPlayback()
+    {
+        _waveProvider.ClearBuffer();
+    }
+
+    public void Dispose()
+    {
+        _waveOutEvent?.Dispose();
+    }
+}

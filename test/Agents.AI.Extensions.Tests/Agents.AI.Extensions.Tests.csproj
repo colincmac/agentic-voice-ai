@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- xUnit1051: CancellationToken usage - not applicable for unit tests -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
+    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
+  </ItemGroup>
+
+
+</Project>

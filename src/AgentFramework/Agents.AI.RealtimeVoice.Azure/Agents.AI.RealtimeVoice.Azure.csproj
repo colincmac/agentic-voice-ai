@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InjectSharedThrow>true</InjectSharedThrow>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="AIContent\**" />
+    <Compile Remove="SessionTools\**" />
+    <EmbeddedResource Remove="AIContent\**" />
+    <EmbeddedResource Remove="SessionTools\**" />
+    <None Remove="AIContent\**" />
+    <None Remove="SessionTools\**" />
+  </ItemGroup>
+  <ItemGroup>
+
+    <!-- Azure Communication Services (ACS)-->
+    <PackageReference Include="Azure.Communication.CallAutomation" />
+    <PackageReference Include="Azure.Communication.Common" />
+    <PackageReference Include="Azure.Communication.Identity" />
+
+    <!-- Azure Managed Redis (AMR)-->
+    <PackageReference Include="StackExchange.Redis" />
+
+    <PackageReference Include="Microsoft.Extensions.Telemetry.Abstractions" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.Net.ClientFactory" />
+
+
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Protobuf Include="Protos\agents.realtimevoice.v1.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\biometrics.v1.proto" GrpcServices="Client" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
+    <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
+    <ProjectReference Include="..\Agents.AI\Agents.AI.csproj" />
+  </ItemGroup>
+</Project>
