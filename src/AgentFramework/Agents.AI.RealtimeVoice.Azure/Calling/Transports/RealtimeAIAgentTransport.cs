@@ -15,7 +15,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Transports;
 public sealed class RealtimeAIAgentTransport : IChannelTransport
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
-    private readonly ConversationSessionThread _thread;
+    private readonly LiveConversationAgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -29,7 +29,7 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport
 
     public RealtimeAIAgentTransport(
         AuthorizingRealtimeAIAgent baseAgent,
-        ConversationSessionThread existingThread,
+        LiveConversationAgentSession existingThread,
         AgentRunOptions? runOptions = null,
         ILoggerFactory? loggerFactory = null,
         ICallAnalyticsService? analyticsService = null,

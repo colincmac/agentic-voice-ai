@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
+
 /// <summary>
 /// Represents the state of an IVR workflow, maintaining data collected across steps.
 /// </summary>
@@ -13,8 +14,9 @@ public sealed class IvrWorkflowState
     private readonly ConcurrentDictionary<string, DateTimeOffset> _timestamps = new();
     private readonly List<string> _completedSteps = [];
     private readonly List<ChatMessage> _transcript = [];
+    private readonly List<RealtimeConversationUtterance> _conversationHistory = [];
     private readonly Lock _lock = new();
-
+    private string? _workflowId;
     /// <summary>
     /// Gets a thread-safe snapshot of the transcript messages.
     /// </summary>
@@ -27,6 +29,33 @@ public sealed class IvrWorkflowState
                 return [.. _transcript];
             }
         }
+    }
+
+    /// <summary>
+    /// Gets a thread-safe snapshot of the conversation history with timing information.
+    /// </summary>
+    public IReadOnlyList<RealtimeConversationUtterance> ConversationHistory
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return [.. _conversationHistory];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a message to the transcript in a thread-safe manner.
+    /// </summary>
+    public void AddUtterance(RealtimeConversationUtterance message)
+    {
+        lock (_lock)
+        {
+            _conversationHistory.Add(message);
+        }
+
+        LastModifiedAt = DateTimeOffset.UtcNow;
     }
 
     /// <summary>
@@ -57,7 +86,7 @@ public sealed class IvrWorkflowState
     /// <summary>
     /// Gets the unique identifier for this workflow state instance.
     /// </summary>
-    public string WorkflowId { get; } = Guid.NewGuid().ToString();
+    public string WorkflowId => _workflowId ??= Guid.NewGuid().ToString();
 
     /// <summary>
     /// Gets the session identifier associated with this workflow.
@@ -67,18 +96,21 @@ public sealed class IvrWorkflowState
     /// <summary>
     /// Gets the name of the currently executing step.
     /// </summary>
-    public string? CurrentStepName { get; internal set; }
+    public string? CurrentStepName { get; set; }
 
 
     /// <summary>
     /// Gets the index of the currently executing step.
     /// </summary>
-    public int CurrentStepIndex { get; internal set; } = -1;
+    public int CurrentStepIndex { get; set; } = -1;
+    public DateTimeOffset? StepStartedAt { get; set; }
+    public string? CurrentPrompt { get; set; }
 
     /// <summary>
     /// Gets the time this workflow state was created.
     /// </summary>
     public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
+
 
     /// <summary>
     /// Gets the time this workflow state was last modified.
@@ -88,7 +120,7 @@ public sealed class IvrWorkflowState
     /// <summary>
     /// Gets the current status of the workflow.
     /// </summary>
-    public IvrWorkflowStatus Status { get; internal set; } = IvrWorkflowStatus.NotStarted;
+    public IvrWorkflowStatus Status { get; set; } = IvrWorkflowStatus.NotStarted;
 
     public AuthenticationLevel AuthLevel { get; set; } = AuthenticationLevel.None;
 

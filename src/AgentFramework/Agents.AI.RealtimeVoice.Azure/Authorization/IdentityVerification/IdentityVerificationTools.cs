@@ -11,6 +11,7 @@ public sealed class IdentityVerificationTools
 {
     private readonly IIdentityVerificationService _verificationService;
     private readonly ILogger<IdentityVerificationTools> _logger;
+    private readonly HashSet<string> _handoffFunctionNames = [];
 
     public IdentityVerificationTools(
         IIdentityVerificationService verificationService,

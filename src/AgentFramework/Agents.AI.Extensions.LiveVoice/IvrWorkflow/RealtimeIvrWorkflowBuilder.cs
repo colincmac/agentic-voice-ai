@@ -1,5 +1,8 @@
+using System.ComponentModel;
+using System.Text.Json;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Microsoft.Extensions.AI;
+using Microsoft.Shared.Diagnostics;
 
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
@@ -12,17 +15,21 @@ public sealed class RealtimeIvrWorkflowBuilder
     private readonly string _name;
     private readonly List<RealtimeIvrWorkflowStep> _steps = [];
     private RealtimePromptBuilder _promptBuilder;
+    private readonly JsonSerializerOptions _jsonSerializerOptions;
+    private readonly List<AITool> _commonTools = [];
 
-    private RealtimeIvrWorkflowBuilder(string name)
+    private RealtimeIvrWorkflowBuilder(string name, JsonSerializerOptions? jsonSerializerOptions = null)
     {
         _name = name;
         _promptBuilder = RealtimePrompt.CreateBuilder();
+        _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
     }
 
     /// <summary>
     /// Creates a new workflow builder with the specified name.
     /// </summary>
-    public static RealtimeIvrWorkflowBuilder Create(string name) => new(name);
+    public static RealtimeIvrWorkflowBuilder Create(string name, JsonSerializerOptions? jsonSerializerOptions = null) => new(name, jsonSerializerOptions);
+
 
     /// <summary>
     /// Configures the base prompt for all steps using a fluent builder.
@@ -39,6 +46,9 @@ public sealed class RealtimeIvrWorkflowBuilder
     /// </summary>
     public RealtimeIvrWorkflowBuilder WithBasePrompt(RealtimePrompt prompt)
     {
+        if(prompt.Role is null) Throw.ArgumentNullException(nameof(prompt.Role));
+        if(prompt.Personality is null) Throw.ArgumentNullException(nameof(prompt.Personality));
+
         _promptBuilder = RealtimePrompt.CreateBuilder();
         // Copy prompt properties - we'll rebuild from the provided prompt
         _promptBuilder
@@ -77,12 +87,18 @@ public sealed class RealtimeIvrWorkflowBuilder
         return this;
     }
 
+    public RealtimeIvrWorkflowBuilder WithCommonTools(params AITool[] tools)
+    {
+        _commonTools.AddRange(tools);
+        return this;
+    }
+
     /// <summary>
     /// Adds a workflow step using a fluent builder.
     /// </summary>
     public RealtimeIvrWorkflowBuilder AddStep(Action<RealtimeIvrStepBuilder> configure)
     {
-        var builder = new RealtimeIvrStepBuilder();
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions);
         configure(builder);
         _steps.Add(builder.Build());
 
@@ -106,7 +122,7 @@ public sealed class RealtimeIvrWorkflowBuilder
         string welcomeMessage,
         Action<RealtimeIvrStepBuilder>? configure = null)
     {
-        var builder = new RealtimeIvrStepBuilder()
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions)
             .WithId("1_greeting")
             .WithGoal("Set tone and invite the reason for calling")
             .WithDescription("Greet the caller warmly and identify the service")
@@ -136,7 +152,7 @@ public sealed class RealtimeIvrWorkflowBuilder
         Action<RealtimeIvrStepBuilder>? configure = null)
     {
         var stepId = $"{_steps.Count + 1}_closing";
-        var builder = new RealtimeIvrStepBuilder()
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions)
             .WithId(stepId)
             .WithGoal("Confirm outcome and end cleanly")
             .WithDescription("Restate the result and any next steps, invite final questions")
@@ -165,12 +181,32 @@ public sealed class RealtimeIvrWorkflowBuilder
         {
             throw new InvalidOperationException("Workflow must have at least one step.");
         }
+        var steps = _commonTools is { Count: 0 } ? _steps : _steps.Select(step =>
+        {
+            var combinedTools = step.AvailableTools is null
+                ? _commonTools
+                : [.. step.AvailableTools, .. _commonTools];
+            return new RealtimeIvrWorkflowStep
+            {
+                Id = step.Id,
+                ConversationState = step.ConversationState,
+                AvailableTools = combinedTools.AsReadOnly(),
+                ToolRules = step.ToolRules,
+                Guards = step.Guards,
+                Validators = step.Validators,
+                RequiredStateKeys = step.RequiredStateKeys,
+                MaxRetries = step.MaxRetries,
+                MaxDuration = step.MaxDuration,
+                RequiredAuthLevel = step.RequiredAuthLevel,
+                OnCompleted = step.OnCompleted
+            };
+        }).ToList();
 
         return new RealtimeIvrWorkflowDefinition
         {
             Name = _name,
             BasePrompt = _promptBuilder.Build(),
-            Steps = _steps.AsReadOnly()
+            Steps = steps.AsReadOnly()
         };
     }
 }
@@ -178,7 +214,7 @@ public sealed class RealtimeIvrWorkflowBuilder
 /// <summary>
 /// Fluent builder for constructing individual Realtime IVR workflow steps.
 /// </summary>
-public sealed class RealtimeIvrStepBuilder
+public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializerOptions = null)
 {
     private string _id = string.Empty;
     private string _description = string.Empty;
@@ -196,6 +232,8 @@ public sealed class RealtimeIvrStepBuilder
     private TimeSpan? _maxDuration;
     private AuthenticationLevel _requiredAuthLevel = AuthenticationLevel.None;
     private Func<IvrWorkflowState, CancellationToken, Task>? _onCompleted;
+    private readonly JsonSerializerOptions _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
+
 
     /// <summary>
     /// Sets the step identifier.
@@ -495,6 +533,7 @@ public sealed class RealtimeIvrStepBuilder
 
         return this;
     }
+
 
     /// <summary>
     /// Builds the workflow step.

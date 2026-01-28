@@ -12,10 +12,11 @@ using Microsoft.Extensions.AI;
 
 namespace Agents.AI.Extensions.LiveVoice;
 
+// Supporting Dynamic Conversation Flows
 public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
-    private ConversationSessionThread? _thread;
+    private LiveConversationAgentSession? _thread;
     private static readonly Func<List<ChatMessage>> initFunction = () => [];
     private const string ThreadStateKey = nameof(_thread);
 
@@ -37,9 +38,9 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
                            .AddHandler<TurnToken>(this.TakeTurnAsync);
     }
 
-    private async Task<ConversationSessionThread> EnsureThreadAsync(CancellationToken cancellationToken = default) {
+    private async Task<LiveConversationAgentSession> EnsureThreadAsync(CancellationToken cancellationToken = default) {
 
-        return _thread ??= await _agent.GetNewThreadAsync(cancellationToken).ConfigureAwait(false);
+        return _thread ??= await _agent.GetNewSessionAsync(cancellationToken).ConfigureAwait(false);
     }
 
     protected async ValueTask SendAudioAsync(ReadOnlyMemory<byte> frame, IWorkflowContext context, CancellationToken cancellationToken = default)
@@ -55,9 +56,9 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
         if (threadValue.HasValue)
         {
             var thread = this._agent.DeserializeThread(threadValue.Value);
-            if(thread is not ConversationSessionThread threadSession)
+            if(thread is not LiveConversationAgentSession threadSession)
             {
-               throw new InvalidOperationException($"Deserialized thread is not of expected type {nameof(ConversationSessionThread)}");
+               throw new InvalidOperationException($"Deserialized thread is not of expected type {nameof(LiveConversationAgentSession)}");
             }
             this._thread = threadSession;
         }
@@ -139,7 +140,6 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
     private async ValueTask TakeTurnAsync(List<ChatMessage> messages, IWorkflowContext context, bool? emitEvents, CancellationToken cancellationToken = default)
     {
         List<AgentRunResponseUpdate> updates = [];
-        List<RealtimeConversationTurn>? realtimeConversationTurns = null;
         await foreach (var update in _agent.RunStreamingAsync(messages, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
             updates.Add(update);
@@ -149,7 +149,6 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
                 {
                     var agentResponse = updates.ToAgentRunResponse();
                     updates.Clear();
-                    realtimeConversationTurns ??= [];
                     var turn = new RealtimeConversationTurn
                     {
                         Timestamp = DateTimeOffset.UtcNow,
@@ -159,7 +158,7 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
                             { "ReferenceItemId", finishedContent.ReferenceItemId ?? string.Empty }
                         }
                     };
-                    realtimeConversationTurns.Add(turn);
+                    await context.SendMessageAsync(turn, cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
             }
             if (emitEvents is true)
@@ -167,112 +166,6 @@ public abstract class IvrStepExecutor : StatefulExecutor<List<ChatMessage>>
                 await context.AddEventAsync(new AgentRunUpdateEvent(this.Id, update), cancellationToken).ConfigureAwait(false);
             }
         }
-
-        List<ChatMessage> result = [.. messages];
-        result.AddRange(updates.ToAgentRunResponse().Messages);
-
-        await context.SendMessageAsync(result, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-}
-public abstract class RealtimeAgentProtocolExecutor : StatefulExecutor<List<ChatMessage>>
-{
-    AuthorizingRealtimeAIAgent _agent;
-    private static readonly Func<List<ChatMessage>> initFunction = () => [];
-
-    public RealtimeAgentProtocolExecutor(AuthorizingRealtimeAIAgent agent, bool declareCrossRunShareable = false) : base(agent.Id, () => [], declareCrossRunShareable: declareCrossRunShareable)
-    {
-        _agent = agent;
-    }
-
-    /// <inheritdoc/>
-    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder)
-    {
-
-        return routeBuilder.AddHandler<ChatMessage>(this.AddMessageAsync)
-                           .AddHandler<IEnumerable<ChatMessage>>(this.AddMessagesAsync)
-                           .AddHandler<ChatMessage[]>(this.AddMessagesAsync)
-                           .AddHandler<List<ChatMessage>>(this.AddMessagesAsync)
-                           .AddHandler<TurnToken>(this.TakeTurnAsync);
-    }
-
-    /// <summary>
-    /// Adds a single chat message to the accumulated messages for the current turn.
-    /// </summary>
-    /// <param name="message">The chat message to add.</param>
-    /// <param name="context">The workflow context in which the executor executes.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.</param>
-    /// <returns>A <see cref="ValueTask"/> representing the asynchronous operation.</returns>
-    protected ValueTask AddMessageAsync(ChatMessage message, IWorkflowContext context, CancellationToken cancellationToken = default)
-    {
-        return this.InvokeWithStateAsync(ForwardMessageAsync, context, cancellationToken: cancellationToken);
-
-        ValueTask<List<ChatMessage>?> ForwardMessageAsync(List<ChatMessage>? maybePendingMessages, IWorkflowContext context, CancellationToken cancelationToken)
-        {
-            maybePendingMessages ??= initFunction();
-            maybePendingMessages.Add(message);
-            return new(maybePendingMessages);
-        }
-    }
-
-    /// <summary>
-    /// Adds multiple chat messages to the accumulated messages for the current turn.
-    /// </summary>
-    /// <param name="messages">The collection of chat messages to add.</param>
-    /// <param name="context">The workflow context in which the executor executes.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.</param>
-    /// <returns>A <see cref="ValueTask"/> representing the asynchronous operation.</returns>
-    protected ValueTask AddMessagesAsync(IEnumerable<ChatMessage> messages, IWorkflowContext context, CancellationToken cancellationToken = default)
-    {
-        return this.InvokeWithStateAsync(ForwardMessageAsync, context, cancellationToken: cancellationToken);
-
-        ValueTask<List<ChatMessage>?> ForwardMessageAsync(List<ChatMessage>? maybePendingMessages, IWorkflowContext context, CancellationToken cancelationToken)
-        {
-            maybePendingMessages ??= initFunction();
-            maybePendingMessages.AddRange(messages);
-            return new(maybePendingMessages);
-        }
-    }
-
-    /// <summary>
-    /// Handles a turn token by processing all accumulated chat messages and then resetting the message state.
-    /// </summary>
-    /// <param name="token">The turn token that triggers message processing.</param>
-    /// <param name="context">The workflow context in which the executor executes.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.</param>
-    /// <returns>A <see cref="ValueTask"/> representing the asynchronous operation.</returns>
-    public ValueTask TakeTurnAsync(TurnToken token, IWorkflowContext context, CancellationToken cancellationToken = default)
-    {
-        return this.InvokeWithStateAsync(InvokeTakeTurnAsync, context, cancellationToken: cancellationToken);
-
-        async ValueTask<List<ChatMessage>?> InvokeTakeTurnAsync(List<ChatMessage>? maybePendingMessages, IWorkflowContext context, CancellationToken cancellationToken)
-        {
-            await this.TakeTurnAsync(maybePendingMessages ?? initFunction(), context, token.EmitEvents, cancellationToken)
-                      .ConfigureAwait(false);
-
-            await context.SendMessageAsync(token, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            // Rerun the initialStateFactory to reset the state to empty list. (We could return the empty list directly,
-            // but this is more consistent if the initial state factory becomes more complex.)
-            return initFunction();
-        }
-    }
-
-    private async ValueTask TakeTurnAsync(List<ChatMessage> messages, IWorkflowContext context, bool? emitEvents, CancellationToken cancellationToken = default)
-    {
-        List<AgentRunResponseUpdate> updates = [];
-        await foreach (var update in _agent.RunStreamingAsync(messages, cancellationToken: cancellationToken).ConfigureAwait(false))
-        {
-            updates.Add(update);
-            if (emitEvents is true)
-            {
-                await context.AddEventAsync(new AgentRunUpdateEvent(this.Id, update), cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        List<ChatMessage> result = [.. messages];
-        result.AddRange(updates.ToAgentRunResponse().Messages);
-
-        await context.SendMessageAsync(result, cancellationToken: cancellationToken).ConfigureAwait(false);
-    }
 }

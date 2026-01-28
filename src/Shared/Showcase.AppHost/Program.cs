@@ -50,13 +50,13 @@ var cosmos = builder.AddAzureCosmosDB("cosmosdb")
     });
 #pragma warning restore ASPIRECOSMOSDB001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
-var familyAiDb = cosmos.AddCosmosDatabase("FamilyHistory");
 var voiceAgentDb = cosmos.AddCosmosDatabase("ContactCenter");
 
 /**
  * Monitoring & Telemetry
  */
-builder.AddMonitoring(appInsightsName: appInsightsNameParam);
+//builder.AddMonitoring(appInsightsName: appInsightsNameParam);
+var appinsights = builder.AddAzureApplicationInsights("appinsights").AsExisting(appInsightsNameParam, resourceGroupParam);
 
 
 #region Projects
@@ -77,6 +77,7 @@ var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceag
     .WithReference(voicelive)
     .WithReference(voiceAgentDb, "cosmos")
     .WithReference(biometricsApi)
+    .WithReference(appinsights)
     .WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
     .WaitFor(biometricsApi);
 

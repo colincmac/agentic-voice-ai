@@ -3,18 +3,18 @@ using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
 namespace Agents.AI.RealtimeVoice;
 
-public sealed class ConversationSessionThread : TranscriptTrackingAgentThread, IDisposable
+public sealed class LiveConversationAgentSession : TranscriptTrackingAgentThread, IDisposable
 {
     public ILiveConversationSession Session { get; set; }
     public readonly SemaphoreSlim _sessionGate = new(1);
 
     public string? ActiveSessionId => Session.SessionId;
 
-    public ConversationSessionThread(ILiveConversationSession session)
+    public LiveConversationAgentSession(ILiveConversationSession session)
     {
         Session = session;
     }
-    internal ConversationSessionThread(
+    internal LiveConversationAgentSession(
         ILiveConversationSession session,
     JsonElement serializedThreadState,
     JsonSerializerOptions? jsonSerializerOptions = null,

@@ -44,7 +44,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         AgentThread thread,
         CancellationToken cancellationToken = default)
     {
-        var liveThread = EnsureConversationSessionThread(thread);
+        var liveThread = EnsureConversationSession(thread);
         return liveThread.Session.SendAudioAsync(audio.Data, cancellationToken);
     }
 
@@ -53,17 +53,17 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         AgentThread thread,
         CancellationToken cancellationToken = default)
     {
-        var liveThread = EnsureConversationSessionThread(thread);
+        var liveThread = EnsureConversationSession(thread);
         return liveThread.Session.SendMessagesAsync(messages, cancellationToken);
     }
 
-    public virtual async Task<ConversationSessionThread> GetNewThreadAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<LiveConversationAgentSession> GetNewSessionAsync(CancellationToken cancellationToken = default)
     {
         var session = await Client.GetSessionAsync(
             _agentOptions.SessionOptions,
             cancellationToken).ConfigureAwait(false);
 
-        var thread = new ConversationSessionThread(session);
+        var thread = new LiveConversationAgentSession(session);
         return thread;
     }
 
@@ -119,8 +119,8 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var runOptions = options as RealtimeAgentRunOptions ?? new();
-        thread ??= await GetNewThreadAsync(cancellationToken);
-        var typedThread = EnsureConversationSessionThread(thread);
+        thread ??= await GetNewSessionAsync(cancellationToken);
+        var typedThread = EnsureConversationSession(thread);
 
 
         var (responseOptions, sessionOptions, sessionMessages) =
@@ -129,16 +129,16 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         var activeSession = typedThread.Session;
         List<AgentRunResponseUpdate> finishedResponses = [];
         IAsyncEnumerator<ChatResponseUpdate> responseUpdatesEnumerator;
-        LiveConversationResponseOptions? nextTurnResponseOptions = await ApplyAIContextToNextResponseAsync(typedThread, sessionMessages, responseOptions, cancellationToken);
+        LiveConversationResponseOptions? nextTurnResponseOptions = null; //await ApplyAIContextToNextResponseAsync(typedThread, sessionMessages, responseOptions, cancellationToken);
 
         try
         {
-            if (runOptions.InitiateConversation)
-            {
-                await activeSession.StartResponseAsync(nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
-            }
+            //if (runOptions.InitiateConversation)
+            //{
+            //    await activeSession.StartResponseAsync(nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
+            //}
 
-            responseUpdatesEnumerator = activeSession.GetStreamingResponseAsync(nextTurnResponseOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            responseUpdatesEnumerator = activeSession.GetStreamingResponseAsync(responseOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -149,6 +149,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
         var hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
 
+        await activeSession.StartResponseAsync(responseOptions, cancellationToken).ConfigureAwait(false);
 
         while (hasUpdates)
         {
@@ -184,11 +185,11 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
             foreach (var content in delta.Contents)
             {
-                if (content is RealtimeVadContent vc && vc.VadEvent == VadEventType.InputSpeechEnded)
-                {
-                    await activeSession.StartResponseAsync(nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
-                }
-
+                //if (content is RealtimeVadContent vc && vc.VadEvent == VadEventType.InputSpeechEnded)
+                //{
+                //    await activeSession.StartResponseAsync(nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
+                //}
+                
                 if (content is RealtimeResponseFinishedContent)
                 {
                     nextTurnResponseOptions = await HandleAgentTurnEndedAsync(typedThread, finishedResponses, nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
@@ -217,7 +218,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         serviceType == typeof(ILiveConversationClient) ? Client :
         Client.GetService(serviceType, serviceKey));
 
-    public override ConversationSessionThread GetNewThread() => new(Client.GetSession(_agentOptions.SessionOptions))
+    public override LiveConversationAgentSession GetNewThread() => new(Client.GetSession(_agentOptions.SessionOptions))
     {
         MessageTranscriptStore = _agentOptions.ChatMessageStoreFactory?.Invoke(
             new() { SerializedState = default, JsonSerializerOptions = null }) ?? new InMemoryChatMessageStore(),
@@ -231,7 +232,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
     {
         var transcriptThread = new TranscriptTrackingAgentThread(serializedThread, jsonSerializerOptions);
         // Create new thread with deserialized state
-        var thread = new ConversationSessionThread(
+        var thread = new LiveConversationAgentSession(
             Client.GetSession(_agentOptions.SessionOptions),
             serializedThread,
             jsonSerializerOptions
@@ -243,9 +244,9 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
     #region Private Methods
 
-    private static ConversationSessionThread EnsureConversationSessionThread(AgentThread? thread)
+    private static LiveConversationAgentSession EnsureConversationSession(AgentThread? thread)
     {
-        if (thread is not ConversationSessionThread liveThread)
+        if (thread is not LiveConversationAgentSession liveThread)
         {
             throw new InvalidOperationException(
                 "The provided thread is not compatible with this agent. " +
@@ -255,7 +256,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
     }
 
     private async Task<LiveConversationResponseOptions?> HandleAgentTurnEndedAsync(
-        ConversationSessionThread thread,
+        LiveConversationAgentSession thread,
         List<AgentRunResponseUpdate> finishedResponses,
         LiveConversationResponseOptions? currentOptions,
         CancellationToken cancellationToken)
@@ -352,7 +353,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
     }
     private async Task<(LiveConversationResponseOptions? responseOptions, LiveConversationSessionOptions? sessionOptions, IEnumerable<ChatMessage> messages)> ConfigureThreadAndSessionAsync(
-               ConversationSessionThread thread,
+               LiveConversationAgentSession thread,
                RealtimeAgentRunOptions? runOptions,
                IEnumerable<ChatMessage> initialMessages,
                CancellationToken cancellationToken)
@@ -505,7 +506,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
     )]
     private static partial void LogWarningExceptionProcessingIncomingMessages(ILogger logger, Exception exception, AIAgent agent);
     #endregion
-    private static IList<AITool> EnsureDistinctTools(IList<AITool>? current, IEnumerable<AITool>? additions)
+    private static List<AITool> EnsureDistinctTools(IList<AITool>? current, IEnumerable<AITool>? additions)
     {
         var list = current is null ? new List<AITool>() : (current is List<AITool> l ? l : current.ToList());
         var seen = new HashSet<string>(list.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);

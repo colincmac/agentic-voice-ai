@@ -5,6 +5,7 @@ namespace Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 /// </summary>
 public record SupervisorToolConfig
 {
+    public string ToolName { get; set; } = "getNextResponseFromSupervisor";
     /// <summary>
     /// Gets or sets when to call the supervisor.
     /// </summary>

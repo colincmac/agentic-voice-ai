@@ -62,7 +62,7 @@ public static class Extensions
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
-                    .AddMeter("Showcase.VoiceAgent") // Our custom meter
+                    .AddMeter("*") // Our custom meter
                     .AddMeter("*Microsoft.Agents.AI") // Agent Framework metrics
                     
                     .AddHttpClientInstrumentation()
@@ -71,7 +71,7 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
-                    .AddSource("*Showcase.VoiceAgent")
+                    .AddSource("*")
                     .AddSource("*Microsoft.Agents.AI")
                     .AddAspNetCoreInstrumentation(tracing =>
                         // Don't trace requests to the health endpoint to avoid filling the dashboard with noise

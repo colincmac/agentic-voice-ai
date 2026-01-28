@@ -45,7 +45,8 @@ public class DelegatingRealtimeAIAgent : DelegatingAIAgent, IRealtimeAIAgent
     {
         return TypedInnerAgent.SendMessagesToRunAsync(messages, thread, cancellationToken);
     }
-    public virtual Task<ConversationSessionThread> GetNewThreadAsync(CancellationToken cancellationToken = default) => TypedInnerAgent.GetNewThreadAsync(cancellationToken);
+
+    public virtual Task<LiveConversationAgentSession> GetNewSessionAsync(CancellationToken cancellationToken = default) => TypedInnerAgent.GetNewSessionAsync(cancellationToken);
 
     #endregion
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Extensions.AI.OpenTelemetry.SemanticConventions;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Extensions.AI;
@@ -78,6 +79,7 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
         {
             foreach (var content in message.Contents)
             {
+
                 if (content is FunctionApprovalResponseContent approvalResponse)
                 {
                     var pending = _pendingFunctions.AddOrUpdate(
@@ -115,6 +117,7 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
             bool hasFunctionCallContent = false;
             await foreach (var content in ProcessChatResponseUpdateContentsAsync(update.Contents, options, cancellationToken))
             {
+                //_logger.LogInformation(JsonSerializer.Serialize(content));
                 results.Add(content);
                 hasFunctionCallContent = content is FunctionCallContent || hasFunctionCallContent;
 
@@ -125,7 +128,10 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
             }
             yield return ReplaceUpdateContents(update, results);
 
-            if(hasFunctionCallContent) await StartResponseAsync(options, cancellationToken);
+            if (hasFunctionCallContent)
+            {
+                await StartResponseAsync(options, cancellationToken);
+            }
         }
     }
 

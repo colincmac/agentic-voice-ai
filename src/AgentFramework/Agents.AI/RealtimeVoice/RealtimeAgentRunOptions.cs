@@ -18,7 +18,7 @@ public class RealtimeAgentRunOptions: AgentRunOptions
         this.ResponseOptions = sessionOptions;
     }
 
-    public bool InitiateConversation { get; set; } = false;
+    public bool InitiateConversation { get; set; } = true;
 
     /// <summary>Gets or sets optional response options to pass to the agent's invocation.</summary>
     public LiveConversationResponseOptions? ResponseOptions { get; set; }

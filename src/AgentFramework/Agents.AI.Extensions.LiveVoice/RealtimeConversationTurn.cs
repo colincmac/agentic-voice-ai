@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 
 namespace Agents.AI.Extensions.LiveVoice;
 
+
 public sealed class RealtimeConversationTurn
 {
     public DateTimeOffset? Timestamp { get; set; }

@@ -286,7 +286,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         lastMessageId = textFinished.ItemId;
                         responseId = textFinished.ResponseId;
                         lastRole = ChatRole.Assistant;
-
+                        
                         var update = CreateUpdate([new TextContent(textFinished.Transcript)]);
                         update.RawRepresentation = textFinished;
                         yield return update;
@@ -345,6 +345,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         {
                             lastMessageId = inputAudioTxFinished.ItemId;
                             lastRole = ChatRole.User;
+
                             var update = CreateUpdate([new TextContent(inputAudioTxFinished.Transcript)]);
                             update.RawRepresentation = inputAudioTxFinished;
                             yield return update;
@@ -367,6 +368,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         yield return update;
                         break;
                     }
+
                 default:
                     {
                         // Future-proof: unknown subclass we didn’t explicitly handle.

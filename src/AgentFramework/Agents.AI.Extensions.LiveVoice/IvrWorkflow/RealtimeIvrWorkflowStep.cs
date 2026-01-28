@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.Json;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
@@ -21,7 +23,7 @@ public sealed class RealtimeIvrWorkflowStep
     public required ConversationState ConversationState { get; init; }
 
     /// <summary>
-    /// Gets the tools available during this step.
+    /// Gets the tools available for the Talker/Interacting Voice Agent during this step.
     /// Tools are gated per-step to prevent premature access (e.g., can't activate card until PIN verified).
     /// </summary>
     public IReadOnlyList<AITool>? AvailableTools { get; init; }
@@ -71,6 +73,7 @@ public sealed class RealtimeIvrWorkflowStep
     /// </summary>
     public IReadOnlyList<string> ValidTransitions =>
         ConversationState.Transitions?.Select(t => t.NextStep).ToList() ?? [];
+
 }
 
 /// <summary>
@@ -97,7 +100,7 @@ public sealed class RealtimeIvrWorkflowDefinition
     /// <summary>
     /// Gets the initial step ID.
     /// </summary>
-    public string InitialStepId => Steps.FirstOrDefault()?.Id ?? throw new InvalidOperationException("Workflow has no steps");
+    public string InitialStepId => Steps[0]?.Id ?? throw new InvalidOperationException("Workflow has no steps");
 
     /// <summary>
     /// Gets a step by ID.
@@ -113,31 +116,39 @@ public sealed class RealtimeIvrWorkflowDefinition
 
     /// <summary>
     /// Builds the system prompt for a specific step, including only the tools available for that step.
+    /// Throws <see cref="ArgumentException"/> if the step ID is not found.
     /// </summary>
-    public string BuildPromptForStep(string stepId, IvrWorkflowState? state = null)
+    /// <param name="stepId">The workflow step ID.</param>
+    /// <param name="state">Optional current workflow state for context inclusion.</param>
+    /// <param name="contextSerializerOptions">Optional JSON serializer options for formatting state values in context.</param>
+    /// <returns>The rendered prompt string for the Voice AI Agent (e.g. <i>talker</i> agent).</returns>
+    public string BuildPromptForStep(string stepId, IvrWorkflowState? state = null, JsonSerializerOptions? contextSerializerOptions = null)
     {
         var step = GetStep(stepId) ?? throw new ArgumentException($"Step '{stepId}' not found", nameof(stepId));
 
+        return BuildPromptForStep(step, state, contextSerializerOptions);
+    }
+
+    /// <summary>
+    /// Builds the system prompt for a specific step, including only the tools available for that step.
+    /// </summary>
+    /// <param name="step">The workflow step.</param>
+    /// <param name="state">Optional current workflow state for context inclusion.</param>
+    /// <param name="contextSerializerOptions">Optional JSON serializer options for formatting state values in context.</param>
+    /// <returns>The rendered prompt string for the Voice AI Agent (e.g. <i>talker</i> agent).</returns>
+    public string BuildPromptForStep(RealtimeIvrWorkflowStep step, IvrWorkflowState? state = null, JsonSerializerOptions? contextSerializerOptions = null)
+    {
         // Build a step-specific prompt by merging base prompt with step configuration
         var stepPrompt = BasePrompt with
         {
             ConversationFlow = [step.ConversationState],
             Tools = BuildToolConfigForStep(step),
-            Context = BuildContextForStep(step, state)
+            Context = BuildContext(state, contextSerializerOptions)
         };
 
         return RealtimeAIPromptTemplate.Render(stepPrompt);
     }
 
-    /// <summary>
-    /// Gets the tools available for a specific step.
-    /// </summary>
-    public IReadOnlyList<AITool> GetToolsForStep(string stepId)
-    {
-        var step = GetStep(stepId);
-
-        return step?.AvailableTools ?? [];
-    }
 
     private ToolConfiguration? BuildToolConfigForStep(RealtimeIvrWorkflowStep step)
     {
@@ -155,7 +166,7 @@ public sealed class RealtimeIvrWorkflowDefinition
         };
     }
 
-    private string? BuildContextForStep(RealtimeIvrWorkflowStep step, IvrWorkflowState? state)
+    private string? BuildContext(IvrWorkflowState? state, JsonSerializerOptions? jsonOptions = null)
     {
         if (state is null)
         {
@@ -169,23 +180,72 @@ public sealed class RealtimeIvrWorkflowDefinition
             contextBuilder.AppendLine(BasePrompt.Context);
         }
 
-        // Add collected state as context
-        if (state.CompletedSteps.Count > 0)
-        {
-            contextBuilder.AppendLine();
-            contextBuilder.AppendLine("## Collected Information");
+        contextBuilder.AppendLine();
+        contextBuilder.AppendLine("## Collected Information (formatted `- <key>: <value>`)");
 
-            foreach (var key in step.RequiredStateKeys)
+        // Add collected state as context
+        if (state.Keys.Count > 0)
+        {
+            foreach (var key in state.Keys)
             {
                 if (state.TryGet<object>(key, out var value))
                 {
-                    contextBuilder.AppendLine($"- {key}: {value}");
+                    var formattedValue = FormatStateValue(value, jsonOptions);
+
+                    contextBuilder.AppendLine($"- {key}: {formattedValue}");
                 }
             }
+        }
+        else
+        {
+            contextBuilder.AppendLine("- None");
         }
 
         var result = contextBuilder.ToString().Trim();
 
         return string.IsNullOrWhiteSpace(result) ? null : result;
     }
+
+    private static string FormatStateValue(object? value, JsonSerializerOptions? jsonOptions = null)
+    {
+        if (value is null)
+        {
+            return "(null)";
+        }
+
+        // Primitive types and strings can use ToString() directly
+        if (value is string or bool or int or long or double or decimal or float)
+        {
+            return value.ToString() ?? "(null)";
+        }
+
+        // JsonElement from deserialized data
+        if (value is JsonElement jsonElement)
+        {
+            return jsonElement.ValueKind switch
+            {
+                JsonValueKind.String => jsonElement.GetString() ?? "(null)",
+                JsonValueKind.Number => jsonElement.GetRawText(),
+                JsonValueKind.True or JsonValueKind.False => jsonElement.GetBoolean().ToString(),
+                JsonValueKind.Null => "(null)",
+                _ => jsonElement.GetRawText()
+            };
+        }
+
+        // Complex objects - serialize to JSON
+        try
+        {
+            return JsonSerializer.Serialize(value, jsonOptions);
+        }
+        catch
+        {
+            return value.ToString() ?? "(unknown)";
+        }
+    }
 }
+
+public readonly struct IvrStepAgentConfiguration(string Instructions, IEnumerable<AITool>? Tools = null)
+{
+    public string Instructions { get; } = Instructions;
+    public IEnumerable<AITool>? Tools { get; } = Tools;
+};

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Text.Json;
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.LiveVoice;
@@ -7,6 +9,8 @@ using Agents.AI.RealtimeVoice.Azure.Calling.Models;
 using Extensions.AI.Contents;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,8 +25,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Transports;
 public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
-    private readonly ConversationSessionThread _thread;
-    private readonly RealtimeIvrWorkflowCoordinator _coordinator;
+    private readonly LiveConversationAgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -32,10 +35,16 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
     private Func<string, Task>? _disconnectedHandler = _ => Task.CompletedTask;
 
     private readonly Channel<DataContent> _inboundAudioChannel;
+    private readonly Channel<AgentRunResponseUpdate> _agentUpdates;
     private Task? _backgroundLoop;
     private RealtimeIvrStepConfiguration? _currentStepConfig;
     private readonly SemaphoreSlim _configUpdateLock = new(1, 1);
+    internal const string FunctionPrefix = "transition_to_";
+    private static readonly JsonElement handoffSchema = AIFunctionFactory.Create(
+    ([Description("The reason for the handoff")] string? reasonForHandoff) => { }).JsonSchema;
+    private readonly IvrWorkflowState _stateCache;
 
+    private readonly RealtimeIvrWorkflowDefinition _workflowDefinition;
     /// <summary>
     /// Raised when a workflow step transition occurs.
     /// </summary>
@@ -43,18 +52,23 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
 
     public WorkflowAwareRealtimeAIAgentTransport(
         AuthorizingRealtimeAIAgent agent,
-        ConversationSessionThread existingThread,
-        RealtimeIvrWorkflowCoordinator coordinator,
+        LiveConversationAgentSession existingThread,
+        RealtimeIvrWorkflowDefinition workflowDefinition,
         AgentRunOptions? runOptions = null,
         ILoggerFactory? loggerFactory = null)
     {
         _agent = agent;
         _thread = existingThread;
-        _coordinator = coordinator;
         _runOptions = runOptions;
+        _stateCache = new IvrWorkflowState()
+        {
+            Status = IvrWorkflowStatus.NotStarted,
+            CurrentStepName = workflowDefinition.GetStep(workflowDefinition.InitialStepId)?.Id,
+        };
+
         _logger = loggerFactory?.CreateLogger<WorkflowAwareRealtimeAIAgentTransport>()
                   ?? NullLogger<WorkflowAwareRealtimeAIAgentTransport>.Instance;
-
+        _workflowDefinition = workflowDefinition;
         Metadata = new ParticipantTransportMetadata
         {
             ContactId = agent.Id,
@@ -72,24 +86,18 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
             FullMode = BoundedChannelFullMode.DropOldest,
             AllowSynchronousContinuations = true
         });
-
-        // Wire up coordinator events - directly use ApplyStepConfigurationAsync
-        _coordinator.OnStepChanged += ApplyStepConfigurationAsync;
+        _agentUpdates = Channel.CreateUnbounded<AgentRunResponseUpdate>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = true
+        });
     }
 
     public string ChannelId => Metadata.ContactId;
     public ParticipantTransportMetadata Metadata { get; }
     public bool IsConnected => _backgroundLoop is not null;
 
-    /// <summary>
-    /// Gets the current workflow state.
-    /// </summary>
-    public IvrWorkflowState WorkflowState => _coordinator.WorkflowState;
-
-    /// <summary>
-    /// Gets the current step ID.
-    /// </summary>
-    public string? CurrentStepId => _coordinator.CurrentStepId;
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -97,14 +105,13 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
         {
             return;
         }
-
         // Initialize the coordinator and get the initial configuration
-        _currentStepConfig = await _coordinator.InitializeAsync(cancellationToken);
 
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _backgroundLoop = Task.WhenAll(
             RunAgentStreamAsync(linkedCts.Token),
-            RunSendLoopAsync(linkedCts.Token)
+            RunSendLoopAsync(linkedCts.Token),
+            ProcessAgentUpdatesAsync(linkedCts.Token)
         );
     }
 
@@ -132,48 +139,66 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
         }
     }
 
-    private async Task RunAgentStreamAsync(CancellationToken cancellationToken)
+    private async Task ProcessAgentUpdatesAsync(CancellationToken cancellationToken) 
     {
-        DateTimeOffset turnStartTime = DateTimeOffset.UtcNow;
-        DateTimeOffset? turnEndTime = null;
+        DateTimeOffset agentTurnStart = DateTimeOffset.UtcNow;
+        DateTimeOffset? agentTurnEnd = null;
+        DateTimeOffset userTurnStart = DateTimeOffset.UtcNow;
+        DateTimeOffset? userTurnEnd = null;
         var pendingUpdates = new List<AgentRunResponseUpdate>();
-
         try
         {
-            await foreach (var update in _agent.RunStreamingAsync(_thread, _runOptions, cancellationToken).ConfigureAwait(false))
+            await foreach (var update in _agentUpdates.Reader.ReadAllAsync(cancellationToken))
             {
-                ReadOnlyMemory<byte>? audioFrame = null;
                 List<AIContent> nonAudio = [];
-                var isTurnComplete = false;
-
                 foreach (var content in update.Contents)
                 {
                     switch (content)
                     {
-                        case DataContent dc:
-                            audioFrame = dc.Data;
+                        case DataContent dc when !dc.Data.IsEmpty:
+                            await _audioHandler(ChannelId, dc.Data, cancellationToken).ConfigureAwait(false);
                             break;
-                        case RealtimeVadContent vc when vc.VadEvent == VadEventType.InputSpeechStarted:
+
+                        case RealtimeVadContent vc:
                             // Mark turn start on user speech start
                             nonAudio.Add(content);
-                            turnStartTime = vc.TimeStamp;
+                            if (vc.VadEvent == VadEventType.InputSpeechStarted)
+                            {
+                                userTurnStart = vc.TimeStamp;
+                            }
+                            else if (vc.VadEvent == VadEventType.InputSpeechEnded)
+                            {
+                                userTurnEnd = vc.TimeStamp;
+                            }
+                            else if (vc.VadEvent == VadEventType.OutputSpeechStarted)
+                            {
+                                agentTurnStart = vc.TimeStamp;
+                            }
+                            else if (vc.VadEvent == VadEventType.OutputSpeechEnded)
+                            {
+                                agentTurnEnd = vc.TimeStamp;
+                            }
+     
                             break;
-                        case RealtimeResponseFinishedContent fc:
-                            // Mark turn end on response finished
-                            isTurnComplete = true;
+
+                        case TextContent tc when !string.IsNullOrWhiteSpace(tc.Text):
+                            // Text content is sent when transcription is complete for an utterance for both the user and agent
                             nonAudio.Add(content);
-                            turnEndTime = fc.FinishedAt;
+
+                            if (update.Role == ChatRole.User)
+                            {
+                                await ProcessUtteranceTranscriptAsync(ChatRole.User, userTurnStart, userTurnEnd, tc, cancellationToken).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await ProcessUtteranceTranscriptAsync(ChatRole.Assistant, agentTurnStart, agentTurnEnd, tc, cancellationToken).ConfigureAwait(false);
+                            }
                             break;
+
                         default:
                             nonAudio.Add(content);
                             break;
                     }
-                }
-
-                // Handle audio output
-                if (audioFrame.HasValue)
-                {
-                    await _audioHandler(ChannelId, audioFrame.Value, cancellationToken).ConfigureAwait(false);
                 }
 
                 // Handle non-audio content
@@ -183,27 +208,56 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
                     var msg = MessageUpdateExtensions.FromAgentRunResponseUpdate(update);
                     await _messageHandler(ChannelId, msg, cancellationToken).ConfigureAwait(false);
                 }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancellation is requested
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Workflow-aware realtime agent run error for {ChannelId}", ChannelId);
+        }
+    }
 
-                // Track updates for turn aggregation
-                pendingUpdates.Add(update);
+    private Task ProcessUtteranceTranscriptAsync(ChatRole role, DateTimeOffset turnStartTime, DateTimeOffset? turnEndTime, TextContent transcript, CancellationToken cancellationToken)
+    {
 
-                // When a turn completes, analyze it for workflow progression
-                if (isTurnComplete)
-                {
-                    var chatResponse = pendingUpdates
-                        .Select(u => AsChatResponseUpdate(u))
-                        .ToChatResponse();
+        try
+        {
+            _stateCache.AddUtterance(new RealtimeConversationUtterance(new ChatMessage(role, [transcript]))
+            {
+                UtteranceStartTime = turnStartTime,
+                UtteranceEndTime = turnEndTime
+            });
+            _stateCache.TotalTurns++;
 
-                    var turn = new RealtimeVoiceAgentTurn([.. chatResponse.Messages])
-                    {
-                        TurnStartTime = turnStartTime,
-                        TurnEndTime = turnEndTime
-                    };
+            // Queue orchestrator evaluation (non-blocking) after user utterances
+            // The background processor will debounce and evaluate
+            //if (role == ChatRole.User && _thread is not null)
+            //{
+            //    QueueOrchestratorEvaluation();
+            //}
+            if (role == ChatRole.User)
+            {
 
-                    await ProcessCompletedTurnAsync(turn, cancellationToken);
-                    pendingUpdates.Clear();
-                    isTurnComplete = false; // reset for next turn
-                }
+            }
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing completed turn for workflow");
+            return Task.CompletedTask;
+        }
+    }
+
+    private async Task RunAgentStreamAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var update in _agent.RunStreamingAsync(_thread, _runOptions, cancellationToken).ConfigureAwait(false))
+            {
+               await _agentUpdates.Writer.WriteAsync(update, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -229,27 +283,28 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
             }
         }
     }
+    
 
-    private async Task ProcessCompletedTurnAsync(
-        RealtimeVoiceAgentTurn turn,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Let the coordinator analyze the turn
-            var newConfig = await _coordinator.ProcessTurnAsync(turn, cancellationToken);
+    //private async Task ProcessCompletedTurnAsync(
+    //    RealtimeVoiceAgentTurn turn,
+    //    CancellationToken cancellationToken)
+    //{
+    //    try
+    //    {
+    //        // Let the coordinator analyze the turn
+    //        var newConfig = await _coordinator.ProcessTurnAsync(turn, cancellationToken);
 
-            // If a step transition occurred, update the agent's configuration
-            if (newConfig is not null)
-            {
-                await ApplyStepConfigurationAsync(newConfig, cancellationToken);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing completed turn for workflow");
-        }
-    }
+    //        // If a step transition occurred, update the agent's configuration
+    //        if (newConfig is not null)
+    //        {
+    //            await ApplyStepConfigurationAsync(newConfig, cancellationToken);
+    //        }
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        _logger.LogError(ex, "Error processing completed turn for workflow");
+    //    }
+    //}
 
     private async Task ApplyStepConfigurationAsync(
         RealtimeIvrStepConfiguration config,

@@ -238,35 +238,35 @@ public class ConversationHubBuilder
         ///         sessionId => CreateWorkflowDefinition(sessionId));
         /// </code>
         /// </example>
-        public ConversationHubBuilder AddWorkflowIntegration(
-            Func<IServiceProvider, AIAgent> orchestratorAgentFactory,
-            Func<string, RealtimeIvrWorkflowDefinition> workflowFactory)
-        {
-            // Register the coordinator factory
-            HostBuilder.Services.AddSingleton<IRealtimeIvrWorkflowCoordinatorFactory>(sp =>
-            {
-                var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-                return new RealtimeIvrWorkflowCoordinatorFactory(
-                    () => orchestratorAgentFactory(sp),
-                    loggerFactory);
-            });
+        //public ConversationHubBuilder AddWorkflowIntegration(
+        //    Func<IServiceProvider, AIAgent> orchestratorAgentFactory,
+        //    Func<string, RealtimeIvrWorkflowDefinition> workflowFactory)
+        //{
+        //    // Register the coordinator factory
+        //    HostBuilder.Services.AddSingleton<IRealtimeIvrWorkflowCoordinatorFactory>(sp =>
+        //    {
+        //        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        //        return new RealtimeIvrWorkflowCoordinatorFactory(
+        //            () => orchestratorAgentFactory(sp),
+        //            loggerFactory);
+        //    });
 
-            // Replace the default session activator with the workflow-integrated one
-            HostBuilder.Services.RemoveAll<IContactCenterConversationSessionActivator>();
-            HostBuilder.Services.AddSingleton<IContactCenterConversationSessionActivator>(sp =>
-            {
-                var coordinatorFactory = sp.GetRequiredService<IRealtimeIvrWorkflowCoordinatorFactory>();
-                var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        //    // Replace the default session activator with the workflow-integrated one
+        //    HostBuilder.Services.RemoveAll<IContactCenterConversationSessionActivator>();
+        //    HostBuilder.Services.AddSingleton<IContactCenterConversationSessionActivator>(sp =>
+        //    {
+        //        var coordinatorFactory = sp.GetRequiredService<IRealtimeIvrWorkflowCoordinatorFactory>();
+        //        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
-                return new WorkflowIntegratedSessionActivator(
-                    coordinatorFactory,
-                    scopedSp => scopedSp.GetRequiredService<AuthorizingRealtimeAIAgent>(),
-                    workflowFactory,
-                    loggerFactory);
-            });
+        //        return new WorkflowIntegratedSessionActivator(
+        //            coordinatorFactory,
+        //            scopedSp => scopedSp.GetRequiredService<AuthorizingRealtimeAIAgent>(),
+        //            workflowFactory,
+        //            loggerFactory);
+        //    });
 
-            return this;
-        }
+        //    return this;
+        //}
 
         /// <summary>
         /// Adds workflow-integrated session activation using a keyed orchestrator agent.
@@ -278,13 +278,13 @@ public class ConversationHubBuilder
         /// Factory for creating the workflow definition for each session.
         /// </param>
         /// <returns>The builder for chaining.</returns>
-        public ConversationHubBuilder AddWorkflowIntegration(
-            string orchestratorAgentKey,
-            Func<string, RealtimeIvrWorkflowDefinition> workflowFactory)
-        {
-            return AddWorkflowIntegration(
-                sp => sp.GetRequiredKeyedService<ChatClientAgent>(orchestratorAgentKey),
-                workflowFactory);
-        }
+        //public ConversationHubBuilder AddWorkflowIntegration(
+        //    string orchestratorAgentKey,
+        //    Func<string, RealtimeIvrWorkflowDefinition> workflowFactory)
+        //{
+        //    return AddWorkflowIntegration(
+        //        sp => sp.GetRequiredKeyedService<ChatClientAgent>(orchestratorAgentKey),
+        //        workflowFactory);
+        //}
 
     }

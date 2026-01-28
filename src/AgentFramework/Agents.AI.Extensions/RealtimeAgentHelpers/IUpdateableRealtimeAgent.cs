@@ -10,6 +10,6 @@ public interface IUpdateableRealtimeAgent
 {
     Task ConfigureSessionAsync(
     LiveConversationSessionOptions options,
-    ConversationSessionThread thread,
+    LiveConversationAgentSession thread,
     CancellationToken cancellationToken = default);
 }

@@ -178,7 +178,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
                 {
                     foreach (var kv in props)
                     {
-                        activity.AddTag(kv.Key, kv.Value);
+                        activity?.AddTag(kv.Key, kv.Value);
                     }
                 }
             });
@@ -193,13 +193,13 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
             {
                 if (options.Voice is { } voice)
                 {
-                    activity.AddTag(GenAI.Realtime.RealtimeVoice, voice);
+                    activity?.AddTag(GenAI.Realtime.RealtimeVoice, voice);
                 }
                 if (options.AdditionalProperties is { } props && EnableSensitiveData)
                 {
                     foreach (var kv in props)
                     {
-                        activity.AddTag(kv.Key, kv.Value);
+                        activity?.AddTag(kv.Key, kv.Value);
                     }
                 }
             });
@@ -216,7 +216,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
         Func<Task> action,
         IEnumerable<ChatMessage>? inputMessages,
         CancellationToken cancellationToken,
-        Action<Activity>? additionalTags = null)
+        Action<Activity?>? additionalTags = null)
     {
         using var activity = StartActivity(operationName);
         var stopwatch = _operationDurationHistogram.Enabled ? Stopwatch.StartNew() : null;

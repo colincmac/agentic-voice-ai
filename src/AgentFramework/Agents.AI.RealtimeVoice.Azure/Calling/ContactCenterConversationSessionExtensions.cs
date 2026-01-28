@@ -58,10 +58,10 @@ public static class ContactCenterConversationSessionExtensions
         this ContactCenterConversationSession session,
         string participantId,
         string? displayName = null,
-        Action<AgentRunOptions>? configureRunOptions = null,
-        Func<AuthorizingRealtimeAIAgent, Task<ConversationSessionThread>>? createThreadOverride = null)
+        Action<RealtimeAgentRunOptions>? configureRunOptions = null,
+        Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null)
     {
-        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewThreadAsync());
+        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync());
         var participant = session.GetOrAddParticipant(participantId, displayName);
 
         await session.AddTransportToParticipant(participantId, async sp =>
@@ -71,10 +71,10 @@ public static class ContactCenterConversationSessionExtensions
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var analyticsService = sp.GetService<ICallAnalyticsService>();
 
-            AgentRunOptions? runOptions = null;
+            RealtimeAgentRunOptions? runOptions = null;
             if (configureRunOptions is not null)
             {
-                runOptions = new AgentRunOptions();
+                runOptions = new RealtimeAgentRunOptions();
                 configureRunOptions(runOptions);
             }
 
@@ -101,17 +101,17 @@ public static class ContactCenterConversationSessionExtensions
     public static async Task<HubSessionParticipantContext> AddWorkflowRealtimeAgent(
         this ContactCenterConversationSession session,
         string participantId,
+        RealtimeIvrWorkflowDefinition workflowDefinition,
         string? displayName = null,
         Action<AgentRunOptions>? configureRunOptions = null,
-        Func<AuthorizingRealtimeAIAgent, Task<ConversationSessionThread>>? createThreadOverride = null)
+        Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null)
     {
-        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewThreadAsync());
+        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync());
         var participant = session.GetOrAddParticipant(participantId, displayName);
 
         await session.AddTransportToParticipant(participantId, async sp =>
         {
             var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var coordinator = sp.GetRequiredService<RealtimeIvrWorkflowCoordinator>();
             var thread = await createThread(baseAgent);
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
@@ -125,7 +125,7 @@ public static class ContactCenterConversationSessionExtensions
             return new WorkflowAwareRealtimeAIAgentTransport(
                 baseAgent,
                 thread,
-                coordinator,
+                workflowDefinition,
                 runOptions,
                 loggerFactory);
         });

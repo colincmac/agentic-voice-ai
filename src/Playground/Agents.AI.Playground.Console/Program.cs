@@ -110,7 +110,7 @@ async Task StartAsync(CancellationToken ct)
     using var microphoneInput = MicrophoneAudioStream.Start();
 
     loggerFactory.CreateLogger("Playground").LogInformation("Starting voice live conversation...");
-    var thread = await agent.GetNewThreadAsync(ct);
+    var thread = await agent.GetNewSessionAsync(ct);
     IEnumerable<ChatMessage> messages = [];
     RealtimeAgentRunOptions runOptions = new RealtimeAgentRunOptions()
     {

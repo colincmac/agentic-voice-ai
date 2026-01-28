@@ -219,7 +219,7 @@ async Task StartBufferedAsync(CancellationToken cancellationToken)
     //.Build(serviceProvider);
 
     //var agentInputService = agent.GetService<RealtimeAIAgent>() ?? throw new InvalidOperationException("");
-    var agentThread = await agent.GetNewThreadAsync(cancellationToken);
+    var agentThread = await agent.GetNewSessionAsync(cancellationToken);
 
     var defaultLogger = loggerFactory.CreateLogger<Program>();
     var testParticipantLogger = loggerFactory.CreateLogger<TestCallParticipant>();
