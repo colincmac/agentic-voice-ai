@@ -13,7 +13,6 @@
 
     <PackageReference Include="Aspire.Azure.AI.OpenAI" />
     <PackageReference Include="Aspire.Microsoft.Azure.Cosmos" />
-    <PackageReference Include="Aspire.Microsoft.Extensions.Configuration.AzureAppConfiguration" />
     <PackageReference Include="CommunityToolkit.Aspire.OllamaSharp" />
 
     <PackageReference Include="Azure.AI.OpenAI" />

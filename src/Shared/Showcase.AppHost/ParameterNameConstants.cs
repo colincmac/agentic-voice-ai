@@ -8,6 +8,7 @@ namespace Showcase.AppHost;
 public static class ParameterNameConstants
 {
     public const string AzureCache = "redisCacheName";
+    public const string KeyVault = "keyVaultName";
     public const string CosmosAccount = "cosmosAccountName";
     public const string CosmosDatabase = "cosmosDbName";
 
@@ -20,13 +21,17 @@ public static class ParameterNameConstants
     public const string OpenAIEmbeddingModel = "openAIEmbeddingModel";
     public const string OpenAIEmbeddingModelVersion = "openAIEmbeddingModelVersion";
     public const string ApplicationInsights  = "applicationInsightsName";
+    public const string ContainerAppEnvironment  = "containerAppEnvironmentName";
+    public const string ContainerRegistry  = "containerRegistryName";
     public const string AppConfig = "appConfigName";
     public const string FoundryResourceName = "foundryResourceName";
 
     public const string ManagedIdentityName = "managedIdentityName";
 
     public const string ResourceGroupName = "resourceGroupName";
-
+    public const string LogAnalyticsWorkspace = "logAnalyticsWorkspaceName";
+    public const string LogAnalyticsWorkspaceRg = "logAnalyticsWorkspaceRgName";
+    
     public const string EnvironmentName = "environmentName";
     public const string Location = "location";
 }

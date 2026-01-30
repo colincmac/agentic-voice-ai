@@ -74,7 +74,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
     public override string Name => _agentOptions.Name ?? "RealtimeAIAgent";
     public override string? Description => _agentOptions.Description;
 
-    public string? Instructions => this._agentOptions?.Instructions;
+    public string? Instructions => _agentOptions?.Instructions;
 
     public virtual Task<AgentRunResponse?> CancelRunAsync(string id, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -123,22 +123,21 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         var typedThread = EnsureConversationSession(thread);
 
 
-        var (responseOptions, sessionOptions, sessionMessages) =
+        var (sessionOptions, sessionMessages) =
             await ConfigureThreadAndSessionAsync(typedThread, runOptions, messages, cancellationToken);
 
         var activeSession = typedThread.Session;
         List<AgentRunResponseUpdate> finishedResponses = [];
         IAsyncEnumerator<ChatResponseUpdate> responseUpdatesEnumerator;
-        LiveConversationResponseOptions? nextTurnResponseOptions = null; //await ApplyAIContextToNextResponseAsync(typedThread, sessionMessages, responseOptions, cancellationToken);
 
         try
         {
-            //if (runOptions.InitiateConversation)
-            //{
-            //    await activeSession.StartResponseAsync(nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
-            //}
+            if (runOptions.InitiateConversation)
+            {
+                await activeSession.StartResponseAsync(null, cancellationToken).ConfigureAwait(false);
+            }
 
-            responseUpdatesEnumerator = activeSession.GetStreamingResponseAsync(responseOptions, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            responseUpdatesEnumerator = activeSession.GetStreamingResponseAsync(null, cancellationToken).GetAsyncEnumerator(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -149,7 +148,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
         var hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
 
-        await activeSession.StartResponseAsync(responseOptions, cancellationToken).ConfigureAwait(false);
+        //await activeSession.StartResponseAsync(null, cancellationToken).ConfigureAwait(false);
 
         while (hasUpdates)
         {
@@ -192,7 +191,7 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
                 
                 if (content is RealtimeResponseFinishedContent)
                 {
-                    nextTurnResponseOptions = await HandleAgentTurnEndedAsync(typedThread, finishedResponses, nextTurnResponseOptions, cancellationToken).ConfigureAwait(false);
+                    await HandleAgentTurnEndedAsync(typedThread, finishedResponses, cancellationToken).ConfigureAwait(false);
                     finishedResponses.Clear();
                 }
             }
@@ -255,13 +254,12 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         return liveThread;
     }
 
-    private async Task<LiveConversationResponseOptions?> HandleAgentTurnEndedAsync(
+    private async Task HandleAgentTurnEndedAsync(
         LiveConversationAgentSession thread,
         List<AgentRunResponseUpdate> finishedResponses,
-        LiveConversationResponseOptions? currentOptions,
         CancellationToken cancellationToken)
     {
-        if (finishedResponses is { Count: 0 }) return null;
+        if (finishedResponses is { Count: 0 }) return;
         var agentResponse = ToAgentRunResponse(finishedResponses, Id);
 
         await thread.UpdateTranscriptMessagesAsync(agentResponse.Messages, cancellationToken).ConfigureAwait(false);
@@ -270,7 +268,6 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
             agentResponse.Messages.Where(m => m.Role == ChatRole.User),
             agentResponse.Messages,
             cancellationToken).ConfigureAwait(false);
-        return await ApplyAIContextToNextResponseAsync(thread, agentResponse.Messages, currentOptions, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -319,47 +316,13 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
     }
 
 
-    private async Task<LiveConversationResponseOptions?> ApplyAIContextToNextResponseAsync(TranscriptTrackingAgentThread thread, IEnumerable<ChatMessage> messages, LiveConversationResponseOptions? currentOptions, CancellationToken cancellationToken)
-    {
-        var context = await GetAIContextForNextInvocation(thread, messages, cancellationToken)
-            .ConfigureAwait(false);
-        if (context is not { } aiContext) return currentOptions;
-
-        var responseOptions = currentOptions?.Clone();
-        if (aiContext?.Instructions is not null)
-        {
-            responseOptions ??= new LiveConversationResponseOptions();
-            responseOptions.Instructions = string.IsNullOrWhiteSpace(responseOptions.Instructions)
-                ? aiContext.Instructions
-                : $"{responseOptions.Instructions}{Environment.NewLine}{aiContext.Instructions}";
-        }
-
-        if (aiContext?.Messages is { Count: > 0 })
-        {
-            await SendMessagesToRunAsync(aiContext.Messages, thread, cancellationToken);
-        }
-
-        if (aiContext?.Tools is { Count: > 0 })
-        {
-            responseOptions ??= new LiveConversationResponseOptions();
-            foreach (var tool in aiContext.Tools.OfType<AIFunction>())
-            {
-                responseOptions.Tools ??= [];
-                responseOptions.Tools.Add(tool);
-            }
-        }
-
-        return responseOptions;
-
-    }
-    private async Task<(LiveConversationResponseOptions? responseOptions, LiveConversationSessionOptions? sessionOptions, IEnumerable<ChatMessage> messages)> ConfigureThreadAndSessionAsync(
+    private async Task<(LiveConversationSessionOptions? sessionOptions, IEnumerable<ChatMessage> messages)> ConfigureThreadAndSessionAsync(
                LiveConversationAgentSession thread,
                RealtimeAgentRunOptions? runOptions,
                IEnumerable<ChatMessage> initialMessages,
                CancellationToken cancellationToken)
     {
         var sessionOptions = GetSessionOptions(runOptions);
-        var responseOptions = runOptions?.ResponseOptions?.Clone();
 
         var client = ApplyRunOptionsTransformationsToClient(runOptions, Client);
 
@@ -405,10 +368,10 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
                     : $"{sessionOptions.Instructions}{Environment.NewLine}{aiContext.Instructions}";
             }
 
-            if (!string.IsNullOrWhiteSpace(this.Instructions))
+            if (!string.IsNullOrWhiteSpace(Instructions))
             {
                 sessionOptions ??= new();
-                sessionOptions.Instructions = string.IsNullOrWhiteSpace(sessionOptions.Instructions) ? this.Instructions : $"{this.Instructions}{Environment.NewLine}{sessionOptions.Instructions}";
+                sessionOptions.Instructions = string.IsNullOrWhiteSpace(sessionOptions.Instructions) ? Instructions : $"{Instructions}{Environment.NewLine}{sessionOptions.Instructions}";
             }
             sessionHistory.AddRange(initialMessages);
 
@@ -431,31 +394,26 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
 
             await SendMessagesToRunAsync(sessionHistory, thread, cancellationToken);
 
-            return (responseOptions, sessionOptions, sessionHistory);
+            return (sessionOptions, sessionHistory);
         }
         finally { thread._sessionGate.Release(); }
     }
 
-    private LiveConversationSessionOptions? GetSessionOptions(RealtimeAgentRunOptions? responseOptions = null)
+    private LiveConversationSessionOptions? GetSessionOptions(RealtimeAgentRunOptions? runOptions = null)
     {
-        var requestOptions = responseOptions?.SessionOptions?.Clone();
+        var requestOptions = runOptions?.SessionOptions?.Clone();
 
-        if (this._agentOptions?.SessionOptions is null)
+        if (_agentOptions.SessionOptions is null)
         {
             return requestOptions;
         }
 
         if (requestOptions is null)
         {
-            // Clone defaults and ensure distinct tools.
-            var cloned = _agentOptions.SessionOptions.Clone();
-            if (cloned.Tools is { Count: > 0 })
-            {
-                cloned.Tools = EnsureDistinctTools(cloned.Tools, null);
-            }
-            return cloned;
+            return null;
         }
 
+        // Combine options, giving precedence to requestOptions
         requestOptions.Instructions ??= _agentOptions.SessionOptions.Instructions;
         requestOptions.TurnDetection ??= _agentOptions.SessionOptions.TurnDetection;
         requestOptions.Voice ??= _agentOptions.SessionOptions.Voice;
@@ -463,36 +421,34 @@ public partial class RealtimeAIAgent : AIAgent, IRealtimeAIAgent
         requestOptions.OutputAudioFormat ??= _agentOptions.SessionOptions.OutputAudioFormat;
         requestOptions.InputTranscription ??= _agentOptions.SessionOptions.InputTranscription;
         requestOptions.ToolMode ??= _agentOptions.SessionOptions.ToolMode;
-        requestOptions.Tools ??= _agentOptions.SessionOptions.Tools;
+        //requestOptions.Tools ??= _agentOptions.SessionOptions.Tools;
         requestOptions.Modalities ??= _agentOptions.SessionOptions.Modalities;
         requestOptions.MaxOutputTokens ??= _agentOptions.SessionOptions.MaxOutputTokens;
 
-        if (requestOptions.AdditionalProperties is not null && this._agentOptions.SessionOptions.AdditionalProperties is not null)
+        if (requestOptions.AdditionalProperties is not null && _agentOptions.SessionOptions.AdditionalProperties is not null)
         {
-            foreach (var propertyKey in this._agentOptions.SessionOptions.AdditionalProperties.Keys)
+            foreach (var propertyKey in _agentOptions.SessionOptions.AdditionalProperties.Keys)
             {
-                _ = requestOptions.AdditionalProperties.TryAdd(propertyKey, this._agentOptions.SessionOptions.AdditionalProperties[propertyKey]);
+                _ = requestOptions.AdditionalProperties.TryAdd(propertyKey, _agentOptions.SessionOptions.AdditionalProperties[propertyKey]);
             }
         }
         else
         {
-            requestOptions.AdditionalProperties ??= this._agentOptions.SessionOptions.AdditionalProperties?.Clone();
+            requestOptions.AdditionalProperties ??= _agentOptions.SessionOptions.AdditionalProperties?.Clone();
         }
 
-        if (_agentOptions.SessionOptions.Tools is { Count: not 0 })
+        if (_agentOptions.SessionOptions.Tools is { Count: > 0 })
         {
-            if (requestOptions.Tools is not { Count: > 0 })
+            if (requestOptions.Tools is { Count: 0 })
             {
-                requestOptions.Tools = EnsureDistinctTools(null, _agentOptions.SessionOptions.Tools);
+                // If no tools were specified in the request, use the agent's default tools.
+                requestOptions.Tools = _agentOptions.SessionOptions.Tools;
             }
             else
             {
-                requestOptions.Tools = EnsureDistinctTools(requestOptions.Tools, _agentOptions.SessionOptions.Tools);
+                // Merge tools from both the request and the agent, ensuring no duplicates.
+                requestOptions.Tools =  EnsureDistinctTools(requestOptions.Tools, _agentOptions.SessionOptions.Tools);
             }
-        }
-        else if (requestOptions.Tools is { Count: > 0 })
-        {
-            requestOptions.Tools = EnsureDistinctTools(requestOptions.Tools, null);
         }
 
         return requestOptions;

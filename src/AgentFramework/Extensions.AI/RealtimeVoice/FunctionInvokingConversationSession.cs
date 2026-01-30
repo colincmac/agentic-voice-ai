@@ -72,6 +72,11 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
         await base.StartResponseAsync(responseOptions, cancellationToken);
     }
 
+    public override Task ConfigureSessionAsync(LiveConversationSessionOptions options, CancellationToken cancellationToken = default)
+    {
+        UpdateTools(options.Tools);
+        return base.ConfigureSessionAsync(options, cancellationToken);
+    }
     public override async Task SendMessagesAsync(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken = default)
     {
         var additionalMessages = new List<ChatMessage>();
@@ -134,7 +139,15 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
             }
         }
     }
-
+    private Task ProcessAndSubmit(FunctionInvocation pending, CancellationToken cancellationToken)
+    {
+        return Task.Run(async () =>
+        {
+            var result = await ProcessFunctionCallAsync(pending, true, cancellationToken);
+            pending.ResultContent = CreateFunctionResultContent(result, IncludeDetailedErrors);
+            await SendMessagesAsync([new(ChatRole.Tool, [pending.ResultContent])], cancellationToken);
+        }, cancellationToken);
+    }
 
     private async IAsyncEnumerable<AIContent> ProcessChatResponseUpdateContentsAsync(
         IList<AIContent> contents,

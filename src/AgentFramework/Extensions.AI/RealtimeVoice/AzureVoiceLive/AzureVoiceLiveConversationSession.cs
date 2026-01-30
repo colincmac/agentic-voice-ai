@@ -94,7 +94,6 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
        
         var session = await EnsureSessionAsync(cancellationToken).ConfigureAwait(false);
 
-        //var sessionResponseOptions = ToVoiceLiveSessionOptions(responseOptions);
         await session.StartResponseAsync(cancellationToken)
             .ConfigureAwait(false);
     }
@@ -142,7 +141,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
 
         foreach (var message in messages)
         {
-            if (ToRealtimeItem(message) is not { } realtimeItem)
+            if (ToConversationRequestItem(message) is not { } realtimeItem)
             {
                 continue;
             }
@@ -532,7 +531,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     }
 
 
-    private static ConversationRequestItem? ToRealtimeItem(ChatMessage message)
+    private static ConversationRequestItem? ToConversationRequestItem(ChatMessage message)
     {
         if (message.RawRepresentation is ConversationRequestItem rawItem)
         {
@@ -570,7 +569,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                 { Role: var role } when role == ChatRole.User => new UserMessageItem(message.Text),
                 { Role: var role } when role == ChatRole.Assistant => new AssistantMessageItem(message.Text),
                 { Role: var role } when role == ChatRole.System => new SystemMessageItem(message.Text),
-                _ => null
+                _ => new AssistantMessageItem(message.Text)
             };
         }
 
@@ -660,6 +659,11 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
         return sessionOptions;
     }
 
+    /// <summary>
+    /// https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to#turn-detection-parameters
+    /// </summary>
+    /// <param name="turnDetection"></param>
+    /// <returns></returns>
     private static TurnDetection MapTurnDetectionOption(RealtimeTurnDetection turnDetection)
     {
         var defaultprefixPadding = TimeSpan.FromMilliseconds(300);
@@ -667,7 +671,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
         var defaultSpeechDuration = TimeSpan.FromMilliseconds(80);
         var defaultVadThreshold = 0.3f;
 
-        var defaultDetection = new AzureSemanticVadTurnDetectionEn()
+        var defaultDetection = new AzureSemanticVadTurnDetection()
         {
             AutoTruncate = turnDetection.EnableAutomaticTruncation,
             CreateResponse = turnDetection.EnableAutomaticResponse,
@@ -677,6 +681,11 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
             Threshold = turnDetection.VadThreshold ?? defaultVadThreshold,
             RemoveFillerWords = true,
             SpeechDuration = turnDetection.SpeechDurationMs is null ? defaultSpeechDuration : TimeSpan.FromMilliseconds((int)turnDetection.SpeechDurationMs)
+        };
+        var defaultEouDetection = new AzureSemanticEouDetectionEn()
+        {
+            ThresholdLevel = EouThresholdLevel.Medium,
+            Timeout = TimeSpan.FromSeconds(2)
         };
         return turnDetection.Type switch
         {

@@ -22,6 +22,7 @@
     <PackageReference Include="Azure.Communication.CallAutomation" />
     <PackageReference Include="Azure.Communication.Common" />
     <PackageReference Include="Azure.Communication.Identity" />
+    <PackageReference Include="Azure.Messaging.EventGrid" />
 
     <!-- Azure Managed Redis (AMR)-->
     <PackageReference Include="StackExchange.Redis" />

@@ -24,6 +24,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
 
     // gpt-realtime limit
     private const int MAX_SESSION_TOKENS = 32000;
+
     public AuthorizingRealtimeAIAgent(
         AIAgent innerAgent,
         IAgentSessionRegistry sessionRegistry,
@@ -51,7 +52,6 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
     public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (thread is not LiveConversationAgentSession conversationSessionThread) throw new ArgumentException("Invalid thread type", nameof(thread));
-        //var typedOptions = options as RealtimeAgentRunOptions ?? new();
 
         var sessionId = conversationSessionThread.ActiveSessionId ?? Id
                         ?? throw new InvalidOperationException("Session ID is required for callbacks");
@@ -84,92 +84,31 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
     {
         var runOptions = options as RealtimeAgentRunOptions ?? new();
 
-        //runOptions.SessionOptions ??= new LiveConversationSessionOptions();
-        //runOptions.SessionOptions.Tools ??= [];
-        //runOptions.SessionOptions.Tools = [.. runOptions.SessionOptions.Tools, .. _additionalTools];
-        //var originalClientFactory = runOptions.ConversationClientFactory;
+        runOptions.SessionOptions ??= new LiveConversationSessionOptions();
+        runOptions.SessionOptions.Tools ??= [];
 
-        //runOptions.ConversationClientFactory = client =>
-        //{
-        //    var builder = client.AsBuilder();
+        runOptions.SessionOptions.Tools = [.. ProcessTools(runOptions.SessionOptions.Tools), .. ProcessTools(_additionalTools)];
 
-        //    if (originalClientFactory is not null)
-        //    {
-        //        builder.Use(originalClientFactory);
-        //    }
 
-        //    return builder.ConfigureOptions(
-        //            session =>
-        //            {
-        //                session.Tools = session.Tools is null ? [] : [.. ProcessTools(session.Tools)];
-        //                if (_additionalTools is not null)
-        //                {
-        //                    session.Tools = [.. session.Tools, .. ProcessTools(_additionalTools)];
-        //                }
-
-        //            },
-        //            response =>
-        //            {
-
-        //                response ??= new();
-        //                response.Tools ??= [];
-        //                if (_additionalTools is not null)
-        //                {
-        //                    response.Tools = [.. response.Tools, .. _additionalTools];
-        //                }
-        //                response.Tools = [.. ProcessTools(response.Tools)];
-        //                //response.Tools.Add(AIFunctionFactory.Create(ActivateCreditCardAsync));
-        //                //response.Tools.Add(AIFunctionFactory.Create(TransferToHumanAsync));
-        //            }
-        //        )
-        //        .Build(_scopedServices);
-        //};
-
-        //IEnumerable<AITool> ProcessTools(IEnumerable<AITool> tools)
-        //{
-        //    foreach (var tool in tools)
-        //    {
-        //        if (tool is AIFunction funcTool)
-        //        {
-        //            var authorizedFunc = new AuthorizingAgentFunction(this, funcTool, _delegateFunc);
-        //            yield return authorizedFunc;
-        //        }
-        //        else
-        //        {
-        //            yield return tool;
-        //        }
-        //    }
-        //}
-        //;
+        IEnumerable<AITool> ProcessTools(IEnumerable<AITool> tools)
+        {
+            foreach (var tool in tools)
+            {
+                if (tool is AIFunction funcTool)
+                {
+                    var authorizedFunc = new AuthorizingAgentFunction(this, funcTool, _delegateFunc);
+                    yield return authorizedFunc;
+                }
+                else
+                {
+                    yield return tool;
+                }
+            }
+        }
+        ;
         return runOptions;
     }
-    [Description("Activate user credit card information by user pin. Retry ONCE if the user provides incorrect information. Returns true if the user exists.")]
-    public Task<bool> ActivateCreditCardAsync([Description("The account ID of the user to look up.")] string accountId, [Description("The users pin provided to them in the letter they recieved with the card")] string userPin, CancellationToken token = default)
-    {
-        // Implementation for looking up user information
-        return Task.FromResult(accountId == "8888" && userPin == "1234");
-    }
 
-    [Description("Transfer the user to a human agent.")]
-    public Task<string> TransferToHumanAsync(CancellationToken token = default)
-    {
-        // Implementation for looking up user information
-        return Task.FromResult("Escalating to a support agent.");
-    }
-
-    [Description("Send a text pin to the user's account phone number.")]
-    public Task<string> SendTextPinAsync(CancellationToken token = default)
-    {
-        // Implementation for looking up user information
-        return Task.FromResult("Pin sent: 5555");
-    }
-
-    //[Description("Verify pin async.")]
-    //public Task<string> SendTextPinAsync(CancellationToken token = default)
-    //{
-    //    // Implementation for looking up user information
-    //    return Task.FromResult("Pin sent: 5555");
-    //}
 
     public override object? GetService(Type serviceType, object? serviceKey = null) =>
         serviceType == typeof(AIAgent) ? this :
@@ -201,26 +140,26 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
 
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            if (ToolRequirements is null or { Count: 0 } || GetService<IToolApprovalHandlerProvider>() is not IToolApprovalHandlerProvider toolApprovalHandlerProvider)
-            {
-                return await base.InvokeCoreAsync(arguments, cancellationToken);
-            }
+            //if (ToolRequirements is null or { Count: 0 } || GetService<IToolApprovalHandlerProvider>() is not IToolApprovalHandlerProvider toolApprovalHandlerProvider)
+            //{
+            //    return await base.InvokeCoreAsync(arguments, cancellationToken);
+            //}
 
-            var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>() ?? GetService<ClaimsPrincipal>();
-            var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
-            var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
+            //var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>() ?? GetService<ClaimsPrincipal>();
+            //var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
+            //var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
 
-            foreach (var handler in handlers)
-            {
-                await handler.HandleAsync(approvalContext).ConfigureAwait(false);
-            }
+            //foreach (var handler in handlers)
+            //{
+            //    await handler.HandleAsync(approvalContext).ConfigureAwait(false);
+            //}
 
-            if (!approvalContext.HasSucceeded)
-            {
-                var failure = new ToolApprovalFailure(InnerFunction, arguments, [.. approvalContext.PendingRequirements], [.. approvalContext.FailureResponses], approvalContext.PendingRequirements is { Count: 0 });
-                _logger?.LogWarning("Function '{FunctionName}' invocation denied due to failed tool approval requirements.", InnerFunction.Name);
-                return failure.FailureResponseMessage.Text;
-            }
+            //if (!approvalContext.HasSucceeded)
+            //{
+            //    var failure = new ToolApprovalFailure(InnerFunction, arguments, [.. approvalContext.PendingRequirements], [.. approvalContext.FailureResponses], approvalContext.PendingRequirements is { Count: 0 });
+            //    _logger?.LogWarning("Function '{FunctionName}' invocation denied due to failed tool approval requirements.", InnerFunction.Name);
+            //    return failure.FailureResponseMessage.Text;
+            //}
 
             if (_next is not null)
             {
@@ -232,12 +171,12 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
             }
         }
 
-        public override object? GetService(Type serviceType, object? serviceKey = null) =>
-            //serviceType == typeof(ApprovalRequiredAIFunction) ? _marker :
-            serviceType == typeof(IEnumerable<IToolApprovalRequirement>) ? ToolRequirements :
-            serviceType.IsInstanceOfType(typeof(AIAgent)) ? _agent :
-            _agent.GetService(serviceType, serviceKey) ??
-            base.GetService(serviceType, serviceKey);
+        //public override object? GetService(Type serviceType, object? serviceKey = null) =>
+        //    //serviceType == typeof(ApprovalRequiredAIFunction) ? _marker :
+        //    //serviceType == typeof(IEnumerable<IToolApprovalRequirement>) ? ToolRequirements :
+        //    serviceType.IsInstanceOfType(typeof(AIAgent)) ? _agent :
+        //    _agent.GetService(serviceType, serviceKey) ??
+        //    base.GetService(serviceType, serviceKey);
     }
 
 }

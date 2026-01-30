@@ -80,6 +80,7 @@ public class LiveConversationResponseOptions
 
     /// <summary>Gets or sets additional model-specific properties.</summary>
     public IDictionary<string, object?>? AdditionalProperties { get; set; }
+    public string? RawResponseOptionsJson { get; set; }
 
 
     public LiveConversationResponseOptions Clone()

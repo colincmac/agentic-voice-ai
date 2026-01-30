@@ -5,7 +5,6 @@ using System.Text;
 using System.Threading.Tasks;
 using Agents.AI.RealtimeVoice;
 using Azure.Core;
-using DnsClient.Internal;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

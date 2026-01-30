@@ -9,7 +9,7 @@
     <MicrosoftExtensionsVersionAI>10.1.1-preview.1.25612.2</MicrosoftExtensionsVersionAI>
 
     <MicrosoftAgentsFrameworkVersion>1.0.0-preview.251204.1</MicrosoftAgentsFrameworkVersion>
-    <AspireVersion>13.0.2</AspireVersion>
+    <AspireVersion>13.1.0</AspireVersion>
     <DaprVersion>1.16.1</DaprVersion>
     
   </PropertyGroup>
@@ -17,23 +17,22 @@
     <PackageVersion Include="A2A" Version="0.3.3-preview" />
     <PackageVersion Include="A2A.AspNetCore" Version="0.3.3-preview" />
     <!-- Aspire -->
-    <PackageVersion Include="Aspire.Azure.AI.OpenAI" Version="13.0.2-preview.1.25603.5" />
+
+    <PackageVersion Include="Aspire.Azure.AI.OpenAI" Version="13.1.0-preview.1.25616.3" />
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="$(AspireVersion)" />
+    <PackageVersion Include="Aspire.Hosting.Azure.AIFoundry" Version="13.1.0-preview.1.25616.3" />
     <PackageVersion Include="Aspire.Hosting.Azure.AppConfiguration" Version="$(AspireVersion)" />
+    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.ApplicationInsights" Version="$(AspireVersion)" />
-    <PackageVersion Include="Aspire.Hosting.Azure.AIFoundry" Version="13.0.2-preview.1.25603.5" />
     <PackageVersion Include="Aspire.Hosting.Azure.CognitiveServices" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.CosmosDB" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.Redis" Version="$(AspireVersion)" />
-
-    <PackageVersion Include="Aspire.Hosting.Garnet" Version="$(AspireVersion)" />
+    <PackageVersion Include="Aspire.Hosting.Azure.SignalR" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.OpenAI" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Python" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="$(AspireVersion)" />
-    <PackageVersion Include="Aspire.Hosting.Azure.SignalR" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Microsoft.Azure.Cosmos" Version="$(AspireVersion)" />
-    <PackageVersion Include="Aspire.Microsoft.Extensions.Configuration.AzureAppConfiguration" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.StackExchange.Redis" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.StackExchange.Redis.DistributedCaching" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.StackExchange.Redis.OutputCaching" Version="$(AspireVersion)" />

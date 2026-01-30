@@ -59,8 +59,9 @@ WORKDIR /app
 # Create directories for data persistence
 RUN mkdir -p /app/embeddings
 
-# Expose gRPC port
+# Expose gRPC and HTTP health ports
 EXPOSE 50051
+EXPOSE 8080
 
 # Run the server
 CMD ["python", "server.py"]

@@ -92,11 +92,13 @@ var prompt = RealtimePrompt.CreateBuilder()
             name: "get_recent_transactions",
             useWhen: "the customer wants to identify or review recent charges",
             doNotUseWhen: "account has not been verified")
-        .AddConfirmationTool(
+        .AddPreambleTool(
             name: "submit_dispute",
             useWhen: "all dispute details have been collected and confirmed",
-            confirmationPhrase: "I have all the details for your dispute. Would you like me to submit it now?",
-            doNotUseWhen: "transaction ID or dispute reason is missing")
+            doNotUseWhen: "transaction ID or dispute reason is missing",
+            preamblePhrases: [
+                "Okay, let me submit this and I'll provide you with a confirmation number. Please wait."
+                ])
         .AddPreambleTool(
             name: "check_dispute_status",
             useWhen: "customer asks about an existing dispute",
@@ -188,11 +190,11 @@ builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
     configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
     liveConversationClientKey: "voicelive", configureOptions: (opt) => {
-        opt.SessionOptions = new LiveConversationSessionOptions()
-        {
-            Voice = "en-US-Ava:DragonHDLatestNeural",
-            Tools = new WoodgroveDisputeTools().AsAITools().ToList()
-        };
+        //opt.SessionOptions = new LiveConversationSessionOptions()
+        //{
+        //    Voice = "en-US-Ava:DragonHDLatestNeural",
+        //    Tools = new WoodgroveDisputeTools().AsAITools().ToList()
+        //};
         opt.Instructions = prompt;
     });
 
@@ -216,7 +218,7 @@ builder.AddConversationHub(
     .AddCallAutomation()
     .AddToolCollection<WoodgroveDisputeTools>()
     .AddOperatorDashboard()
-    .AddBiometricVoiceEvaluation()
+    //.AddBiometricVoiceEvaluation()
     .AddStubCallAnalytics();
 // Add workflow integration with the orchestrator agent and workflow factory
 //.AddWorkflowIntegration(
