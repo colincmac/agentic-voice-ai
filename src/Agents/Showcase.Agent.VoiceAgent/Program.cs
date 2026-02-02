@@ -5,6 +5,7 @@ using Agents.AI.RealtimeVoice.Azure;
 using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
 using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hosting;
@@ -24,6 +25,15 @@ AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 
 builder.AddServiceDefaults();
 builder.Services.AddHttpClient();
+
+
+// Retrieve the endpoint
+var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
+
+if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
+{
+    builder.Configuration.AddAzureAppConfiguration(appConfigEndpoint);
+}
 
 //builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 //    .AddMicrosoftIdentityWebApi(builder.Configuration)

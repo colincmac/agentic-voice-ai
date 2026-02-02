@@ -43,7 +43,8 @@ var cosmosAccountParam = builder.AddParameter(ParameterNameConstants.CosmosAccou
 /**
  * Monitoring & Telemetry
  */
-var appinsights = builder.AddAzureApplicationInsights("appinsights").AsExisting(appInsightsNameParam, defaultResourceGroupParam);
+var appinsights = builder.AddAzureApplicationInsights("appinsights")
+    .AsExisting(appInsightsNameParam, defaultResourceGroupParam);
 
 //var law = builder.AddAzureLogAnalyticsWorkspace("law")
 //    .AsExisting(lawParam, lawRgParam);
@@ -96,12 +97,9 @@ var temp1 = builder.AddParameter("redistemp");
 var redis = builder.AddAzureManagedRedis("redis")
     .AsExisting(temp1, temp2).PublishAsConnectionString();
 
-var appConfig =
-    builder.AddAzureAppConfiguration("appconfig")
-    .RunAsEmulator(emulator =>
-    {
-        emulator.WithDataBindMount();
-    }).PublishAsConnectionString();
+//var appConfig =
+//    builder.AddAzureAppConfiguration("appconfig")
+//    .AsExisting(appConfigParam, defaultResourceGroupParam).ExcludeFromManifest();
 
 var keyVault = builder.AddAzureKeyVault("secrets")
     .AsExisting(keyVaultParam, defaultResourceGroupParam);
@@ -140,9 +138,9 @@ var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceag
     .WithReference(voiceAgentDb, "cosmos")
     .WithReference(appinsights)
     .WithReference(keyVault)
-    .WithReference(appConfig)
+    //.WithReference(appConfig)
     .WithReference(redis)
-    .WithAzureUserAssignedIdentity(sharedMi)
+    //.WithAzureUserAssignedIdentity(sharedMi)
     //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
     .WithExternalHttpEndpoints();
 

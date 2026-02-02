@@ -171,6 +171,7 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _messageLatencyHist.Record(elapsed, new KeyValuePair<string, object?>(SessionTargetChannelCountAttributeKey, targetCount));
     }
+
     private async Task OnAudioAsync(string sourceId, ReadOnlyMemory<byte> frame, CancellationToken ct)
     {
         var start = Stopwatch.GetTimestamp();
