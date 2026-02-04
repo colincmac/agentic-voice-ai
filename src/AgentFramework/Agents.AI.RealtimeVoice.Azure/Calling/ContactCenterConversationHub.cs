@@ -19,15 +19,13 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 /// </summary>
 public sealed class ContactCenterConversationHub : IHostedService
 {
-    private const string MeterName = "Agents.AI.RealtimeVoice.Azure.Calling";
-    private const string ActivitySourceName = "Agents.AI.RealtimeVoice.Azure.Calling";
 
     private readonly ConcurrentDictionary<string, ContactCenterConversationSession> _activeSessions = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<ContactCenterConversationHub> _logger;
     private readonly Timer _cleanupTimer;
     // Telemetry
-    private readonly ActivitySource _activitySource;
+    private readonly ActivitySource _activitySource = ConversationSessionActivitySource.ActivitySource;
     private readonly Meter _meter;
     private readonly Counter<int> _sessionCreatedCounter;
     private readonly Counter<int> _sessionClosedCounter;
@@ -51,8 +49,7 @@ public sealed class ContactCenterConversationHub : IHostedService
         _logger = _loggerFactory.CreateLogger<ContactCenterConversationHub>();
 
         // Initialize telemetry
-        _activitySource = new ActivitySource(ActivitySourceName);
-        _meter = new Meter(MeterName);
+        _meter = new Meter(HubMeterName);
 
         _sessionCreatedCounter = _meter.CreateCounter<int>(
             HubSessionsCreatedAttributeKey,
@@ -106,7 +103,7 @@ public sealed class ContactCenterConversationHub : IHostedService
     public ContactCenterConversationSession GetOrCreateSession(
         string sessionId)
     {
-        using var activity = StartActivity("ConversationHub.GetOrCreateSession");
+        using var activity = StartActivity(HubOperations.CreateSession);
         activity?.SetTag(SessionIdAttributeKey, sessionId);
 
         if (_activeSessions.TryGetValue(sessionId, out var existingSession))

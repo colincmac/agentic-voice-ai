@@ -8,6 +8,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 internal static partial class ConversationSessionActivitySource
 {
     public const string ActivitySourceName = "Agents.AI.RealtimeVoice.ContactCenter";
+    public const string HubMeterName = "Agents.AI.RealtimeVoice.ContactCenter.Hub";
     public const string MeterName = "Agents.AI.RealtimeVoice.ContactCenter";
 
     #region Hub Attributes

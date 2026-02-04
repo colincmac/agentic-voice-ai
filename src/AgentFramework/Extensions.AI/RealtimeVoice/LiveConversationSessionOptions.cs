@@ -48,6 +48,9 @@ public class LiveConversationSessionOptions : ChatOptions
     public string? InputNoiceReductionType { get; set; } = "azure_deep_noise_suppression";
 
     public ConversationVoiceOptions? VoiceOptions { get; set; }
+
+    public bool EnableAsyncToolCalls { get; set; } = true;
+
     public string? RawSessionOptionsJson { get; set; }
 
 

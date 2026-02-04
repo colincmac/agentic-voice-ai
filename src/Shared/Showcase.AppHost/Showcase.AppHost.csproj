@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Agents\Showcase.Agent.IntentAgent\Showcase.Agent.IntentAgent.csproj" />
     <ProjectReference Include="..\..\Agents\Showcase.Agent.VoiceAgent\Showcase.Agent.VoiceAgent.csproj" />
   </ItemGroup>
 

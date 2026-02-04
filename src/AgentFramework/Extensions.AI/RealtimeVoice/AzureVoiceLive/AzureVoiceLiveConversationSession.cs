@@ -2,6 +2,7 @@ using System.ClientModel.Primitives;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Azure.AI.VoiceLive;
 using Extensions.AI.Contents;
 using Extensions.AI.RealtimeVoice;
@@ -41,7 +42,9 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     private LiveConversationSessionOptions? _options;
     private readonly TaskCompletionSource<string?> _sessionStartTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private RealtimeSessionState _state = RealtimeSessionState.Connecting;
+
     private bool _disposed;
+
     public AzureVoiceLiveConversationSession(
         AzureVoiceLiveConversationClient parentClient,
         string realtimeModelId,
@@ -76,6 +79,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     }
 
     public LiveConversationSessionMetadata Metadata { get; }
+    public LiveConversationSessionOptions? CurrentSessionConfiguration => _options;
 
     private string? _sessionId;
     /// <inheritdoc/>

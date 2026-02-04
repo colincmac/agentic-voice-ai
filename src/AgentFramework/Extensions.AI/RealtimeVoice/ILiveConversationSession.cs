@@ -13,6 +13,8 @@ public interface ILiveConversationSession : IDisposable
 
     public IList<AITool> SessionTools { get; }
 
+    public LiveConversationSessionOptions? CurrentSessionConfiguration { get; }
+
     /// <summary>Occurs when the session state changes.</summary>
     event EventHandler<RealtimeSessionStateChangedEventArgs>? StateChanged;
 

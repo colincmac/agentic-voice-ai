@@ -144,10 +144,12 @@ var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceag
     //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
     .WithExternalHttpEndpoints();
 
-    //.WaitFor(biometricsApi);
+//.WaitFor(biometricsApi);
 
+builder.AddProject<Projects.Showcase_Agent_IntentAgent>("showcase-agent-intentagent");
 
 #endregion
+
 
 builder.Build().Run();
 

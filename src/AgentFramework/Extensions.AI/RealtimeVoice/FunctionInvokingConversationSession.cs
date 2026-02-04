@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 using Extensions.AI.OpenTelemetry.SemanticConventions;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Extensions.AI;
@@ -18,11 +19,20 @@ namespace Extensions.AI.RealtimeVoice;
 /// Unlike <see cref="FunctionInvokingChatClient"/>, this class is designed to work in real-time. Function invocations, through FunctionCallContent,
 /// are processed as soon as they are detected in the streaming response from the inner session. 
 /// </summary>
-public partial class FunctionInvokingConversationSession : DelegatingConversationSession
+public sealed partial class FunctionInvokingConversationSession : DelegatingConversationSession, IAsyncDisposable
 {
     private readonly Dictionary<string, AITool> _defaultToolMap = [];
     private readonly ConcurrentDictionary<string, FunctionInvocation> _pendingFunctions = [];
+    private readonly Channel<FunctionInvocation> _functionInvocationChannel = Channel.CreateUnbounded<FunctionInvocation>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false,
+        AllowSynchronousContinuations = true
+    });
+    private readonly ConcurrentBag<Task> _activeFunctionTasks = [];
+    private readonly CancellationTokenSource _shutdownCts = new();
 
+    private Task? _functionProcessorTask;
     /// <summary>The logger to use for logging information about function invocation.</summary>
     private readonly ILogger _logger;
 
@@ -31,17 +41,17 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
     private readonly ActivitySource? _activitySource;
 
     /// <summary>Gets the <see cref="IServiceProvider"/> specified when constructing the <see cref="FunctionInvokingChatClient"/>, if any.</summary>
-    protected IServiceProvider? FunctionInvocationServices { get; }
+    private IServiceProvider? FunctionInvocationServices { get; }
 
     public FunctionInvokingConversationSession(ILiveConversationSession innerSession, ILoggerFactory? loggerFactory = null, IServiceProvider? functionInvocationServices = null) : base(innerSession)
     {
         _logger = (ILogger?)loggerFactory?.CreateLogger<FunctionInvokingConversationSession>() ?? NullLogger.Instance;
         _activitySource = innerSession.GetService<ActivitySource>();
         FunctionInvocationServices = functionInvocationServices;
-
         // Build tool map
         _defaultToolMap = BuildToolMap([.. AdditionalTools ?? [], .. innerSession.SessionTools]);
     }
+
 
     private static Dictionary<string, AITool> BuildToolMap(IEnumerable<AITool> tools)
     {
@@ -116,13 +126,13 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
         LiveConversationResponseOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        _functionProcessorTask ??= Task.Run(() => ProcessBackgroundFunctionInvocationsAsync(cancellationToken), cancellationToken);
         await foreach (var update in base.GetStreamingResponseAsync(options, cancellationToken))
         {
             var results = new List<AIContent>();
-            bool hasFunctionCallContent = false;
+            var hasFunctionCallContent = false;
             await foreach (var content in ProcessChatResponseUpdateContentsAsync(update.Contents, options, cancellationToken))
             {
-                //_logger.LogInformation(JsonSerializer.Serialize(content));
                 results.Add(content);
                 hasFunctionCallContent = content is FunctionCallContent || hasFunctionCallContent;
 
@@ -139,16 +149,57 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
             }
         }
     }
-    private Task ProcessAndSubmit(FunctionInvocation pending, CancellationToken cancellationToken)
+
+
+    private async Task ProcessBackgroundFunctionInvocationsAsync(CancellationToken cancellationToken)
     {
-        return Task.Run(async () =>
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
+        var linkedToken = linkedCts.Token;
+        var reader = _functionInvocationChannel.Reader;
+
+        try
         {
-            var result = await ProcessFunctionCallAsync(pending, true, cancellationToken);
-            pending.ResultContent = CreateFunctionResultContent(result, IncludeDetailedErrors);
-            await SendMessagesAsync([new(ChatRole.Tool, [pending.ResultContent])], cancellationToken);
-        }, cancellationToken);
+            await foreach (var functionInvocation in reader.ReadAllAsync(linkedToken).ConfigureAwait(false))
+            {
+                var task = ProcessSingleFunctionAsync(functionInvocation, linkedToken);
+                _activeFunctionTasks.Add(task);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when cancellation is requested
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Function processing failed for session {SessionId}", InnerSession.SessionId);
+        }
     }
 
+    private async Task ProcessSingleFunctionAsync(FunctionInvocation functionInvocation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await ProcessFunctionCallAsync(functionInvocation, captureExceptions: true, cancellationToken);
+            functionInvocation.ResultContent = CreateFunctionResultContent(result, IncludeDetailedErrors);
+            await SendMessagesAsync([new(ChatRole.Tool, [functionInvocation.ResultContent])], cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Function {FunctionName} failed for session {SessionId}",
+                functionInvocation.CallContent.Name, InnerSession.SessionId);
+        }
+    }
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="contents"></param>
+    /// <param name="options"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
     private async IAsyncEnumerable<AIContent> ProcessChatResponseUpdateContentsAsync(
         IList<AIContent> contents,
         LiveConversationResponseOptions? options,
@@ -183,6 +234,12 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
 
                             pending.ApprovalRequest = approvalRequest;
                             yield return approvalRequest;
+                            break;
+                        }
+
+                        if(InnerSession.CurrentSessionConfiguration?.EnableAsyncToolCalls == true)
+                        {
+                            await _functionInvocationChannel.Writer.WriteAsync(pending, cancellationToken);
                         }
                         else
                         {
@@ -220,10 +277,17 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
                             break;
                         }
 
-                        var result = await ProcessFunctionCallAsync(pending, true, cancellationToken);
-                        pending.ResultContent = CreateFunctionResultContent(result, IncludeDetailedErrors);
-                        await SendMessagesAsync([new(ChatRole.Tool, [pending.ResultContent])], cancellationToken);
-                        yield return pending.ResultContent;
+                        if (InnerSession.CurrentSessionConfiguration?.EnableAsyncToolCalls == true)
+                        {
+                            await _functionInvocationChannel.Writer.WriteAsync(pending, cancellationToken);
+                        }
+                        else
+                        {
+                            var result = await ProcessFunctionCallAsync(pending, true, cancellationToken);
+                            pending.ResultContent = CreateFunctionResultContent(result, IncludeDetailedErrors);
+                            await SendMessagesAsync([new(ChatRole.Tool, [pending.ResultContent])], cancellationToken);
+                            yield return pending.ResultContent;
+                        }
                         break;
                     }
 
@@ -438,6 +502,59 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
 #else
         new((long)((Stopwatch.GetTimestamp() - startingTimestamp) * ((double)TimeSpan.TicksPerSecond / Stopwatch.Frequency)));
 #endif
+    public override void Dispose()
+    {
+        // Signal shutdown
+        if(!_shutdownCts.IsCancellationRequested)
+        {
+            _shutdownCts.Cancel();
+        }
+
+        // Complete the channel to stop accepting new work
+        _functionInvocationChannel.Writer.TryComplete();
+
+        // Wait for active tasks with a timeout
+        try
+        {
+            var allTasks = _activeFunctionTasks.ToArray();
+            if (allTasks.Length > 0)
+            {
+                Task.WhenAll(allTasks).Wait(TimeSpan.FromSeconds(5));
+            }
+
+            _functionProcessorTask?.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch (AggregateException)
+        {
+            // Tasks were cancelled or failed during shutdown
+        }
+
+        _shutdownCts.Dispose();
+        base.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _shutdownCts.CancelAsync();
+        try
+        {
+            var allTasks = _activeFunctionTasks.ToArray();
+            if (allTasks.Length > 0)
+            {
+                await Task.WhenAll(allTasks).WaitAsync(TimeSpan.FromSeconds(5));
+            }
+
+            if(_functionProcessorTask is not null)
+            {
+                await _functionProcessorTask.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+        }
+        catch (AggregateException)
+        {
+            // Tasks were cancelled or failed during shutdown
+        }
+        Dispose();
+    }
 
 
     [LoggerMessage(LogLevel.Debug, "Invoking {MethodName}.", SkipEnabledCheck = true)]
@@ -457,6 +574,7 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
 
     [LoggerMessage(LogLevel.Error, "{MethodName} invocation failed.")]
     private partial void LogInvocationFailed(string methodName, Exception error);
+
 
     public sealed class FunctionInvocation
     {
@@ -535,7 +653,6 @@ public partial class FunctionInvokingConversationSession : DelegatingConversatio
         /// <summary>The function call failed with an exception.</summary>
         Exception,
     }
-
     private struct ApprovalResultWithRequestMessage
     {
         public FunctionApprovalResponseContent Response { get; set; }

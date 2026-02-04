@@ -66,6 +66,7 @@ public sealed class OpenAIRealtimeConversationSession : ILiveConversationSession
     }
 
     public LiveConversationSessionMetadata Metadata { get; }
+    public LiveConversationSessionOptions? CurrentSessionConfiguration => _options;
 
     private string? _sessionId;
     /// <inheritdoc/>

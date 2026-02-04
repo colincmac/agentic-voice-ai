@@ -232,8 +232,13 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     private TimeSpan? _maxDuration;
     private AuthenticationLevel _requiredAuthLevel = AuthenticationLevel.None;
     private Func<IvrWorkflowState, CancellationToken, Task>? _onCompleted;
+
     private readonly JsonSerializerOptions _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
 
+    private static readonly JsonElement handoffSchema = AIFunctionFactory.Create(
+        ([Description("The reason for the handoff")] string? reasonForHandoff) => { }).JsonSchema;
+
+    private static string SanitizeHandoffStepName(string name) => name.Replace(" ", "_").ToLowerInvariant();
 
     /// <summary>
     /// Sets the step identifier.
@@ -533,7 +538,16 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
 
         return this;
     }
-
+    private AITool CreateTransitionTool(StateTransition transition)
+    {
+        var functionName = $"transition_to_{transition.NextStep}";
+        var description = $"Transition to the '{transition.NextStep}' step when: {transition.Condition}";
+        return AIFunctionFactory.CreateDeclaration(
+                functionName,
+                $"Transfer conversation to {transition.NextStep}. {transition.Condition}",
+                handoffSchema
+            );
+    }
 
     /// <summary>
     /// Builds the workflow step.
@@ -582,3 +596,4 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
         };
     }
 }
+public record AIToolConfiguration(AITool tool, ToolConfiguration? toolConfiguration = null);

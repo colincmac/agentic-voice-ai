@@ -13,6 +13,7 @@ using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.Extensions.AI;
+using OpenTelemetry.Resources;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Configuration;
@@ -23,7 +24,19 @@ var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 //builder.Services.AddGrpc();
 
-builder.AddServiceDefaults();
+if (builder.Environment.IsDevelopment())
+{
+    var resourceAttributes = new Dictionary<string, object> {
+    { "service.name", "artagent" },
+    { "service.namespace", "dev" },
+    { "service.instance.id", "local" }};
+
+    builder.AddServiceDefaults(opt => opt.AddAttributes(resourceAttributes));
+}
+else
+{
+    builder.AddServiceDefaults();
+}
 builder.Services.AddHttpClient();
 
 
@@ -73,7 +86,7 @@ var prompt = RealtimePrompt.CreateBuilder()
     .WithPersonality(p => p
         .Personality("Professional, empathetic, and reassuring")
         .Tone("Calm, supportive, and patient")
-        .Length("2-3 sentences per turn")
+        .Length("1-2 sentences per turn")
         .WithLanguage("English",true)
         .Pacing("Speak clearly and at a moderate pace. Don't change your pace based on the customer's speech, but you can repeat things more slowly if they didn't understand you the first time.")
         .Emotion("Show understanding when customers express frustration about disputed charges")
@@ -85,7 +98,6 @@ var prompt = RealtimePrompt.CreateBuilder()
             "NEVER read the full card number aloud—only the last 4 digits",
             "IF the customer provides a transaction date or amount, repeat it back to confirm",
             "IF the dispute amount exceeds $500, inform the customer a specialist may follow up within 48 hours")
-        //.EnableCharacterByCharacterPronunciation()
         .HandleUnclearAudio(
             askForClarification: true,
             clarificationPhrases: [
@@ -93,11 +105,14 @@ var prompt = RealtimePrompt.CreateBuilder()
                 "Sorry, I missed that. Can you say that again?"
             ]))
     .WithTools(t => t
-        .GlobalPreamble("Let me look into that for you.")
-        .AddProactiveTool(
+        .GlobalPreamble("Tool calls might be quick or take a little while. While calling a tool, always inform the customer that you are doing something on their behalf.")
+        .AddPreambleTool(
             name: "lookup_account",
             useWhen: "verifying customer identity or retrieving account information",
-            doNotUseWhen: "the customer has not provided any identifying information")
+            doNotUseWhen: "the customer has not provided any identifying information",
+            preamblePhrases: [
+                "Thank you, hold on while I look up your account."
+                ])
         .AddProactiveTool(
             name: "get_recent_transactions",
             useWhen: "the customer wants to identify or review recent charges",
@@ -161,7 +176,8 @@ var prompt = RealtimePrompt.CreateBuilder()
         .AddInstructions(
             "Ask why the customer is disputing this charge",
             "Common reasons: unauthorized charge, duplicate charge, incorrect amount, merchandise not received, service not provided",
-            "Summarize the reason back to the customer for confirmation")
+            "Summarize the reason back to the customer for confirmation",
+            "If the customer identifies the reason for the dispute in the previous steps, use that reason but confirm whether they want to use more information")
         .AddExamples(
             "Can you tell me why you're disputing this charge?",
             "So you're saying you didn't authorize this transaction—is that correct?")
@@ -195,16 +211,12 @@ var prompt = RealtimePrompt.CreateBuilder()
         .MaxFailedToolAttempts(2))
     .BuildAndRender();
 
+Console.WriteLine(prompt);
 
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
     configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
     liveConversationClientKey: "voicelive", configureOptions: (opt) => {
-        //opt.SessionOptions = new LiveConversationSessionOptions()
-        //{
-        //    Voice = "en-US-Ava:DragonHDLatestNeural",
-        //    Tools = new WoodgroveDisputeTools().AsAITools().ToList()
-        //};
         opt.Instructions = prompt;
     });
 
@@ -217,6 +229,14 @@ builder.AddAIAgent(
         """,
     chatClientServiceKey: "chat");
 
+builder.AddAIAgent(
+    name: "IntentAgent",
+    instructions: """
+        You analyze voice conversation transcripts and determine when workflow step transitions should occur.
+        Your decisions help guide the IVR workflow through greeting, intent collection, identity verification,
+        and request handling phases.
+        """,
+    chatClientServiceKey: "chat");
 
 builder.AddTestAgents();
 builder.AddConversationHub(
@@ -277,16 +297,16 @@ app.MapOperatorCalls();
 app.MapOperatorDashboardHub();
 
 // attach a2a with simple message communication
-app.MapA2A(agentName: "pirate", path: "/a2a/pirate");
-app.MapA2A(agentName: "knights-and-knaves", path: "/a2a/knights-and-knaves", agentCard: new()
-{
-    Name = "Knights and Knaves",
-    Description = "An agent that helps you solve the knights and knaves puzzle.",
-    Version = "1.0",
+//app.MapA2A(agentName: "pirate", path: "/a2a/pirate");
+//app.MapA2A(agentName: "knights-and-knaves", path: "/a2a/knights-and-knaves", agentCard: new()
+//{
+//    Name = "Knights and Knaves",
+//    Description = "An agent that helps you solve the knights and knaves puzzle.",
+//    Version = "1.0",
 
-    // Url can be not set, and SDK will help assign it.
-    // Url = "http://localhost:5390/a2a/knights-and-knaves"
-});
+//    // Url can be not set, and SDK will help assign it.
+//    // Url = "http://localhost:5390/a2a/knights-and-knaves"
+//});
 
 
 //app.MapAgentDiscovery("/agents");

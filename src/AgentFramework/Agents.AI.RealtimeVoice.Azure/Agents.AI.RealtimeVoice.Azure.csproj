@@ -5,17 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InjectSharedThrow>true</InjectSharedThrow>
-
   </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Remove="AIContent\**" />
-    <Compile Remove="SessionTools\**" />
-    <EmbeddedResource Remove="AIContent\**" />
-    <EmbeddedResource Remove="SessionTools\**" />
-    <None Remove="AIContent\**" />
-    <None Remove="SessionTools\**" />
-  </ItemGroup>
   <ItemGroup>
 
     <!-- Azure Communication Services (ACS)-->
@@ -34,10 +25,13 @@
 
   </ItemGroup>
   
+
   <ItemGroup>
     <Protobuf Include="Protos\agents.realtimevoice.v1.proto" GrpcServices="Server" />
     <Protobuf Include="Protos\biometrics.v1.proto" GrpcServices="Client" />
   </ItemGroup>
+
+  
   <ItemGroup>
     <ProjectReference Include="..\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
     <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />

@@ -293,8 +293,8 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
         if (activity is { IsAllDataRequested: true })
         {
             activity
-                .AddTag(GenAI.AttributeGenAiOperationName, GenAI.OperationNameValues.GenerateContent)
-                .AddTag("gen_ai.live.operation", shortOperationName);
+                .AddTag(GenAI.AttributeGenAiOperationName, shortOperationName)
+                .AddTag("gen_ai.live.operation", GenAI.OperationNameValues.GenerateContent);
 
             if (_modelId is not null)
             {
