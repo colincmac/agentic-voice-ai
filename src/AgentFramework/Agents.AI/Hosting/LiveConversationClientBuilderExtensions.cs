@@ -228,12 +228,12 @@ public static class LiveConversationClientBuilderExtensions
     AspireOpenAIClientBuilder builder,
     string deploymentName)
     {
-        var openAiClient = builder.ServiceKey is null
+        var voiceLiveClient = builder.ServiceKey is null
             ? services.GetRequiredService<VoiceLiveClient>()
             : services.GetRequiredKeyedService<VoiceLiveClient>(builder.ServiceKey);
         var loggerFactory = services.GetService<ILoggerFactory>();
 
-        var conversationClient = new AzureVoiceLiveConversationClient(openAiClient, deploymentName, loggerFactory);
+        var conversationClient = new AzureVoiceLiveConversationClient(voiceLiveClient, deploymentName, loggerFactory);
         if (builder.DisableTracing)
         {
             return conversationClient;

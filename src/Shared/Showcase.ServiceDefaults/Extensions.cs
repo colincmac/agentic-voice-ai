@@ -97,15 +97,14 @@ public static class Extensions
         {
             otelBuilder.UseOtlpExporter();
         }
-        otelBuilder.UseAzureMonitor();
         if (configureOtel != null)
         {
             otelBuilder.ConfigureResource(configureOtel);
         }
-        //if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
-        //{
-        //    otelBuilder.UseAzureMonitor();
-        //}
+        if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
+        {
+            otelBuilder.UseAzureMonitor();
+        }
 
         return builder;
     }

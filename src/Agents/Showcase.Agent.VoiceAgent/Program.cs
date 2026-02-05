@@ -38,6 +38,7 @@ else
     builder.AddServiceDefaults();
 }
 builder.Services.AddHttpClient();
+builder.Services.AddHttpLogging(o => { });
 
 
 // Retrieve the endpoint
@@ -277,6 +278,7 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+app.UseHttpLogging();
 
 //app.UseHttpsRedirection();
 
@@ -295,19 +297,6 @@ app.MapTeams();
 app.MapCallAutomation();
 app.MapOperatorCalls();
 app.MapOperatorDashboardHub();
-
-// attach a2a with simple message communication
-//app.MapA2A(agentName: "pirate", path: "/a2a/pirate");
-//app.MapA2A(agentName: "knights-and-knaves", path: "/a2a/knights-and-knaves", agentCard: new()
-//{
-//    Name = "Knights and Knaves",
-//    Description = "An agent that helps you solve the knights and knaves puzzle.",
-//    Version = "1.0",
-
-//    // Url can be not set, and SDK will help assign it.
-//    // Url = "http://localhost:5390/a2a/knights-and-knaves"
-//});
-
 
 //app.MapAgentDiscovery("/agents");
 app.MapDefaultEndpoints();

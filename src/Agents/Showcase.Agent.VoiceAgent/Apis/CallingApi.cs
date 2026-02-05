@@ -95,6 +95,7 @@ public static class CallingApi
             foreach (var cloudEvent in cloudEvents)
             {
                 var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
+                services.Logger.LogDebug(JsonSerializer.Serialize(callAutomationEvent));
             }
 
             return Results.Ok();
