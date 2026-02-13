@@ -27,7 +27,7 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly Func<string, Task>? _onDisposed;
     private ClaimsPrincipal? _user;
-    private bool _isDisposed;
+    private volatile bool _isDisposed;
 
     public ScopedChannelTransport(IChannelTransport transport, IServiceProvider serviceProvider, Func<string, Task>? onDisposed = null) : this(transport, serviceProvider)
     {
