@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Claims;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling.Models;
@@ -165,6 +164,7 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
             lock (_transportsLock)
             {
                 transportList = _transports.ToArray();
+                _transports.Clear(); // Clear the collection to prevent new additions during disposal
             }
 
             foreach (var transport in transportList)
