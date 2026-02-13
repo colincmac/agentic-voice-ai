@@ -169,7 +169,12 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
                 targetCount++;
             }
         }
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        if (tasks.Count > 0)
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _messageLatencyHist.Record(elapsed, new KeyValuePair<string, object?>(SessionTargetChannelCountAttributeKey, targetCount));
     }
@@ -186,7 +191,12 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
                 targetCount++;
             }
         }
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        if (tasks.Count > 0)
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _audioPacketsCounter.Add(targetCount, SessionId, sourceId);
         _audioBytesCounter.Add(frame.Length * targetCount, SessionId, sourceId);

@@ -118,7 +118,11 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
                 tasks.Add(transport.SendAudioAsync(audioData, cancellationToken));
             }
         }
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        if (tasks.Count > 0)
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
     }
 
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)
@@ -137,7 +141,11 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
                 tasks.Add(transport.SendMessageAsync(message, cancellationToken));
             }
         }
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        if (tasks.Count > 0)
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
     }
 
     public void OnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
