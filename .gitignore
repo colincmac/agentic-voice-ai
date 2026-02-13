@@ -1,8 +1,9 @@
 .azure/*
 
+
 appsettings.Development.json
 **/*/appsettings.Development.json
-
+**/*/Properties/PublishProfiles/*
 .vs
 .vscode/*
 !.vscode/settings.json

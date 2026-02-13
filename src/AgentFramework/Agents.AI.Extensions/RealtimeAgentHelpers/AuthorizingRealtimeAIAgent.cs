@@ -6,6 +6,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.RealtimeVoice;
+using Extensions.AI.Contents;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -23,7 +24,8 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
     private readonly List<AITool> _additionalTools;
 
     // gpt-realtime limit
-    private const int MAX_SESSION_TOKENS = 32000;
+    private const int REALTIME_MAX_SESSION_TOKENS = 32000;
+    private readonly int _maxSessionTokens;
 
     public AuthorizingRealtimeAIAgent(
         AIAgent innerAgent,
@@ -31,12 +33,13 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
         AgentFunctionInvocationMiddleware? delegateFunc = null,
         IEnumerable<IAIToolCollection>? aIToolCollections = null,
         IServiceProvider? serviceProvider = null,
-        int maxSessionTokenCount = 32000) : base(innerAgent)
+        int maxSessionTokenCount = REALTIME_MAX_SESSION_TOKENS) : base(innerAgent)
     {
         _sessionRegistry = sessionRegistry;
         _scopedServices = serviceProvider;
-        _delegateFunc = delegateFunc ?? DefaultMiddleware;
+        _delegateFunc = delegateFunc ?? DefaultFunctionMiddleware;
         _additionalTools = aIToolCollections?.SelectMany(c => c.AsAITools()).ToList() ?? [];
+        _maxSessionTokens = maxSessionTokenCount;
     }
 
 
@@ -46,8 +49,23 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
     }
 
 
-    public override Task<AgentRunResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
-        => InnerAgent.RunAsync(messages, thread, AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
+    public override async Task<AgentRunResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        List<AgentRunResponseUpdate> updates = [];
+
+        await foreach (var update in RunStreamingAsync(messages, thread, options, cancellationToken))
+        {
+            updates.Add(update);
+
+            if(update.Contents.Any(x => x is RealtimeResponseFinishedContent))
+            {
+                break;
+            }
+        }
+
+        return updates.ToAgentRunResponse();
+
+    }
 
     public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -74,7 +92,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent, IUpdateable
         }
     }
 
-    private static ValueTask<object?> DefaultMiddleware(AIAgent agent, AIFunctionArguments arguments, AIFunction function, Func<AIFunctionArguments, CancellationToken, ValueTask<object?>> next, CancellationToken ct)
+    private static ValueTask<object?> DefaultFunctionMiddleware(AIAgent agent, AIFunctionArguments arguments, AIFunction function, Func<AIFunctionArguments, CancellationToken, ValueTask<object?>> next, CancellationToken ct)
     {
         return next(arguments, ct); // Pass through
     }

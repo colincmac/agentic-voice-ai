@@ -13,6 +13,7 @@ using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Azure;
 using OpenTelemetry.Resources;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
@@ -23,6 +24,18 @@ using Showcase.ServiceDefaults;
 var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 //builder.Services.AddGrpc();
+var azureSection = builder.Configuration.GetSection("Azure");
+var tenantId = azureSection["TenantId"];
+
+var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+{
+    TenantId = tenantId
+});
+builder.Services.AddAzureClients(clientBuilder =>
+{
+    // Make this the default for clients created by the factory
+    clientBuilder.UseCredential(credential);
+});
 
 if (builder.Environment.IsDevelopment())
 {
@@ -39,7 +52,12 @@ else
 }
 builder.Services.AddHttpClient();
 builder.Services.AddHttpLogging(o => { });
-
+builder.Services.AddAzureClients(clientBuilder =>
+{
+    // Set up any default settings
+    clientBuilder.ConfigureDefaults(
+        builder.Configuration.GetSection("AzureDefaults"));
+});
 
 // Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");

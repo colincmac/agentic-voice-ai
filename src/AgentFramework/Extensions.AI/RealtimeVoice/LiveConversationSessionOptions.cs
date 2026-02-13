@@ -49,7 +49,7 @@ public class LiveConversationSessionOptions : ChatOptions
 
     public ConversationVoiceOptions? VoiceOptions { get; set; }
 
-    public bool EnableAsyncToolCalls { get; set; } = true;
+    public bool EnableAsyncToolCalls { get; set; } = false;
 
     public string? RawSessionOptionsJson { get; set; }
 

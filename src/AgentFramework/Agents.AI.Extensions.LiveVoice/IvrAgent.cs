@@ -28,19 +28,20 @@ internal class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
 
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly IvrWorkflowState _state;
-
+    private readonly int _maxSessionTokenCount;
     public IvrAgent(
         AIAgent innerAgent,
         IAgentSessionRegistry sessionRegistry,
         AgentFunctionInvocationMiddleware? delegateFunc = null,
         IEnumerable<IAIToolCollection>? aIToolCollections = null,
         IServiceProvider? serviceProvider = null,
-        int maxSessionTokenCount = 32000) : base(innerAgent)
+        int maxSessionTokenCount = MAX_SESSION_TOKENS) : base(innerAgent)
     {
         _sessionRegistry = sessionRegistry;
         _scopedServices = serviceProvider;
         _delegateFunc = delegateFunc ?? DefaultMiddleware;
         _additionalTools = aIToolCollections?.SelectMany(c => c.AsAITools()).ToList() ?? [];
+        _maxSessionTokenCount = maxSessionTokenCount;
         _state = new IvrWorkflowState();
         _workflow = RealtimeIvrWorkflowBuilder.Create("CallerIntentBiometric")
             .WithBasePrompt(prompt => prompt

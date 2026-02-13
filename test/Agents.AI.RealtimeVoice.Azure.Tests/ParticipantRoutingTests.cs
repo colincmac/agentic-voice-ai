@@ -1,8 +1,10 @@
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
 using Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests;
 
@@ -265,5 +267,185 @@ public class ParticipantRoutingTests
 
         // Assert
         Assert.True(metadata.JoinedAt >= before && metadata.JoinedAt <= after);
+    }
+
+    [Fact]
+    public async Task ScopedChannelTransport_DoubleDispose_FiresCallbackOnce()
+    {
+        var inner = new MockChannelTransport("inner-channel");
+        var callbackCount = 0;
+
+        var scoped = new ScopedChannelTransport(inner, new ServiceCollection().BuildServiceProvider(), _ =>
+        {
+            Interlocked.Increment(ref callbackCount);
+            return Task.CompletedTask;
+        });
+
+        await scoped.DisposeAsync();
+        await scoped.DisposeAsync();
+
+        Assert.Equal(1, callbackCount);
+        Assert.True(inner.WasDisposed);
+    }
+
+    [Fact]
+    public async Task ScopedChannelTransport_IsConnected_FalseAfterDispose()
+    {
+        var inner = new MockChannelTransport("inner-channel");
+        var scoped = new ScopedChannelTransport(inner, new ServiceCollection().BuildServiceProvider());
+        await scoped.ConnectAsync();
+
+        Assert.True(scoped.IsConnected);
+
+        await scoped.DisposeAsync();
+
+        Assert.False(scoped.IsConnected);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_AddTransport_IsThreadSafe()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var tasks = Enumerable.Range(0, 10).Select(i =>
+        {
+            var transport = new MockChannelTransport($"channel-{i}");
+            return context.AddTransportAsync(transport);
+        });
+
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(10, context.Transports.Count);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_MetadataCache_InvalidatesOnAddRemove()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var metadata1 = context.Metadata;
+        Assert.False(metadata1.SupportsAudio);
+
+        var transport = new MockChannelTransport("audio-channel", new ParticipantTransportMetadata
+        {
+            ContactId = "audio-channel",
+            ChannelType = CommunicationChannelType.Phone,
+            RawIdentifier = "audio-channel",
+            SupportsAudio = true,
+            SupportsMessaging = false
+        });
+        await context.AddTransportAsync(transport);
+
+        var metadata2 = context.Metadata;
+        Assert.True(metadata2.SupportsAudio);
+        Assert.NotSame(metadata1, metadata2);
+
+        await context.RemoveTransport("audio-channel");
+
+        var metadata3 = context.Metadata;
+        Assert.False(metadata3.SupportsAudio);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_SendMessage_ReachesAllTransports()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var transport1 = new MockChannelTransport("ch-1");
+        var transport2 = new MockChannelTransport("ch-2");
+
+        await context.AddTransportAsync(transport1);
+        await context.AddTransportAsync(transport2);
+
+        var message = new MessageUpdate
+        {
+            CreatedAt = DateTimeOffset.UtcNow,
+            SenderParticipantId = "sender",
+            Role = "user",
+            Contents = [new TextContent("Hello")]
+        };
+
+        await context.SendMessageAsync(message);
+
+        Assert.Equal(1, transport1.MessageCallCount);
+        Assert.Equal(1, transport2.MessageCallCount);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_SendAudio_DistributesToAudioCapableTransports()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var audioTransport = new MockChannelTransport("audio-ch", new ParticipantTransportMetadata
+        {
+            ContactId = "audio-ch",
+            ChannelType = CommunicationChannelType.Phone,
+            RawIdentifier = "audio-ch",
+            SupportsAudio = true,
+            SupportsMessaging = false
+        });
+        var chatTransport = new MockChannelTransport("chat-ch", new ParticipantTransportMetadata
+        {
+            ContactId = "chat-ch",
+            ChannelType = CommunicationChannelType.ChatAIAgent,
+            RawIdentifier = "chat-ch",
+            SupportsAudio = false,
+            SupportsMessaging = true
+        });
+
+        await context.AddTransportAsync(audioTransport);
+        await context.AddTransportAsync(chatTransport);
+
+        var audioData = new byte[] { 1, 2, 3, 4, 5 };
+        await context.SendAudioAsync(audioData);
+
+        // Allow time for the RawMediaStreamChannel distribution and pump loop
+        await Task.Delay(200);
+
+        Assert.True(audioTransport.AudioCallCount > 0);
+        Assert.Equal(0, chatTransport.AudioCallCount);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_RemoveTransport_IsIdempotent()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var transport = new MockChannelTransport("ch-1");
+        await context.AddTransportAsync(transport);
+
+        var firstRemove = await context.RemoveTransport("ch-1");
+        var secondRemove = await context.RemoveTransport("ch-1");
+
+        Assert.True(firstRemove);
+        Assert.False(secondRemove);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_DisposeAsync_IsIdempotent()
+    {
+        var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        var context = new HubSessionParticipantContext(scope, "participant-1");
+        var disconnectedCount = 0;
+
+        context.OnDisconnected(_ =>
+        {
+            Interlocked.Increment(ref disconnectedCount);
+            return Task.CompletedTask;
+        });
+
+        var transport = new MockChannelTransport("ch-1");
+        await context.AddTransportAsync(transport);
+
+        await context.DisposeAsync();
+        await context.DisposeAsync();
+
+        Assert.Equal(1, disconnectedCount);
+        Assert.False(context.IsConnected);
     }
 }

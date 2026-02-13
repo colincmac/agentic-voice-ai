@@ -21,27 +21,22 @@ public interface IScopedChannelTransport : IChannelTransport
     object? GetService(Type serviceType, object? serviceKey = null);
 }
 
-public sealed class ScopedChannelTransport(IChannelTransport transport, IServiceProvider serviceProvider) : IScopedChannelTransport
+public sealed class ScopedChannelTransport : IScopedChannelTransport
 {
-    private readonly IChannelTransport _innerTransport = transport;
-    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly IChannelTransport _innerTransport;
+    private readonly IServiceProvider _serviceProvider;
     private readonly Func<string, Task>? _onDisposed;
     private ClaimsPrincipal? _user;
+    private int _disposed;
 
-    public ScopedChannelTransport(IChannelTransport transport, IServiceProvider serviceProvider, Func<string, Task>? onDisposed = null) : this(transport, serviceProvider)
+    public ScopedChannelTransport(IChannelTransport transport, IServiceProvider serviceProvider, Func<string, Task>? onDisposed = null)
     {
+        _innerTransport = transport;
+        _serviceProvider = serviceProvider;
         _onDisposed = onDisposed;
-        // Propagate disconnection from inner transport so parent can remove this scoped wrapper
-        _innerTransport.OnDisconnected(async id =>
-        {
-            if (_onDisposed is not null)
-            {
-                await _onDisposed(id);
-            }
-        }); 
     }
 
-    public bool IsConnected => _innerTransport.IsConnected;
+    public bool IsConnected => _disposed == 0 && _innerTransport.IsConnected;
     public string? UserIdentifier { get; set; }
 
     public ClaimsPrincipal User
@@ -68,6 +63,11 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             await _innerTransport.DisposeAsync();
@@ -76,7 +76,7 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
         {
             if (_onDisposed is not null)
             {
-                await _onDisposed(ChannelId);
+                try { await _onDisposed(ChannelId); } catch { }
             }
         }
     }

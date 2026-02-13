@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling.Models;
@@ -9,12 +10,15 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 public sealed class HubSessionParticipantContext : IScopedChannelTransport
 {
     private readonly IServiceScope _participantScope;
-    private readonly HashSet<ScopedChannelTransport> _transports = [];
+    private readonly ConcurrentDictionary<string, TransportBinding> _transports = new();
+    private readonly RawMediaStreamChannel _outboundAudio;
     private Func<string, ReadOnlyMemory<byte>, CancellationToken, Task>? _audioHandler;
     private Func<string, MessageUpdate, CancellationToken, Task>? _messageHandler;
     private Func<string, Task>? _disconnectedHandler;
     private readonly string _participantId;
     private string? _displayName;
+    private ParticipantTransportMetadata? _cachedMetadata;
+    private int _disposed;
     private ClaimsPrincipalServiceProvider ServiceProvider => new(_participantScope.ServiceProvider, GetClaimsPrincipal);
 
     public HubSessionParticipantContext(IServiceScope participantScope, string participantId, string? displayName = null)
@@ -22,81 +26,89 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
         _participantScope = participantScope;
         _participantId = participantId;
         _displayName = displayName;
+        _outboundAudio = new RawMediaStreamChannel(new RawMediaStreamChannelOptions
+        {
+            Capacity = 64 * 1024,
+            ChunkSize = 640,
+        });
     }
 
     public string ChannelId => ParticipantId;
     public string ParticipantId => _participantId;
-    public bool IsConnected { get; private set; } = false;
+    public bool IsConnected { get; private set; }
     public string? DisplayName { get => _displayName; set => _displayName = value; }
     public string? UserIdentifier { get; set; }
-    public IReadOnlyList<IScopedChannelTransport> Transports => [.. _transports];
+    public IReadOnlyList<IScopedChannelTransport> Transports => [.. _transports.Values.Select(b => b.Transport)];
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var transport in _transports)
+        foreach (var binding in _transports.Values)
         {
-            await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            await binding.Transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
         }
         IsConnected = true;
     }
 
-    public ClaimsPrincipal User => Transports.Select(t => t.User).Aggregate((current, next) =>
+    public ClaimsPrincipal User
     {
-        var combined = new ClaimsPrincipal(current);
-        combined.AddIdentities(next.Identities);
-        return combined;
-    });
+        get
+        {
+            var transports = Transports;
+            if (transports.Count == 0)
+            {
+                return new ClaimsPrincipal();
+            }
+
+            return transports.Select(t => t.User).Aggregate((current, next) =>
+            {
+                var combined = new ClaimsPrincipal(current);
+                combined.AddIdentities(next.Identities);
+
+                return combined;
+            });
+        }
+    }
 
     public ParticipantTransportMetadata Metadata
     {
         get
         {
-            var firstTransport = _transports.FirstOrDefault();
-            if (firstTransport is null)
+            var cached = _cachedMetadata;
+            if (cached is not null)
             {
-                return new ParticipantTransportMetadata
-                {
-                    ContactId = ParticipantId,
-                    ChannelType = CommunicationChannelType.Unknown,
-                    RawIdentifier = ParticipantId,
-                    DisplayName = DisplayName,
-                    SupportsAudio = false,
-                    SupportsMessaging = false
-                };
+                return cached;
             }
 
-            return new ParticipantTransportMetadata
-            {
-                ContactId = ParticipantId,
-                ChannelType = firstTransport.Metadata.ChannelType,
-                RawIdentifier = ParticipantId,
-                DisplayName = DisplayName ?? firstTransport.Metadata.DisplayName,
-                SupportsAudio = _transports.Any(t => t.Metadata.SupportsAudio),
-                SupportsMessaging = _transports.Any(t => t.Metadata.SupportsMessaging),
-                SupportsVideo = _transports.Any(t => t.Metadata.SupportsVideo),
-                SupportsScreenShare = _transports.Any(t => t.Metadata.SupportsScreenShare)
-            };
+            cached = BuildMetadata();
+            _cachedMetadata = cached;
+
+            return cached;
         }
     }
 
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)
     {
-        foreach (var transport in _transports)
-        {
-            if (transport.Metadata.SupportsAudio)
-            {
-                _ = transport.SendAudioAsync(audioData, cancellationToken);
-            }
-        }
+        await _outboundAudio.WriteAsync(audioData, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)
     {
-        foreach (var transport in _transports)
+        foreach (var binding in _transports.Values)
         {
-            if (transport.Metadata.SupportsMessaging)
+            if (binding.Transport.Metadata.SupportsMessaging)
             {
-                _ = transport.SendMessageAsync(message, cancellationToken);
+                try
+                {
+                    await binding.Transport.SendMessageAsync(message, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Individual transport failure should not block other transports
+                }
             }
         }
     }
@@ -112,18 +124,24 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
-            foreach (var transport in _transports)
+            foreach (var binding in _transports.Values)
             {
-                await transport.DisposeAsync();
+                try { await binding.DisposeAsync(); } catch { }
             }
             _transports.Clear();
+            await _outboundAudio.DisposeAsync();
             _participantScope.Dispose();
         }
-        catch (Exception) { }
         finally
         {
+            IsConnected = false;
             if (_disconnectedHandler is not null)
             {
                 try { await _disconnectedHandler(ChannelId); } catch { }
@@ -133,38 +151,152 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
 
     private Task OnAudioReceivedCore(string channelId, ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken)
     {
-        if (_audioHandler is null) return Task.CompletedTask;
+        if (_audioHandler is null)
+        {
+            return Task.CompletedTask;
+        }
+
         return _audioHandler(ChannelId, audioData, cancellationToken);
     }
 
     private Task OnMessageReceivedCore(string channelId, MessageUpdate update, CancellationToken cancellationToken)
     {
-        if (_messageHandler is null) return Task.CompletedTask;
+        if (_messageHandler is null)
+        {
+            return Task.CompletedTask;
+        }
+
         return _messageHandler(ChannelId, update, cancellationToken);
     }
 
     private ClaimsPrincipal GetClaimsPrincipal() => User;
 
-    internal async Task AddTransportAsync(IChannelTransport transport, CancellationToken cancellationToken = default)
+    public async Task AddTransportAsync(IChannelTransport transport, CancellationToken cancellationToken = default)
     {
-        var scoped = new ScopedChannelTransport(transport, ServiceProvider, async id => await RemoveTransport(id, alreadyDisposed: true));
+        var scoped = new ScopedChannelTransport(transport, ServiceProvider, id => RemoveTransport(id, alreadyDisposed: true));
         scoped.OnMessageReceived(OnMessageReceivedCore);
         scoped.OnAudioReceived(OnAudioReceivedCore);
-        scoped.OnDisconnected(async id => await RemoveTransport(id));
+        scoped.OnDisconnected(id => RemoveTransport(id));
         await scoped.ConnectAsync(cancellationToken).ConfigureAwait(false);
-        _transports.Add(scoped);
+
+        var subscription = _outboundAudio.Subscribe();
+        var pumpTask = scoped.Metadata.SupportsAudio
+            ? Task.Run(() => PumpAudioToTransportAsync(scoped, subscription, cancellationToken), cancellationToken)
+            : Task.CompletedTask;
+
+        var binding = new TransportBinding(scoped, subscription, pumpTask);
+        _transports[scoped.ChannelId] = binding;
+        InvalidateMetadataCache();
     }
 
-    internal async Task<bool> RemoveTransport(string transportId, bool alreadyDisposed = false)
+    public async Task<bool> RemoveTransport(string transportId, bool alreadyDisposed = false)
     {
-        var toRemove = _transports.FirstOrDefault(t => t.ChannelId == transportId);
-        if (toRemove is null) return false;
-        _transports.Remove(toRemove);
+        if (!_transports.TryRemove(transportId, out var binding))
+        {
+            return false;
+        }
+
+        InvalidateMetadataCache();
+
         if (!alreadyDisposed)
         {
-            await toRemove.DisposeAsync();
+            await binding.DisposeAsync();
         }
+        else
+        {
+            await binding.Subscription.DisposeAsync();
+        }
+
         return true;
+    }
+
+    private void InvalidateMetadataCache() => _cachedMetadata = null;
+
+    private ParticipantTransportMetadata BuildMetadata()
+    {
+        var bindings = _transports.Values.ToArray();
+        if (bindings.Length == 0)
+        {
+            return new ParticipantTransportMetadata
+            {
+                ContactId = ParticipantId,
+                ChannelType = CommunicationChannelType.Unknown,
+                RawIdentifier = ParticipantId,
+                DisplayName = DisplayName,
+                SupportsAudio = false,
+                SupportsMessaging = false
+            };
+        }
+
+        var first = bindings[0].Transport;
+
+        return new ParticipantTransportMetadata
+        {
+            ContactId = ParticipantId,
+            ChannelType = first.Metadata.ChannelType,
+            RawIdentifier = ParticipantId,
+            DisplayName = DisplayName ?? first.Metadata.DisplayName,
+            SupportsAudio = bindings.Any(b => b.Transport.Metadata.SupportsAudio),
+            SupportsMessaging = bindings.Any(b => b.Transport.Metadata.SupportsMessaging),
+            SupportsVideo = bindings.Any(b => b.Transport.Metadata.SupportsVideo),
+            SupportsScreenShare = bindings.Any(b => b.Transport.Metadata.SupportsScreenShare)
+        };
+    }
+
+    private static async Task PumpAudioToTransportAsync(
+        ScopedChannelTransport transport,
+        RawMediaPipeSubscription subscription,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var chunk in subscription.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!transport.IsConnected)
+                {
+                    break;
+                }
+
+                try
+                {
+                    await transport.SendAudioAsync(chunk, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch
+                {
+                    // Individual frame send failure; continue pumping
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown
+        }
+    }
+
+    private sealed record TransportBinding(
+        ScopedChannelTransport Transport,
+        RawMediaPipeSubscription Subscription,
+        Task PumpTask) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            await Subscription.DisposeAsync();
+
+            try
+            {
+                await PumpTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Pump may have already faulted
+            }
+
+            await Transport.DisposeAsync();
+        }
     }
 
     private sealed class ClaimsPrincipalServiceProvider : IServiceProvider
@@ -181,6 +313,7 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
         public object? GetService(Type serviceType)
         {
             if (serviceType == typeof(ClaimsPrincipal)) return _principalAccessor();
+
             return _inner.GetService(serviceType);
         }
     }

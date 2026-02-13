@@ -250,6 +250,7 @@ public sealed partial class FunctionInvokingConversationSession : DelegatingConv
                         }
                         break;
                     }
+
                 case FunctionApprovalResponseContent farc:
                     {
 
@@ -418,11 +419,11 @@ public sealed partial class FunctionInvokingConversationSession : DelegatingConv
                 new(GenAI.AttributeGenAiToolDescription, function.Description),
             ]);
 
-        long startingTimestamp = Stopwatch.GetTimestamp();
+        var startingTimestamp = Stopwatch.GetTimestamp();
 
-        bool enableSensitiveData = activity is { IsAllDataRequested: true } && InnerSession.GetService<OpenTelemetryConversationSession>()?.EnableSensitiveData is true;
-        bool traceLoggingEnabled = _logger.IsEnabled(LogLevel.Trace);
-        bool loggedInvoke = false;
+        var enableSensitiveData = activity is { IsAllDataRequested: true } && InnerSession.GetService<OpenTelemetryConversationSession>()?.EnableSensitiveData is true;
+        var traceLoggingEnabled = _logger.IsEnabled(LogLevel.Trace);
+        var loggedInvoke = false;
         if (enableSensitiveData || traceLoggingEnabled)
         {
             string functionArguments = TelemetryHelpers.AsJson(context.CallContent.Arguments, function.JsonSerializerOptions);

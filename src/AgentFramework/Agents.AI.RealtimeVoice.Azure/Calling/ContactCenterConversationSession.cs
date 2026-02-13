@@ -164,7 +164,18 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         {
             if (pc.ChannelId != sourceId)
             {
-                _ = pc.SendMessageAsync(message, ct);
+                try
+                {
+                    await pc.SendMessageAsync(message, ct).ConfigureAwait(false);
+                }
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch
+                {
+                    // Individual participant failure should not block routing to others
+                }
                 targetCount++;
             }
         }
@@ -180,7 +191,18 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         {
             if (pc.ChannelId != sourceId)
             {
-                _ = pc.SendAudioAsync(frame, ct);
+                try
+                {
+                    await pc.SendAudioAsync(frame, ct).ConfigureAwait(false);
+                }
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch
+                {
+                    // Individual participant failure should not block routing to others
+                }
                 targetCount++;
             }
         }

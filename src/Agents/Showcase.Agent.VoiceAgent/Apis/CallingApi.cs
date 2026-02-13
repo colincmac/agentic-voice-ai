@@ -70,9 +70,8 @@ public static class CallingApi
                         EnableDtmfTones = true,
                         TransportUri = websocketUri,
                         StartMediaStreaming = true,
-                        AudioFormat = AudioFormat.Pcm24KMono
+                        AudioFormat = services.Options.Value.Acs.audioFormat
                     };
-
                     var options = new AnswerCallOptions(acsIncomingCallEventData.IncomingCallContext, callbackUri)
                     {
                         MediaStreamingOptions = mediaStreamingOptions,
