@@ -27,6 +27,7 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly Func<string, Task>? _onDisposed;
     private ClaimsPrincipal? _user;
+    private bool _isDisposed;
 
     public ScopedChannelTransport(IChannelTransport transport, IServiceProvider serviceProvider, Func<string, Task>? onDisposed = null) : this(transport, serviceProvider)
     {
@@ -34,7 +35,7 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
         // Propagate disconnection from inner transport so parent can remove this scoped wrapper
         _innerTransport.OnDisconnected(async id =>
         {
-            if (_onDisposed is not null)
+            if (!_isDisposed && _onDisposed is not null)
             {
                 await _onDisposed(id);
             }
@@ -68,6 +69,13 @@ public sealed class ScopedChannelTransport(IChannelTransport transport, IService
 
     public async ValueTask DisposeAsync()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+
         try
         {
             await _innerTransport.DisposeAsync();

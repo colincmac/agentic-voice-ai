@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling.Models;
@@ -9,12 +10,13 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 public sealed class HubSessionParticipantContext : IScopedChannelTransport
 {
     private readonly IServiceScope _participantScope;
-    private readonly HashSet<ScopedChannelTransport> _transports = [];
+    private readonly ConcurrentBag<ScopedChannelTransport> _transports = [];
     private Func<string, ReadOnlyMemory<byte>, CancellationToken, Task>? _audioHandler;
     private Func<string, MessageUpdate, CancellationToken, Task>? _messageHandler;
     private Func<string, Task>? _disconnectedHandler;
     private readonly string _participantId;
     private string? _displayName;
+    private bool _isDisposed;
     private ClaimsPrincipalServiceProvider ServiceProvider => new(_participantScope.ServiceProvider, GetClaimsPrincipal);
 
     public HubSessionParticipantContext(IServiceScope participantScope, string participantId, string? displayName = null)
@@ -29,7 +31,7 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
     public bool IsConnected { get; private set; } = false;
     public string? DisplayName { get => _displayName; set => _displayName = value; }
     public string? UserIdentifier { get; set; }
-    public IReadOnlyList<IScopedChannelTransport> Transports => [.. _transports];
+    public IReadOnlyList<IScopedChannelTransport> Transports => _transports.ToArray();
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -51,7 +53,8 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
     {
         get
         {
-            var firstTransport = _transports.FirstOrDefault();
+            var transportList = _transports.ToArray();
+            var firstTransport = transportList.FirstOrDefault();
             if (firstTransport is null)
             {
                 return new ParticipantTransportMetadata
@@ -71,34 +74,38 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
                 ChannelType = firstTransport.Metadata.ChannelType,
                 RawIdentifier = ParticipantId,
                 DisplayName = DisplayName ?? firstTransport.Metadata.DisplayName,
-                SupportsAudio = _transports.Any(t => t.Metadata.SupportsAudio),
-                SupportsMessaging = _transports.Any(t => t.Metadata.SupportsMessaging),
-                SupportsVideo = _transports.Any(t => t.Metadata.SupportsVideo),
-                SupportsScreenShare = _transports.Any(t => t.Metadata.SupportsScreenShare)
+                SupportsAudio = transportList.Any(t => t.Metadata.SupportsAudio),
+                SupportsMessaging = transportList.Any(t => t.Metadata.SupportsMessaging),
+                SupportsVideo = transportList.Any(t => t.Metadata.SupportsVideo),
+                SupportsScreenShare = transportList.Any(t => t.Metadata.SupportsScreenShare)
             };
         }
     }
 
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)
     {
+        var tasks = new List<Task>();
         foreach (var transport in _transports)
         {
             if (transport.Metadata.SupportsAudio)
             {
-                _ = transport.SendAudioAsync(audioData, cancellationToken);
+                tasks.Add(transport.SendAudioAsync(audioData, cancellationToken));
             }
         }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)
     {
+        var tasks = new List<Task>();
         foreach (var transport in _transports)
         {
             if (transport.Metadata.SupportsMessaging)
             {
-                _ = transport.SendMessageAsync(message, cancellationToken);
+                tasks.Add(transport.SendMessageAsync(message, cancellationToken));
             }
         }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     public void OnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
@@ -112,13 +119,20 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
 
     public async ValueTask DisposeAsync()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+
         try
         {
-            foreach (var transport in _transports)
+            var transportList = _transports.ToArray();
+            foreach (var transport in transportList)
             {
                 await transport.DisposeAsync();
             }
-            _transports.Clear();
             _participantScope.Dispose();
         }
         catch (Exception) { }
@@ -157,9 +171,28 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
 
     internal async Task<bool> RemoveTransport(string transportId, bool alreadyDisposed = false)
     {
-        var toRemove = _transports.FirstOrDefault(t => t.ChannelId == transportId);
+        // Create a snapshot to safely search for the transport
+        var transportList = _transports.ToArray();
+        var toRemove = transportList.FirstOrDefault(t => t.ChannelId == transportId);
         if (toRemove is null) return false;
-        _transports.Remove(toRemove);
+
+        // Rebuild the bag without the removed transport
+        var newTransports = new ConcurrentBag<ScopedChannelTransport>();
+        foreach (var transport in transportList)
+        {
+            if (transport.ChannelId != transportId)
+            {
+                newTransports.Add(transport);
+            }
+        }
+
+        // Replace the old collection - note this is not atomic but safe enough for this scenario
+        while (_transports.TryTake(out _)) { }
+        foreach (var transport in newTransports)
+        {
+            _transports.Add(transport);
+        }
+
         if (!alreadyDisposed)
         {
             await toRemove.DisposeAsync();

@@ -159,30 +159,34 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
     private async Task OnMessageAsync(string sourceId, MessageUpdate message, CancellationToken ct)
     {
         var start = Stopwatch.GetTimestamp();
+        var tasks = new List<Task>();
         var targetCount = 0;
         foreach (var pc in _participantContexts.Values)
         {
             if (pc.ChannelId != sourceId)
             {
-                _ = pc.SendMessageAsync(message, ct);
+                tasks.Add(pc.SendMessageAsync(message, ct));
                 targetCount++;
             }
         }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _messageLatencyHist.Record(elapsed, new KeyValuePair<string, object?>(SessionTargetChannelCountAttributeKey, targetCount));
     }
     private async Task OnAudioAsync(string sourceId, ReadOnlyMemory<byte> frame, CancellationToken ct)
     {
         var start = Stopwatch.GetTimestamp();
+        var tasks = new List<Task>();
         var targetCount = 0;
         foreach (var pc in _participantContexts.Values)
         {
             if (pc.ChannelId != sourceId)
             {
-                _ = pc.SendAudioAsync(frame, ct);
+                tasks.Add(pc.SendAudioAsync(frame, ct));
                 targetCount++;
             }
         }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _audioPacketsCounter.Add(targetCount, SessionId, sourceId);
         _audioBytesCounter.Add(frame.Length * targetCount, SessionId, sourceId);
