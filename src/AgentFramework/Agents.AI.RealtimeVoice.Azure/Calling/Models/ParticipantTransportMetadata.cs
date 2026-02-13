@@ -101,6 +101,13 @@ public class ParticipantTransportMetadata
     public bool SupportsScreenShare { get; init; }
 
     /// <summary>
+    /// The role this channel plays in the session routing topology.
+    /// Determines what content gets routed to/from this channel.
+    /// Flags are combinable — a channel can serve multiple roles simultaneously.
+    /// </summary>
+    public ChannelRole Role { get; init; } = ChannelRole.None;
+
+    /// <summary>
     /// Whether this contact is currently muted.
     /// </summary>
     public bool IsMuted { get; set; }

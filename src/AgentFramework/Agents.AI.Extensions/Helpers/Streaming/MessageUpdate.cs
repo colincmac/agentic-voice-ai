@@ -21,6 +21,12 @@ public class MessageUpdate
 
     public string? SenderParticipantId { get; set; }
 
+    /// <summary>
+    /// When set, the session router delivers this message only to the
+    /// specified participant instead of broadcasting to all participants.
+    /// </summary>
+    public string? TargetParticipantId { get; set; }
+
     public string? Role { get; set; }
     public string? ResponseId { get; set; }
     public string? MessageId { get; set; }

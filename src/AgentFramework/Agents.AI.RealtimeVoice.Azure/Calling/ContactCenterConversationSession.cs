@@ -28,7 +28,8 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
     private readonly SemaphoreSlim _initSemaphore = new(1, 1);
     private readonly SemaphoreSlim _transferLock = new(1, 1);
 
-    private readonly HubSessionContext _hubSessionContext; 
+    private readonly HubSessionContext _hubSessionContext;
+    private readonly SessionContextBus _contextBus = new();
 
     private readonly ConcurrentDictionary<string, HubSessionParticipantContext> _participantContexts = new();
     private TransferMetadata? _pendingTransfer;
@@ -49,6 +50,17 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
 
     public IReadOnlyDictionary<string, HubSessionParticipantContext> ParticipantContexts => _participantContexts;
     public HubSessionContext HubSessionContext => _hubSessionContext;
+
+    /// <summary>
+    /// Session-scoped pub/sub for structured context events.
+    /// All channels publish context here; AI agents subscribe to build
+    /// unified awareness across all interaction modalities.
+    /// <para>
+    /// Audio frames never flow through this bus — they stay on their dedicated
+    /// <see cref="Extensions.Helpers.Streaming.RawMediaStreamChannel"/> path.
+    /// </para>
+    /// </summary>
+    public SessionContextBus ContextBus => _contextBus;
 
     public ContactCenterConversationSession(
         IServiceScope sessionScope,
@@ -88,6 +100,15 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
             var participantContext = new HubSessionParticipantContext(participantScope, id, displayName);
             HookInboundHandlers(participantContext);
             _participantsGauge.Add(1);
+
+            _contextBus.PublishAsync(new SessionContextEvent
+            {
+                EventId = $"join_{id}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                Kind = ContextEventKind.ParticipantJoined,
+                SourceParticipantId = id,
+                Payload = new { ParticipantId = id, DisplayName = displayName }
+            });
+
             return participantContext;
         }
 
@@ -103,6 +124,15 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         }
         await context.DisposeAsync();
         _participantsGauge.Add(-1);
+
+        await _contextBus.PublishAsync(new SessionContextEvent
+        {
+            EventId = $"leave_{participantId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+            Kind = ContextEventKind.ParticipantLeft,
+            SourceParticipantId = participantId,
+            Payload = new { ParticipantId = participantId }
+        });
+
         _logger.LogInformation("Participant {ParticipantId} removed.", participantId);
         return true;
     }
@@ -160,27 +190,53 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
     {
         var start = Stopwatch.GetTimestamp();
         var targetCount = 0;
+
+        // Route messages to participants first (latency-sensitive path)
         foreach (var pc in _participantContexts.Values)
         {
-            if (pc.ChannelId != sourceId)
+            if (pc.ChannelId == sourceId)
             {
-                try
-                {
-                    await pc.SendMessageAsync(message, ct).ConfigureAwait(false);
-                }
-                catch (Exception) when (ct.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch
-                {
-                    // Individual participant failure should not block routing to others
-                }
-                targetCount++;
+                continue;
             }
+
+            // Directed messaging: when TargetParticipantId is set, skip non-matching participants
+            if (message.TargetParticipantId is not null && pc.ChannelId != message.TargetParticipantId)
+            {
+                continue;
+            }
+
+            if (!pc.Metadata.SupportsMessaging)
+            {
+                continue;
+            }
+
+            try
+            {
+                await pc.SendMessageAsync(message, ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch
+            {
+                // Individual participant failure should not block routing to others
+            }
+            targetCount++;
         }
+
         var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         _messageLatencyHist.Record(elapsed, new KeyValuePair<string, object?>(SessionTargetChannelCountAttributeKey, targetCount));
+
+        // Publish to context bus AFTER routing completes — non-blocking TryWrite, zero impact on delivery
+        await _contextBus.PublishAsync(new SessionContextEvent
+        {
+            EventId = message.MessageId ?? Guid.NewGuid().ToString("N"),
+            Kind = ContextEventKind.ChatMessage,
+            SourceParticipantId = sourceId,
+            TargetParticipantId = message.TargetParticipantId,
+            Payload = message
+        }, ct).ConfigureAwait(false);
     }
 
     private async Task OnAudioAsync(string sourceId, ReadOnlyMemory<byte> frame, CancellationToken ct)
@@ -274,6 +330,7 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         using var activity = _activitySource.StartActivity("TransportSession.Dispose");
         activity?.SetTag(SessionActivityAttributeKey, SessionId);
         await CloseAsync("Disposing");
+        await _contextBus.DisposeAsync();
         await _sessionCts.CancelAsync();
 
         _initSemaphore.Dispose();

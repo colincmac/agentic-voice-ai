@@ -236,6 +236,7 @@ public sealed class HubSessionParticipantContext : IScopedChannelTransport
             ChannelType = first.Metadata.ChannelType,
             RawIdentifier = ParticipantId,
             DisplayName = DisplayName ?? first.Metadata.DisplayName,
+            Role = bindings.Aggregate(ChannelRole.None, (acc, b) => acc | b.Transport.Metadata.Role),
             SupportsAudio = bindings.Any(b => b.Transport.Metadata.SupportsAudio),
             SupportsMessaging = bindings.Any(b => b.Transport.Metadata.SupportsMessaging),
             SupportsVideo = bindings.Any(b => b.Transport.Metadata.SupportsVideo),

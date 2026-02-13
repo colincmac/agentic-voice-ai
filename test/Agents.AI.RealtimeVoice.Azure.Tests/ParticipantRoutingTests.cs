@@ -193,24 +193,25 @@ public class ParticipantRoutingTests
     [Fact]
     public void ParticipantTransportMetadata_RequiredProperties()
     {
-        // Arrange & Act
         var metadata = new ParticipantTransportMetadata
         {
             ContactId = "contact-123",
             ChannelType = CommunicationChannelType.VoiceAIAgent,
             RawIdentifier = "agent-456",
             DisplayName = "AI Agent",
+            Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true,
             SupportsVideo = false,
             SupportsScreenShare = false
         };
 
-        // Assert
         Assert.Equal("contact-123", metadata.ContactId);
         Assert.Equal(CommunicationChannelType.VoiceAIAgent, metadata.ChannelType);
         Assert.Equal("agent-456", metadata.RawIdentifier);
         Assert.Equal("AI Agent", metadata.DisplayName);
+        Assert.True(metadata.Role.HasFlag(ChannelRole.PrimaryVoice));
+        Assert.True(metadata.Role.HasFlag(ChannelRole.InteractiveMessaging));
         Assert.True(metadata.SupportsAudio);
         Assert.True(metadata.SupportsMessaging);
         Assert.False(metadata.SupportsVideo);
@@ -447,5 +448,40 @@ public class ParticipantRoutingTests
 
         Assert.Equal(1, disconnectedCount);
         Assert.False(context.IsConnected);
+    }
+
+    [Fact]
+    public async Task HubSessionParticipantContext_Metadata_AggregatesChannelRoles()
+    {
+        await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
+        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+
+        var voiceTransport = new MockChannelTransport("voice-ch", new ParticipantTransportMetadata
+        {
+            ContactId = "voice-ch",
+            ChannelType = CommunicationChannelType.Phone,
+            RawIdentifier = "voice-ch",
+            Role = ChannelRole.PrimaryVoice,
+            SupportsAudio = true,
+            SupportsMessaging = false
+        });
+        var chatTransport = new MockChannelTransport("chat-ch", new ParticipantTransportMetadata
+        {
+            ContactId = "chat-ch",
+            ChannelType = CommunicationChannelType.ChatAIAgent,
+            RawIdentifier = "chat-ch",
+            Role = ChannelRole.InteractiveMessaging | ChannelRole.ControlPlane,
+            SupportsAudio = false,
+            SupportsMessaging = true
+        });
+
+        await context.AddTransportAsync(voiceTransport);
+        await context.AddTransportAsync(chatTransport);
+
+        var metadata = context.Metadata;
+        Assert.True(metadata.Role.HasFlag(ChannelRole.PrimaryVoice));
+        Assert.True(metadata.Role.HasFlag(ChannelRole.InteractiveMessaging));
+        Assert.True(metadata.Role.HasFlag(ChannelRole.ControlPlane));
+        Assert.False(metadata.Role.HasFlag(ChannelRole.DataStream));
     }
 }

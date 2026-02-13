@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
@@ -162,6 +163,74 @@ public static class ContactCenterConversationSessionExtensions
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             return new AcsWebsocketTransport(webSocket, callInfo.Value, cancellationToken, loggerFactory.CreateLogger<AcsWebsocketTransport>());
         });
+        return participant;
+    }
+
+    /// <summary>
+    /// Creates a filtered subscription to the session's <see cref="SessionContextBus"/>.
+    /// Subscribers receive structured context events (transcripts, chat, CRM data,
+    /// modality insights, approval decisions) without interfering with real-time audio routing.
+    /// </summary>
+    /// <param name="session">The conversation session.</param>
+    /// <param name="filter">
+    /// Optional predicate to filter events. Pass null to receive all events.
+    /// Example: <c>e => e.Kind is ContextEventKind.ModalityInsight</c>
+    /// </param>
+    /// <returns>A <see cref="ContextSubscription"/> that can be read as an async stream.</returns>
+    public static ContextSubscription SubscribeToContext(
+        this ContactCenterConversationSession session,
+        Func<SessionContextEvent, bool>? filter = null)
+    {
+        return session.ContextBus.Subscribe(filter);
+    }
+
+    /// <summary>
+    /// Publishes a context event to the session's <see cref="SessionContextBus"/>.
+    /// This is non-blocking and does not affect real-time audio routing.
+    /// </summary>
+    public static ValueTask PublishContextAsync(
+        this ContactCenterConversationSession session,
+        SessionContextEvent contextEvent,
+        CancellationToken cancellationToken = default)
+    {
+        return session.ContextBus.PublishAsync(contextEvent, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a modality processor (e.g., screen analysis AI, document analysis AI) that
+    /// subscribes to a <see cref="RawMediaStreamChannel"/> data stream and publishes
+    /// <see cref="ContextEventKind.ModalityInsight"/> events to the session's context bus.
+    /// <para>
+    /// The processor runs as a background participant. The primary voice AI agent
+    /// can subscribe to the context bus to receive these insights as additional context.
+    /// </para>
+    /// </summary>
+    /// <param name="session">The conversation session.</param>
+    /// <param name="participantId">Unique participant identifier for the processor.</param>
+    /// <param name="processor">The modality processor implementation.</param>
+    /// <param name="sourceDataChannel">
+    /// The <see cref="RawMediaStreamChannel"/> producing the data stream to analyze
+    /// (e.g., screen share frames, document pages).
+    /// </param>
+    /// <param name="displayName">Optional display name.</param>
+    /// <param name="cancellationToken">Token to observe for cancellation.</param>
+    public static async Task<HubSessionParticipantContext> AddModalityProcessorAsync(
+        this ContactCenterConversationSession session,
+        string participantId,
+        IModalityProcessor processor,
+        RawMediaStreamChannel sourceDataChannel,
+        string? displayName = null,
+        CancellationToken cancellationToken = default)
+    {
+        var participant = session.GetOrAddParticipant(participantId, displayName ?? processor.Name);
+        var subscription = sourceDataChannel.Subscribe();
+
+        await processor.StartAsync(
+            subscription,
+            session.ContextBus,
+            session.SessionId,
+            cancellationToken);
+
         return participant;
     }
 }

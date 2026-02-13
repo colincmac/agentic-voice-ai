@@ -51,6 +51,7 @@ public sealed class ConversationSignalRHub : Hub
             ChannelType = CommunicationChannelType.ChatAIAgent,
             RawIdentifier = channelId,
             DisplayName = participantId,
+            Role = ChannelRole.InteractiveMessaging | ChannelRole.ControlPlane,
             SupportsAudio = false,
             SupportsMessaging = true
         };

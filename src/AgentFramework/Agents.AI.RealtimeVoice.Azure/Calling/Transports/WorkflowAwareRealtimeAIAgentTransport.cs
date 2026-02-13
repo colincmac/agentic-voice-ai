@@ -75,6 +75,7 @@ public sealed class WorkflowAwareRealtimeAIAgentTransport : IChannelTransport
             ChannelType = CommunicationChannelType.VoiceAIAgent,
             RawIdentifier = existingThread.ActiveSessionId ?? agent.Id,
             DisplayName = agent.DisplayName,
+            Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true
         };

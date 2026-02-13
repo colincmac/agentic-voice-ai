@@ -48,6 +48,7 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport
             ChannelType = CommunicationChannelType.VoiceAIAgent,
             RawIdentifier = existingThread.ActiveSessionId ?? baseAgent.Id,
             DisplayName = baseAgent.DisplayName,
+            Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true
         };

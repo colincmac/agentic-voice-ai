@@ -42,6 +42,7 @@ public sealed class AcsWebsocketTransport : IChannelTransport
             ChannelType = CommunicationChannelType.Phone,
             RawIdentifier = _call.Source.RawId,
             DisplayName = _call.SourceDisplayName,
+            Role = ChannelRole.PrimaryVoice,
             SupportsAudio = true,
             SupportsMessaging = true,
             SupportsVideo = false,
