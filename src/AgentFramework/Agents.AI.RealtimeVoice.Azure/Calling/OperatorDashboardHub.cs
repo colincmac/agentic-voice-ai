@@ -2,12 +2,10 @@ using System.Buffers;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Text;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Connections.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Mvc;
 

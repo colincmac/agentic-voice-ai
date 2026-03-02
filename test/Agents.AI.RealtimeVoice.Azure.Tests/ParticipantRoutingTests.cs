@@ -1,7 +1,7 @@
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
+using Agents.AI.RealtimeVoice.Azure.Transports;
+using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -84,7 +84,7 @@ public class ParticipantRoutingTests
         string? receivedChannelId = null;
         ReadOnlyMemory<byte> receivedAudio = default;
 
-        transport.OnAudioReceived((channelId, audio, ct) =>
+        transport.SetOnAudioReceived((channelId, audio, ct) =>
         {
             receivedChannelId = channelId;
             receivedAudio = audio;
@@ -109,7 +109,7 @@ public class ParticipantRoutingTests
         string? receivedChannelId = null;
         MessageUpdate? receivedMessage = null;
 
-        transport.OnMessageReceived((channelId, message, ct) =>
+        transport.SetOnMessageReceived((channelId, message, ct) =>
         {
             receivedChannelId = channelId;
             receivedMessage = message;
@@ -154,7 +154,7 @@ public class ParticipantRoutingTests
         var transport = new MockChannelTransport("test-channel");
         bool disconnectedCalled = false;
 
-        transport.OnDisconnected(_ =>
+        transport.SetOnDisconnected(_ =>
         {
             disconnectedCalled = true;
             return Task.CompletedTask;
@@ -176,7 +176,7 @@ public class ParticipantRoutingTests
         var transport = new MockChannelTransport("test-channel");
         int disconnectedCount = 0;
 
-        transport.OnDisconnected(_ =>
+        transport.SetOnDisconnected(_ =>
         {
             disconnectedCount++;
             return Task.CompletedTask;
@@ -307,7 +307,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_AddTransport_IsThreadSafe()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var tasks = Enumerable.Range(0, 10).Select(i =>
         {
@@ -324,7 +324,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_MetadataCache_InvalidatesOnAddRemove()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var metadata1 = context.Metadata;
         Assert.False(metadata1.SupportsAudio);
@@ -353,7 +353,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_SendMessage_ReachesAllTransports()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var transport1 = new MockChannelTransport("ch-1");
         var transport2 = new MockChannelTransport("ch-2");
@@ -379,7 +379,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_SendAudio_DistributesToAudioCapableTransports()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var audioTransport = new MockChannelTransport("audio-ch", new ParticipantTransportMetadata
         {
@@ -415,7 +415,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_RemoveTransport_IsIdempotent()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var transport = new MockChannelTransport("ch-1");
         await context.AddTransportAsync(transport);
@@ -431,7 +431,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_DisposeAsync_IsIdempotent()
     {
         var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        var context = new HubSessionParticipantContext(scope, "participant-1");
+        var context = new HubSessionParticipant(scope, "participant-1");
         var disconnectedCount = 0;
 
         context.OnDisconnected(_ =>
@@ -454,7 +454,7 @@ public class ParticipantRoutingTests
     public async Task HubSessionParticipantContext_Metadata_AggregatesChannelRoles()
     {
         await using var scope = new ServiceCollection().BuildServiceProvider().CreateAsyncScope();
-        await using var context = new HubSessionParticipantContext(scope, "participant-1");
+        await using var context = new HubSessionParticipant(scope, "participant-1");
 
         var voiceTransport = new MockChannelTransport("voice-ch", new ParticipantTransportMetadata
         {

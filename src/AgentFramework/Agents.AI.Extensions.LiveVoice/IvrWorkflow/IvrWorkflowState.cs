@@ -15,6 +15,7 @@ public sealed class IvrWorkflowState
     private readonly List<string> _completedSteps = [];
     private readonly List<ChatMessage> _transcript = [];
     private readonly List<RealtimeConversationUtterance> _conversationHistory = [];
+
     private readonly Lock _lock = new();
     private string? _workflowId;
     /// <summary>

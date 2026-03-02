@@ -1,6 +1,6 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
+using Agents.AI.RealtimeVoice.Azure.Models;
+using Agents.AI.RealtimeVoice.Azure.Transports;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests;
 

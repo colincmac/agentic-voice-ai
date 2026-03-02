@@ -74,6 +74,16 @@ public sealed class RawMediaStreamChannel : IAsyncDisposable
     public long BufferedBytes => _totalBytesWritten - _totalBytesDistributed;
 
     /// <summary>
+    /// Gets the cumulative number of bytes written into this channel since creation.
+    /// </summary>
+    public long TotalBytesWritten => Interlocked.Read(ref _totalBytesWritten);
+
+    /// <summary>
+    /// Gets the cumulative number of bytes distributed to consumers since creation.
+    /// </summary>
+    public long TotalBytesDistributed => Interlocked.Read(ref _totalBytesDistributed);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="RawMediaStreamChannel"/> class.
     /// </summary>
     /// <param name="capacity">Maximum number of bytes to buffer before pausing writes.</param>

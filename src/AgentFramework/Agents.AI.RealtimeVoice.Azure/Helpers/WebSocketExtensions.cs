@@ -1,6 +1,6 @@
 using System.Net.WebSockets;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
+using Agents.AI.RealtimeVoice.Azure.Transports;
 using Microsoft.Extensions.Logging;
 
 namespace Agents.AI.RealtimeVoice.Azure.Helpers;

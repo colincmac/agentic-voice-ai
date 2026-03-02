@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Agents.AI.RealtimeVoice.Azure.Media;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
@@ -111,51 +112,122 @@ public static class CallAutomationEndpointBuilderExtensions
         }).WithName("Call Automation - HandleCallEvents");
 
         routeGroup.MapGet("/automation/media/wss/{serverCallId}", async (
-            HttpContext httpContext,
-            [AsParameters] CallingServices services,
-            [FromRoute] string serverCallId,
-            [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId
-            ) =>
+     HttpContext httpContext,
+     [AsParameters] CallingServices services,
+     [FromRoute] string serverCallId,
+     [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId
+     ) =>
         {
             if (!httpContext.WebSockets.IsWebSocketRequest)
             {
                 httpContext.Response.StatusCode = 400;
                 return;
             }
+
             var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
-
             var logger = loggerFactory.CreateLogger("CallAutomation.WebSocket");
+            var webSocketManager = httpContext.RequestServices.GetRequiredService<WebSocketResourceManager>();
 
-            WebSocket? webSocket = null;
-            ContactCenterConversationSession? session = null;
-            HubSessionParticipantContext? acsChannel = null;
-            string? callerPhoneNumber = null;
+            var sessionId = $"call_{serverCallId}";
+            var session = services.ConversationHub.GetOrCreateSession(sessionId);
+            var connectionTime = DateTime.UtcNow;
+
+            // CancellationTokenSource cancelled when this connection is superseded
+            using var supersededCts = new CancellationTokenSource();
+
+            var registrationResult = await webSocketManager.RegisterAsync(
+                serverCallId,
+                connectionTime,
+                acceptWebSocketAsync: () => httpContext.WebSockets.AcceptWebSocketAsync(),
+                onSuperseded: async supersededSocket =>
+                {
+                    logger.LogInformation(
+                        "WebSocket for ServerCallId {ServerCallId} is being superseded",
+                        serverCallId);
+
+                    // Signal the old processing loop to stop
+                    await supersededCts.CancelAsync();
+
+                    // Gracefully close the old socket
+                    if (supersededSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                    {
+                        try
+                        {
+                            await supersededSocket.CloseAsync(
+                                WebSocketCloseStatus.NormalClosure,
+                                "Connection superseded by a newer one",
+                                CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Error closing superseded WebSocket for {ServerCallId}", serverCallId);
+                        }
+                    }
+                });
+
+            if (!registrationResult.IsAccepted)
+            {
+                logger.LogInformation(
+                    "WebSocket registration rejected for ServerCallId: {ServerCallId} (older connection)",
+                    serverCallId);
+
+                if (!httpContext.Response.HasStarted)
+                {
+                    httpContext.Response.StatusCode = StatusCodes.Status409Conflict;
+                }
+                return;
+            }
+
+            WebSocket webSocket = registrationResult.WebSocket!;
+            string? previousChannelId = null;
 
             try
             {
-                // Accept the WebSocket connection
-                webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
-                logger.LogInformation("WebSocket connection established for ServerCallId: {ServerCallId}", serverCallId);
+                // If this superseded an old connection, replace the transport
+                HubSessionParticipant acsChannel;
+                if (registrationResult.WasSuperseded)
+                {
+                    logger.LogInformation(
+                        "Replacing ACS transport for ServerCallId: {ServerCallId}",
+                        serverCallId);
 
-                // Get or create the conversation session
-                var sessionId = $"call_{serverCallId}";
-                session = services.ConversationHub.GetOrCreateSession(sessionId);
+                    acsChannel = await session.ReplaceAcsWebsocketConnectionAsync(
+                        webSocket,
+                        callConnectionId,
+                        previousTransportChannelId: previousChannelId,
+                        cancellationToken: httpContext.RequestAborted);
+                }
+                else
+                {
+                    acsChannel = await session.AddAcsWebsocketConnectionAsync(
+                        webSocket,
+                        callConnectionId,
+                        httpContext.RequestAborted);
+                }
 
-                // Get call information
-                acsChannel = await session.AddAcsWebsocketConnectionAsync(webSocket, callConnectionId, httpContext.RequestAborted);
-
-                // Check if we need to create or reuse an AI agent
+                // Ensure an AI agent is attached
+                var callerPhoneNumber = acsChannel.Metadata.ContactId;
                 var agentParticipantId = $"agent_for_{callerPhoneNumber}";
                 await session.AddRealtimeAIAgentAsync(agentParticipantId);
 
-                // Keep the WebSocket connection alive until it's closed
-                await KeepWebSocketAliveAsync(webSocket, session, acsChannel, logger, httpContext.RequestAborted);
+                // Keep alive until closed or superseded
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    httpContext.RequestAborted,
+                    supersededCts.Token);
+
+                await KeepWebSocketAliveAsync(webSocket, session, acsChannel, logger, linkedCts.Token);
+            }
+            catch (OperationCanceledException) when (supersededCts.IsCancellationRequested)
+            {
+                logger.LogInformation(
+                    "WebSocket for ServerCallId {ServerCallId} was superseded; exiting gracefully",
+                    serverCallId);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error in WebSocket handler for ServerCallId: {ServerCallId}", serverCallId);
 
-                if (webSocket?.State == WebSocketState.Open)
+                if (webSocket.State is WebSocketState.Open)
                 {
                     await webSocket.CloseAsync(
                         WebSocketCloseStatus.InternalServerError,
@@ -163,12 +235,16 @@ public static class CallAutomationEndpointBuilderExtensions
                         CancellationToken.None);
                 }
             }
+            finally
+            {
+                await webSocketManager.UnregisterAsync(serverCallId, webSocket);
+            }
         }).WithName("Call Automation - Media WebSocket");
     }
     private static async Task KeepWebSocketAliveAsync(
         WebSocket webSocket,
         ContactCenterConversationSession session,
-        HubSessionParticipantContext acsChannel,
+        HubSessionParticipant acsChannel,
         ILogger logger,
         CancellationToken cancellationToken)
     {

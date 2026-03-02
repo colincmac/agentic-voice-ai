@@ -1,11 +1,10 @@
-using System;
 using System.Buffers;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
+using Agents.AI.RealtimeVoice.Azure.Media.Audio;
+using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.RealtimeVoice.Azure.Models;
+using Agents.AI.RealtimeVoice.Azure.Transports;
 using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -13,7 +12,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Showcase.ConsolePlayground;
 
-public class TestCallParticipant : IChannelTransport
+public class TestCallParticipant : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
 {
     private readonly ILogger<TestCallParticipant>? _logger;
     private SpeakerOutput? _speakerOutput;
@@ -95,9 +94,9 @@ public class TestCallParticipant : IChannelTransport
 
     public Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public void OnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) { }
-    public void OnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) { }
-    public void OnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
+    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) { }
+    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) { }
+    public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
     public Task ConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public async ValueTask DisposeAsync()
     {

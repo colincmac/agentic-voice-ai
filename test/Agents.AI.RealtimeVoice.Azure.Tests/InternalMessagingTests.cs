@@ -1,5 +1,5 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 using Microsoft.Extensions.AI;
 
@@ -133,7 +133,7 @@ public class InternalMessagingTests
         var transport = new MockChannelTransport("test-channel");
         var receivedMessages = new List<MessageUpdate>();
 
-        transport.OnMessageReceived((channelId, message, ct) =>
+        transport.SetOnMessageReceived((channelId, message, ct) =>
         {
             receivedMessages.Add(message);
             return Task.CompletedTask;

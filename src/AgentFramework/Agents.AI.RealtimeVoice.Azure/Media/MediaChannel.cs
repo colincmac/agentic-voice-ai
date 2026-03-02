@@ -14,18 +14,24 @@ public sealed class MediaChannel : IAsyncDisposable
     private readonly RawMediaStreamChannel _inboundMediaStreamChannel;
     private readonly RawMediaStreamChannel _outboundMediaStreamChannel;
 
-    public MediaChannel(string connectionId, string mediaStreamId, string mediaType, RawMediaStreamChannelOptions? streamOptions = null)
+    public MediaChannel(string connectionId, string mediaStreamId, string mediaType, RawMediaStreamChannelOptions? inboundStreamOptions = null, RawMediaStreamChannelOptions? outboundStreamOptions = null)
     {
         ConnectionId = connectionId;
         MediaStreamId = mediaStreamId;
         MediaType = mediaType;
-        var channelStreamOptions = streamOptions ?? new RawMediaStreamChannelOptions()
+        var inboundOptions = inboundStreamOptions ?? new RawMediaStreamChannelOptions()
         {
             Capacity = DEFAULT_CAPACITY,
             ChunkSize = DEFAULT_CHUNK_SIZE
         };
-        _inboundMediaStreamChannel = new RawMediaStreamChannel(channelStreamOptions);
-        _outboundMediaStreamChannel = new RawMediaStreamChannel(channelStreamOptions);
+        _inboundMediaStreamChannel = new RawMediaStreamChannel(inboundOptions);
+
+        var outboundOptions = outboundStreamOptions ?? new RawMediaStreamChannelOptions()
+        {
+            Capacity = DEFAULT_CAPACITY,
+            ChunkSize = DEFAULT_CHUNK_SIZE
+        };
+        _outboundMediaStreamChannel = new RawMediaStreamChannel(outboundOptions);
     }
     
     public string ConnectionId { get; }

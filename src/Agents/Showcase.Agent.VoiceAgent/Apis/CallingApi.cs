@@ -1,19 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text.Json;
-using Agents.AI.Extensions;
-using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
-using Microsoft.Agents.AI;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 
 namespace Showcase.Agent.VoiceAgent.Apis;
@@ -118,7 +111,7 @@ public static class CallingApi
 
             WebSocket? webSocket = null;
             ContactCenterConversationSession? session = null;
-            HubSessionParticipantContext? acsChannel = null;
+            HubSessionParticipant? acsChannel = null;
             string? callerPhoneNumber = null;
 
             try
@@ -158,7 +151,7 @@ public static class CallingApi
     private static async Task KeepWebSocketAliveAsync(
         WebSocket webSocket,
         ContactCenterConversationSession session,
-        HubSessionParticipantContext acsChannel,
+        HubSessionParticipant acsChannel,
         ILogger logger,
         CancellationToken cancellationToken)
     {

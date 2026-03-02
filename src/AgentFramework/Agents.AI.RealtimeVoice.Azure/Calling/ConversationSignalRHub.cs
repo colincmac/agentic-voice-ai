@@ -1,6 +1,6 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
+using Agents.AI.RealtimeVoice.Azure.Models;
+using Agents.AI.RealtimeVoice.Azure.Transports;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -42,7 +42,7 @@ public sealed class ConversationSignalRHub : Hub
         var session = conversationHub.GetOrCreateSession(sessionId);
 
         // Get or create participant
-        var participantContext = session.GetOrAddParticipant(participantId, displayName);
+        var participantContext = session.GetOrAddParticipantAsync(participantId, displayName);
 
         // Create SignalR transport
         var metadata = new ParticipantTransportMetadata
@@ -59,7 +59,7 @@ public sealed class ConversationSignalRHub : Hub
         var transport = new SignalRTransport(channelId, metadata, Clients.Caller);
 
         // Add transport to participant using the current HTTP request's service provider
-        await session.AddTransportToParticipant(participantId, transport);
+        await session.AddTransportToParticipantAsync(participantId, transport);
 
         await Groups.AddToGroupAsync(Context.ConnectionId, sessionId);
         await base.OnConnectedAsync();
@@ -90,7 +90,7 @@ public sealed class ConversationSignalRHub : Hub
             var session = conversationHub.TryGetSession(sessionId);
             if (session is not null)
             {
-                await session.RemoveTransportFromParticipant(participantId, channelId);
+                await session.RemoveTransportFromParticipantAsync(participantId, channelId);
             }
         }
 
