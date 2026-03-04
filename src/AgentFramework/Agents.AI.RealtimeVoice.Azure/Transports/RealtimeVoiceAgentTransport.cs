@@ -1,8 +1,12 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Agents.AI.Extensions.LiveVoice.Media.Transcription;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 using Extensions.AI.Contents;
@@ -22,10 +26,13 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 /// orchestration lives in the agent — this transport is a pure media bridge.
 /// </para>
 /// </summary>
-public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer, ISignalConsumer, ITranscriptProducer
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
     private readonly LiveConversationAgentSession _thread;
+    private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly IvrWorkflowState _workflowState = new();
+
     private readonly AgentRunOptions? _runOptions;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -33,6 +40,7 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
 
     private Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> _audioHandler = (_, _, _) => Task.CompletedTask;
     private Func<string, MessageUpdate, CancellationToken, Task> _messageHandler = (_, _, _) => Task.CompletedTask;
+    private Func<string, TranscriptSegment, CancellationToken, Task> _transcriptHandler = (_, _, _) => Task.CompletedTask;
     private Func<string, Task>? _disconnectedHandler;
 
     private readonly Channel<DataContent> _inboundAudioChannel;
@@ -41,12 +49,14 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
     public RealtimeVoiceAgentTransport(
         AuthorizingRealtimeAIAgent agent,
         LiveConversationAgentSession existingThread,
+        RealtimeIvrWorkflowDefinition workflow,
         AgentRunOptions? runOptions = null,
         PresenceDetectorService? presenceDetector = null,
         ILoggerFactory? loggerFactory = null)
     {
         _agent = agent;
         _thread = existingThread;
+        _workflow = workflow;
         _runOptions = runOptions;
         _presenceDetector = presenceDetector;
         _logger = loggerFactory?.CreateLogger<RealtimeVoiceAgentTransport>()
@@ -92,9 +102,10 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
         return Task.CompletedTask;
     }
 
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
+    public void SetOnTranscriptReceivedCallback(Func<string, TranscriptSegment, CancellationToken, Task> handler) => _transcriptHandler = handler;
 
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)
     {
@@ -107,6 +118,16 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
         var chat = MessageUpdateExtensions.ToChatMessage(message);
         await _agent.SendMessagesToRunAsync([chat], _thread, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task SendSignalAsync(SessionSignal signal, CancellationToken cancellationToken = default)
+    {
+        return signal.Kind switch
+        {
+            //SessionSignalKind.StopAudio => _agent.StopAudioAsync(_thread, cancellationToken),
+            _ => Task.CompletedTask // Other signals can be handled as needed
+        };
+    }
+
 
     private async Task RunSendLoopAsync(CancellationToken ct)
     {
@@ -176,6 +197,14 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
                             var (r, s, e) = update.Role == ChatRole.User
                                 ? (ChatRole.User, userTurnStart, userTurnEnd)
                                 : (ChatRole.Assistant, agentTurnStart, agentTurnEnd);
+                            var transcriptSegment = new TranscriptSegment
+                            {
+                                Role = update.Role,
+                                Text = atc.Text,
+                                UtteranceStart = update.CreatedAt,
+                                IsFinal = false,
+                            };
+                            await _transcriptHandler(ChannelId, transcriptSegment, cancellationToken).ConfigureAwait(false);
                             ivrAgent?.RecordUtterance(r, s, e, atc);
                             break;
 
@@ -198,13 +227,19 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Expected when cancellation is requested
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Realtime voice agent transport error for {ChannelId}", ChannelId);
+            _logger.LogError(ex, "Realtime voice stream failed for {ChannelId}, attempting text-only fallback", ChannelId);
+
+            // Notify the conversation hub that audio is degraded
+            var degradedMsg = new MessageUpdate
+            {
+                Contents = [new TextContent("I'm experiencing audio difficulties. Let me continue assisting you via text.")]
+            };
+            await _messageHandler(ChannelId, degradedMsg, CancellationToken.None).ConfigureAwait(false);
+
+            // Continue processing via text-only path if available
+            // This keeps the session alive rather than dropping the caller
         }
         finally
         {
@@ -253,4 +288,6 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioProdu
             }
         }
     }
+
+
 }

@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 using Microsoft.Agents.AI;
@@ -8,7 +8,7 @@ using Microsoft.Extensions.AI;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
-public sealed class ChatAIAgentTransport : IChannelTransport, IMessageProducer, IMessageConsumer
+public sealed class ChatAIAgentTransport : IChannelTransport, IMessageConsumer, IMessageProducer
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
@@ -53,7 +53,7 @@ public sealed class ChatAIAgentTransport : IChannelTransport, IMessageProducer, 
         return Task.CompletedTask;
     }
 
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnected = handler;
 
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)

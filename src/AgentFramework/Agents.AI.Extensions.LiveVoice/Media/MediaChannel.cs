@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Agents.AI.Extensions.Helpers.Streaming;
 
-namespace Agents.AI.RealtimeVoice.Azure.Media;
+namespace Agents.AI.Extensions.LiveVoice.Media;
 
 public sealed class MediaChannel : IAsyncDisposable
 {

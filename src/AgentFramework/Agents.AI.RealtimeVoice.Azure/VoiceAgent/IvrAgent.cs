@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.LiveVoice;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
@@ -243,6 +244,40 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
 
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
+            // Deterministic gate: enforce auth level from workflow state
+            if (ToolRequirements is { Count: > 0 }
+                && GetService<IToolApprovalHandlerProvider>() is IToolApprovalHandlerProvider provider)
+            {
+                var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>()
+                                       ?? GetService<ClaimsPrincipal>();
+
+                var approvalContext = new ToolApprovalContext(
+                    this, arguments, _agent, ToolRequirements, invokingIdentity);
+
+                var handlers = await provider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
+
+                foreach (var handler in handlers)
+                {
+                    await handler.HandleAsync(approvalContext).ConfigureAwait(false);
+                }
+
+                if (!approvalContext.HasSucceeded)
+                {
+                    var failure = new ToolApprovalFailure(
+                        InnerFunction,
+                        arguments,
+                        [.. approvalContext.PendingRequirements],
+                        [.. approvalContext.FailureResponses],
+                        approvalContext.PendingRequirements is { Count: 0 });
+
+                    _logger?.LogWarning(
+                        "Function '{FunctionName}' denied — auth level insufficient for current workflow step.",
+                        InnerFunction.Name);
+
+                    return failure.FailureResponseMessage.Text;
+                }
+            }
+
             if (_next is not null)
             {
                 return await _next.Invoke(_agent, arguments, InnerFunction, base.InvokeCoreAsync, cancellationToken);

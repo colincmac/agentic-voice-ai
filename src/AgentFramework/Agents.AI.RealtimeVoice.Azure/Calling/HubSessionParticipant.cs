@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using Agents.AI.Extensions.Helpers.Streaming;
+using Agents.AI.Extensions.LiveVoice.Media;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Media;
 using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.Transports;
 using Microsoft.Extensions.DependencyInjection;
@@ -130,7 +132,7 @@ public sealed class HubSessionParticipant : IAsyncDisposable, IConnectionMetrics
     {
         foreach (var binding in _transports.Values)
         {
-            if (binding.Transport is IMessageProducer producer)
+            if (binding.Transport is IMessageConsumer producer)
             {
                 try
                 {
@@ -208,21 +210,21 @@ public sealed class HubSessionParticipant : IAsyncDisposable, IConnectionMetrics
     {
         transport.SetOnDisconnected(id => RemoveTransport(id, alreadyDisposed: true));
 
-        if (transport is IMessageConsumer messageConsumer)
+        if (transport is IMessageProducer messageConsumer)
         {
-            messageConsumer.SetOnMessageReceived(OnMessageReceivedCore);
+            messageConsumer.SetOnMessageReceivedCallback(OnMessageReceivedCore);
         }
 
-        if (transport is IAudioConsumer audioConsumer)
+        if (transport is IAudioProducer audioConsumer)
         {
-            audioConsumer.SetOnAudioReceived(OnAudioReceivedCore);
+            audioConsumer.SetOnAudioReceivedCallback(OnAudioReceivedCore);
         }
 
         transport.SetOnDisconnected(id => RemoveTransport(id));
         await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         var subscription = _outboundAudio.Subscribe();
-        var pumpTask = transport is IAudioProducer audioProducer
+        var pumpTask = transport is IAudioConsumer audioProducer
             ? Task.Run(() => PumpAudioToTransportAsync(audioProducer, transport, subscription, cancellationToken), cancellationToken)
             : Task.CompletedTask;
 
@@ -279,15 +281,15 @@ public sealed class HubSessionParticipant : IAsyncDisposable, IConnectionMetrics
             RawIdentifier = ParticipantId,
             DisplayName = DisplayName ?? first.Metadata.DisplayName,
             Role = bindings.Aggregate(ChannelRole.None, (acc, b) => acc | b.Transport.Metadata.Role),
-            SupportsAudio = bindings.Any(b => b.Transport is IAudioProducer or IAudioConsumer),
-            SupportsMessaging = bindings.Any(b => b.Transport is IMessageProducer or IMessageConsumer),
+            SupportsAudio = bindings.Any(b => b.Transport is IAudioConsumer or IAudioProducer),
+            SupportsMessaging = bindings.Any(b => b.Transport is IMessageConsumer or IMessageProducer),
             SupportsVideo = bindings.Any(b => b.Transport.Metadata.SupportsVideo),
             SupportsScreenShare = bindings.Any(b => b.Transport.Metadata.SupportsScreenShare)
         };
     }
 
     private static async Task PumpAudioToTransportAsync(
-        IAudioProducer audioProducer,
+        IAudioConsumer audioProducer,
         IChannelTransport transport,
         RawMediaPipeSubscription subscription,
         CancellationToken cancellationToken)

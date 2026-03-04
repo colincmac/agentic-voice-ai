@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.A2A;
@@ -27,7 +27,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 /// automatically, enabling cross-agent awareness without explicit wiring.
 /// </para>
 /// </summary>
-public sealed class A2AAgentTransport : IChannelTransport, IMessageProducer, IMessageConsumer
+public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMessageProducer
 {
     private readonly AIAgent _agent;
     private readonly A2AAgentThread _thread;
@@ -96,7 +96,7 @@ public sealed class A2AAgentTransport : IChannelTransport, IMessageProducer, IMe
         return Task.CompletedTask;
     }
 
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnected = handler;
 
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)

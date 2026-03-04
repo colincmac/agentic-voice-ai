@@ -1,12 +1,15 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Agents.AI.Extensions.LiveVoice.Media.Transcription;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
-internal sealed class SignalRTransport : IChannelTransport, IMessageProducer
+internal sealed class SignalRTransport : IChannelTransport, IMessageConsumer
 {
     private readonly IClientProxy _proxy;
     private readonly ParticipantTransportMetadata _metadata;

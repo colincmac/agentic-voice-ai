@@ -5,17 +5,19 @@ using System.Text;
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Azure.Communication.CallAutomation;
 using Extensions.AI.Contents;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using DtmfTone = Extensions.AI.AudioHelpers.DtmfTone;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
-public sealed class AcsWebsocketTransport : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public sealed class AcsWebsocketTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly WebSocket _webSocket;
     private readonly CallConnectionProperties _call;
@@ -74,8 +76,8 @@ public sealed class AcsWebsocketTransport : IChannelTransport, IAudioProducer, I
         );
         return Task.CompletedTask;
     }
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
 
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)
@@ -98,6 +100,16 @@ public sealed class AcsWebsocketTransport : IChannelTransport, IAudioProducer, I
                     cancellationToken);
             }
         }
+    }
+
+    public Task SendSignalAsync(SessionSignal signal, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void SetOnSignalReceived(Func<string, SessionSignal, CancellationToken, Task> handler)
+    {
+        throw new NotImplementedException();
     }
 
     private async Task RunSendLoopAsync(CancellationToken ct)
@@ -213,4 +225,6 @@ public sealed class AcsWebsocketTransport : IChannelTransport, IAudioProducer, I
             try { await _disconnectedHandler(ChannelId); } catch { }
         }
     }
+
+
 }

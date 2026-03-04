@@ -36,14 +36,14 @@ public sealed class GrpcConversationStreamService : ConversationStream.Conversat
         var transport = new GrpcTransport(channelId, metadata, _serviceProvider, responseStream, _loggerFactory.CreateLogger<GrpcTransport>());
         //_registry.Add(transport);
 
-        transport.SetOnAudioReceived((cid, frame, ct) =>
+        transport.SetOnAudioReceivedCallback((cid, frame, ct) =>
         {
             // For now we just log; session routing will attach later.
             _logger.LogTrace("Inbound audio {Bytes} from {Channel}", frame.Length, cid);
             return Task.CompletedTask;
         });
 
-        transport.SetOnMessageReceived((cid, msg, ct) =>
+        transport.SetOnMessageReceivedCallback((cid, msg, ct) =>
         {
             _logger.LogTrace("Inbound message from {Channel}", cid);
             return Task.CompletedTask;

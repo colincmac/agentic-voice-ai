@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Agents.AI.Extensions.LiveVoice.Media;
 using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Agents.AI.RealtimeVoice.Azure.Media;

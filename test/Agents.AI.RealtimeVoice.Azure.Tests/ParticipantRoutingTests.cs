@@ -84,7 +84,7 @@ public class ParticipantRoutingTests
         string? receivedChannelId = null;
         ReadOnlyMemory<byte> receivedAudio = default;
 
-        transport.SetOnAudioReceived((channelId, audio, ct) =>
+        transport.SetOnAudioReceivedCallback((channelId, audio, ct) =>
         {
             receivedChannelId = channelId;
             receivedAudio = audio;

@@ -1,16 +1,6 @@
-namespace Agents.AI.RealtimeVoice.Azure.Media.Transcription;
+using Microsoft.Extensions.AI;
 
-/// <summary>
-/// A transport that receives inbound transcript segments (from STT or an AI model)
-/// and forwards them into the session via a registered callback.
-/// </summary>
-public interface ITranscriptConsumer
-{
-    /// <summary>
-    /// Register an inbound transcript handler invoked for every recognized segment.
-    /// </summary>
-    void SetOnTranscriptReceived(Func<string, TranscriptSegment, CancellationToken, Task> handler);
-}
+namespace Agents.AI.Extensions.LiveVoice.Media.Transcription;
 
 /// <summary>
 /// A single segment of transcribed speech, produced by an STT engine or
@@ -22,7 +12,7 @@ public sealed class TranscriptSegment
     public required string Text { get; init; }
 
     /// <summary>Speaker role (e.g. "user", "assistant").</summary>
-    public string? Role { get; init; }
+    public ChatRole? Role { get; init; }
 
     /// <summary>Whether this is a final (committed) segment or an interim hypothesis.</summary>
     public bool IsFinal { get; init; }

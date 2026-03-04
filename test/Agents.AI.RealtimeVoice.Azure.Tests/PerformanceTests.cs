@@ -144,7 +144,7 @@ public class PerformanceTests
         var transport = new MockChannelTransport("test-channel");
         var handlerCallCount = 0;
 
-        transport.SetOnAudioReceived(async (channelId, audio, ct) =>
+        transport.SetOnAudioReceivedCallback(async (channelId, audio, ct) =>
         {
             Interlocked.Increment(ref handlerCallCount);
             await Task.Delay(10); // Simulate slow handler
