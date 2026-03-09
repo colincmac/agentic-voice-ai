@@ -39,6 +39,9 @@ public static class ContactCenterConversationSessionExtensions
         var callInfo = await callConnection.GetCallConnectionPropertiesAsync(cancellationToken);
 
         var callerPhoneNumber = callInfo.Value.SourceCallerIdNumber?.PhoneNumber ?? callInfo.Value.Source.RawId;
+        var conversationContext = session.HubSessionContext.ConversationContext;
+        conversationContext.CallerId = callerPhoneNumber;
+        conversationContext.CallerName = callInfo.Value.SourceDisplayName;
 
         // Remove the old transport first if one was superseded
         if (previousTransportChannelId is not null)
@@ -232,6 +235,9 @@ public static class ContactCenterConversationSessionExtensions
         var callInfo = await callConnection.GetCallConnectionPropertiesAsync(cancellationToken);
 
         var callerPhoneNumber = callInfo.Value.SourceCallerIdNumber?.PhoneNumber ?? callInfo.Value.Source.RawId;
+        var conversationContext = session.HubSessionContext.ConversationContext;
+        conversationContext.CallerId = callerPhoneNumber;
+        conversationContext.CallerName = callInfo.Value.SourceDisplayName;
         var participant = await session.GetOrAddParticipantAsync(callerPhoneNumber, callInfo.Value.SourceDisplayName, cancellationToken);
 
         await session.AddTransportToParticipantAsync(callerPhoneNumber, async sp =>

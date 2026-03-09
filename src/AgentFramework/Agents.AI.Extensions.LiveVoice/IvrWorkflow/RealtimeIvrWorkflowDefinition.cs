@@ -50,11 +50,15 @@ public sealed class RealtimeIvrWorkflowDefinition
     /// <param name="state">Optional current workflow state for context inclusion.</param>
     /// <param name="contextSerializerOptions">Optional JSON serializer options for formatting state values in context.</param>
     /// <returns>The rendered prompt string for the Voice AI Agent (e.g. <i>talker</i> agent).</returns>
-    public string BuildPromptForStep(string stepId, IvrWorkflowState? state = null, JsonSerializerOptions? contextSerializerOptions = null)
+    public string BuildPromptForStep(
+        string stepId,
+        IvrWorkflowState? state = null,
+        ConversationContext? conversationContext = null,
+        JsonSerializerOptions? contextSerializerOptions = null)
     {
         var step = GetStep(stepId) ?? throw new ArgumentException($"Step '{stepId}' not found", nameof(stepId));
 
-        return BuildPromptForStep(step, state, contextSerializerOptions);
+        return BuildPromptForStep(step, state, conversationContext, contextSerializerOptions);
     }
 
     /// <summary>
@@ -64,14 +68,18 @@ public sealed class RealtimeIvrWorkflowDefinition
     /// <param name="state">Optional current workflow state for context inclusion.</param>
     /// <param name="contextSerializerOptions">Optional JSON serializer options for formatting state values in context.</param>
     /// <returns>The rendered prompt string for the Voice AI Agent (e.g. <i>talker</i> agent).</returns>
-    public string BuildPromptForStep(RealtimeIvrWorkflowStep step, IvrWorkflowState? state = null, JsonSerializerOptions? contextSerializerOptions = null)
+    public string BuildPromptForStep(
+        RealtimeIvrWorkflowStep step,
+        IvrWorkflowState? state = null,
+        ConversationContext? conversationContext = null,
+        JsonSerializerOptions? contextSerializerOptions = null)
     {
         // Build a step-specific prompt by merging base prompt with step configuration
         var stepPrompt = BasePrompt with
         {
             ConversationFlow = [step.ConversationState],
             Tools = BuildToolConfigForStep(step),
-            Context = BuildContext(state, contextSerializerOptions)
+            Context = BuildContext(state, conversationContext, contextSerializerOptions)
         };
 
         return RealtimeAIPromptTemplate.Render(stepPrompt);
@@ -94,9 +102,12 @@ public sealed class RealtimeIvrWorkflowDefinition
         };
     }
 
-    private string? BuildContext(IvrWorkflowState? state, JsonSerializerOptions? jsonOptions = null)
+    private string? BuildContext(
+        IvrWorkflowState? state,
+        ConversationContext? conversationContext = null,
+        JsonSerializerOptions? jsonOptions = null)
     {
-        if (state is null)
+        if (state is null && conversationContext is null)
         {
             return BasePrompt.Context;
         }
@@ -108,11 +119,21 @@ public sealed class RealtimeIvrWorkflowDefinition
             contextBuilder.AppendLine(BasePrompt.Context);
         }
 
+        if (ConversationContextFormatter.Format(conversationContext) is { } pinnedContext)
+        {
+            contextBuilder.AppendLine();
+            contextBuilder.AppendLine(pinnedContext);
+        }
+
         contextBuilder.AppendLine();
         contextBuilder.AppendLine("## Collected Information (formatted `- <key>: <value>`)");
 
         // Add collected state as context
-        if (state.Keys.Count > 0)
+        if (state is null || state.Keys.Count == 0)
+        {
+            contextBuilder.AppendLine("- None");
+        }
+        else
         {
             foreach (var key in state.Keys)
             {
@@ -123,10 +144,6 @@ public sealed class RealtimeIvrWorkflowDefinition
                     contextBuilder.AppendLine($"- {key}: {formattedValue}");
                 }
             }
-        }
-        else
-        {
-            contextBuilder.AppendLine("- None");
         }
 
         var result = contextBuilder.ToString().Trim();

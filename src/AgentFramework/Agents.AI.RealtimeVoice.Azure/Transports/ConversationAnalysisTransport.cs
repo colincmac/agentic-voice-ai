@@ -1,9 +1,11 @@
 using System.Buffers;
+using System.Diagnostics;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Agents.AI.Extensions.LiveVoice.Media.Audio;
 using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.RealtimeVoice.Azure.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -33,9 +35,11 @@ public sealed class ConversationAnalysisTransport : IChannelTransport, IAudioCon
     private readonly ITextSentimentAnalyzer _textAnalyzer;
     private readonly CrossSignalCorrelator _correlator;
     private readonly HubSessionEventBus _eventBus;
+    private readonly SessionTelemetry? _telemetry;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly string _channelId;
+    private readonly string? _sessionId;
 
     // Audio buffering — accumulate frames into analysis windows
     private readonly MemoryStream _audioBuffer = new();
@@ -70,6 +74,8 @@ public sealed class ConversationAnalysisTransport : IChannelTransport, IAudioCon
         string? channelId = null,
         int analysisWindowMs = 3_000,
         int sampleRateHz = 16_000,
+        string? sessionId = null,
+        SessionTelemetry? telemetry = null,
         ILoggerFactory? loggerFactory = null)
     {
         _audioPipeline = audioPipeline;
@@ -78,6 +84,8 @@ public sealed class ConversationAnalysisTransport : IChannelTransport, IAudioCon
         _channelId = channelId ?? $"analysis-{Guid.NewGuid():N}";
         _analysisWindowMs = analysisWindowMs;
         _sampleRateHz = sampleRateHz;
+        _sessionId = sessionId;
+        _telemetry = telemetry;
         _correlator = new CrossSignalCorrelator();
         _logger = loggerFactory?.CreateLogger<ConversationAnalysisTransport>()
                   ?? NullLogger<ConversationAnalysisTransport>.Instance;
@@ -179,6 +187,7 @@ public sealed class ConversationAnalysisTransport : IChannelTransport, IAudioCon
 
                 try
                 {
+                    var analysisStart = Stopwatch.GetTimestamp();
                     var audioResult = await _audioPipeline
                         .AnalyzeAsync(window, _sampleRateHz, ct)
                         .ConfigureAwait(false);
@@ -192,6 +201,14 @@ public sealed class ConversationAnalysisTransport : IChannelTransport, IAudioCon
                     var analysis = _correlator.Evaluate(audioResult);
                     if (analysis is not null)
                     {
+                        if (_telemetry is not null && !string.IsNullOrWhiteSpace(_sessionId))
+                        {
+                            _telemetry.RecordSignalAnalysis(
+                                _sessionId,
+                                analysis,
+                                Stopwatch.GetElapsedTime(analysisStart).TotalMilliseconds);
+                        }
+
                         await PublishAnalysisAsync(analysis, ct).ConfigureAwait(false);
                     }
                 }
