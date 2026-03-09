@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Signaling\**" />
+    <EmbeddedResource Remove="Signaling\**" />
+    <None Remove="Signaling\**" />
+  </ItemGroup>
+
+  <ItemGroup>
 
     <!-- Azure Communication Services (ACS)-->
     <PackageReference Include="Azure.Communication.CallAutomation" />
@@ -39,10 +45,5 @@
     <ProjectReference Include="..\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
     <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
     <ProjectReference Include="..\Agents.AI\Agents.AI.csproj" />
-  </ItemGroup>
-
-  
-  <ItemGroup>
-    <Folder Include="Signaling\" />
   </ItemGroup>
 </Project>

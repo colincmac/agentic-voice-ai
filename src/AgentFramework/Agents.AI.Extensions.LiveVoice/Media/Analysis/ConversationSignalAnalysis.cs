@@ -48,23 +48,3 @@ public sealed record ConversationSignalAnalysis
     public const double DivergenceThreshold = 0.4;
 }
 
-/// <summary>
-/// A discrete emotion signal extracted from audio features (pitch, energy, cadence).
-/// </summary>
-public sealed record EmotionSignal
-{
-    /// <summary>Detected emotion label (e.g., "angry", "happy", "neutral", "frustrated").</summary>
-    public required string Label { get; init; }
-
-    /// <summary>Confidence score for this detection (0.0–1.0).</summary>
-    public required double Confidence { get; init; }
-
-    /// <summary>
-    /// Valence score mapped to the same scale as text sentiment
-    /// (−1.0 = strongly negative, +1.0 = strongly positive).
-    /// Enables direct comparison with text sentiment for divergence calculation.
-    /// </summary>
-    public required double Valence { get; init; }
-
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
-}

@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using A2A;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.RealtimeVoice.Azure.Transports;
 using Azure.Communication.CallAutomation;
@@ -138,46 +139,79 @@ public static class ContactCenterConversationSessionExtensions
                 analyticsService,
                 session.SessionId);
         });
+
+        await session.AddTransportToParticipantAsync(participantId, async sp =>
+        {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+
+            // 1. Create the analysis transport with the session's event bus
+            var analysisTransport = new ConversationAnalysisTransport(
+                audioPipeline: sp.GetRequiredService<IAudioAnalysisPipeline>(),
+                textAnalyzer: sp.GetRequiredService<ITextSentimentAnalyzer>(),
+                eventBus: session.SessionEventBus,
+                analysisWindowMs: 3_000,
+                loggerFactory: loggerFactory);
+
+            var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
+            var thread = await createThread(baseAgent);
+            var analyticsService = sp.GetService<ICallAnalyticsService>();
+
+            RealtimeAgentRunOptions? runOptions = null;
+            if (configureRunOptions is not null)
+            {
+                runOptions = new RealtimeAgentRunOptions();
+                configureRunOptions(runOptions);
+            }
+
+            return new RealtimeAIAgentTransport(
+                baseAgent,
+                thread,
+                runOptions,
+                loggerFactory,
+                analyticsService,
+                session.SessionId);
+        });
+
         return participant;
     }
 
     /// <summary>
     /// Adds a participant (AI agent) to the conversation, optionally configures AgentRunOptions, creates or overrides a thread, then attaches a RealtimeVoiceAgentTransport and returns the participant context. 
     /// </summary>
-    public static async Task<HubSessionParticipant> AddWorkflowRealtimeAgentAsync(
-        this ContactCenterConversationSession session,
-        string participantId,
-        RealtimeIvrWorkflowDefinition workflowDefinition,
-        string? displayName = null,
-        Action<AgentRunOptions>? configureRunOptions = null,
-        Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null,
-        CancellationToken cancellationToken = default)
-    {
-        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync(cancellationToken));
-        var participant = await session.GetOrAddParticipantAsync(participantId, displayName, cancellationToken);
+    //public static async Task<HubSessionParticipant> AddWorkflowRealtimeAgentAsync(
+    //    this ContactCenterConversationSession session,
+    //    string participantId,
+    //    RealtimeIvrWorkflowDefinition workflowDefinition,
+    //    string? displayName = null,
+    //    Action<AgentRunOptions>? configureRunOptions = null,
+    //    Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync(cancellationToken));
+    //    var participant = await session.GetOrAddParticipantAsync(participantId, displayName, cancellationToken);
 
-        await session.AddTransportToParticipantAsync(participantId, async sp =>
-        {
-            var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var thread = await createThread(baseAgent);
-            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+    //    await session.AddTransportToParticipantAsync(participantId, async sp =>
+    //    {
+    //        var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
+    //        var thread = await createThread(baseAgent);
+    //        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
-            AgentRunOptions? runOptions = null;
-            if (configureRunOptions is not null)
-            {
-                runOptions = new AgentRunOptions();
-                configureRunOptions(runOptions);
-            }
+    //        AgentRunOptions? runOptions = null;
+    //        if (configureRunOptions is not null)
+    //        {
+    //            runOptions = new AgentRunOptions();
+    //            configureRunOptions(runOptions);
+    //        }
 
-            return new RealtimeVoiceAgentTransport(
-                baseAgent,
-                thread,
-                runOptions,
-                presenceDetector: null,
-                loggerFactory);
-        });
-        return participant;
-    }
+    //        return new RealtimeVoiceAgentTransport(
+    //            baseAgent,
+    //            thread,
+    //            runOptions,
+    //            presenceDetector: null,
+    //            loggerFactory);
+    //    });
+    //    return participant;
+    //}
 
     /// <summary>
     /// 
@@ -288,4 +322,6 @@ public static class ContactCenterConversationSessionExtensions
 
         return participant;
     }
+
+
 }

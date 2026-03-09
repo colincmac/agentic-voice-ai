@@ -66,7 +66,7 @@ public sealed class CrossSignalCorrelator
         // Average recent signals for a stable comparison
         var avgAudioValence = recentAudio
             .TakeLast(5)
-            .Average(e => e.Valence);
+            .Average(e => e.ValenceScore);
 
         var avgTextSentiment = recentText
             .TakeLast(5)
@@ -110,7 +110,7 @@ public sealed class CrossSignalCorrelator
                 return false;
             }
 
-            var avgValence = audio.TakeLast(3).Average(e => e.Valence);
+            var avgValence = audio.TakeLast(3).Average(e => e.ValenceScore);
             var avgSentiment = text.TakeLast(3).Average(t => t.Sentiment);
 
             return Math.Abs(avgSentiment - avgValence) >= _divergenceThreshold;

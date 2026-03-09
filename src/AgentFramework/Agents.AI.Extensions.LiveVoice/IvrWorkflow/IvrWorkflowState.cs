@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -301,7 +301,7 @@ public sealed class IvrWorkflowState
             // Average recent audio emotion scores (negative = negative emotion)
             var recentEmotions = AudioEmotionHistory
                 .TakeLast(10)
-                .Average(e => e.Score);
+                .Average(e => e.ValenceScore);
 
             // Divergence: text says positive but voice says negative, or vice versa
             var textPositive = SentimentScore > 0.3;

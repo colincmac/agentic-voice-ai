@@ -65,7 +65,7 @@ public sealed class A2AAudioAnalysisPipeline : IAudioAnalysisPipeline
         // For now, return a placeholder indicating the A2A path is wired
         return new AudioAnalysisResult
         {
-            OverallConfidence = 0.0
+            Confidence = 0.0
         };
     }
 }

@@ -1,4 +1,4 @@
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
