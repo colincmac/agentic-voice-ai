@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Agents.AI.Extensions.LiveVoice.Media.Transcription;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,7 +23,7 @@ public interface IScopedChannelTransport : IChannelTransport
 /// supports the corresponding capability. Consumers should verify
 /// <see cref="IChannelTransport.Metadata"/> for authoritative capability checks.
 /// </summary>
-public sealed class ScopedChannelTransport : IScopedChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public sealed class ScopedChannelTransport : IScopedChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly IChannelTransport _innerTransport;
     private readonly IServiceProvider _serviceProvider;
@@ -60,24 +62,24 @@ public sealed class ScopedChannelTransport : IScopedChannelTransport, IAudioProd
     // --- Media interface delegation ---
 
     public Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)
-        => _innerTransport is IAudioProducer p ? p.SendAudioAsync(audioData, cancellationToken) : Task.CompletedTask;
+        => _innerTransport is IAudioConsumer p ? p.SendAudioAsync(audioData, cancellationToken) : Task.CompletedTask;
 
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler)
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler)
     {
-        if (_innerTransport is IAudioConsumer c)
+        if (_innerTransport is IAudioProducer c)
         {
-            c.SetOnAudioReceived(handler);
+            c.SetOnAudioReceivedCallback(handler);
         }
     }
 
     public Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)
-        => _innerTransport is IMessageProducer p ? p.SendMessageAsync(message, cancellationToken) : Task.CompletedTask;
+        => _innerTransport is IMessageConsumer p ? p.SendMessageAsync(message, cancellationToken) : Task.CompletedTask;
 
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler)
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler)
     {
-        if (_innerTransport is IMessageConsumer c)
+        if (_innerTransport is IMessageProducer c)
         {
-            c.SetOnMessageReceived(handler);
+            c.SetOnMessageReceivedCallback(handler);
         }
     }
 

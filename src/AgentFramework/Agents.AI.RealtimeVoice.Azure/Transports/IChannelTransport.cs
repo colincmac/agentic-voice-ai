@@ -1,5 +1,5 @@
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
@@ -11,8 +11,8 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 /// than methods on this base interface. A transport declares what it can handle by
 /// additionally implementing one or more of:
 /// <list type="bullet">
-///   <item><see cref="IAudioProducer"/> / <see cref="IAudioConsumer"/> – raw audio frames</item>
-///   <item><see cref="IMessageProducer"/> / <see cref="IMessageConsumer"/> – structured messages</item>
+///   <item><see cref="IAudioConsumer"/> / <see cref="IAudioProducer"/> – raw audio frames</item>
+///   <item><see cref="IMessageConsumer"/> / <see cref="IMessageProduce"/> – structured messages</item>
 /// </list>
 /// Consumers (e.g., session routers, participants) check for these interfaces at
 /// runtime to decide what content to route through each transport.

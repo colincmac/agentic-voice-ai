@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -275,6 +276,39 @@ public sealed class IvrWorkflowState
     public IReadOnlyDictionary<string, object?> ToSnapshot()
     {
         return new Dictionary<string, object?>(_data);
+    }
+
+    /// <summary>
+    /// Running emotion signals from audio analysis (paralingual features).
+    /// Used for cross-validation against text-based sentiment.
+    /// </summary>
+    public ConcurrentQueue<EmotionSignal> AudioEmotionHistory { get; } = new();
+
+    /// <summary>
+    /// Checks whether text sentiment and audio emotion are diverging,
+    /// which may indicate the text pipeline is missing important vocal cues
+    /// (e.g., sarcasm, frustration masked by polite words).
+    /// </summary>
+    public bool IsSignalDivergent
+    {
+        get
+        {
+            if (SentimentScore is null || AudioEmotionHistory.IsEmpty)
+            {
+                return false;
+            }
+
+            // Average recent audio emotion scores (negative = negative emotion)
+            var recentEmotions = AudioEmotionHistory
+                .TakeLast(10)
+                .Average(e => e.ValenceScore);
+
+            // Divergence: text says positive but voice says negative, or vice versa
+            var textPositive = SentimentScore > 0.3;
+            var audioNegative = recentEmotions < -0.3;
+
+            return (textPositive && audioNegative) || (!textPositive && recentEmotions > 0.5);
+        }
     }
 }
 

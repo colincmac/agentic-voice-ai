@@ -2,8 +2,8 @@ using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 using Microsoft.Agents.AI;
@@ -16,7 +16,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 /// <summary>
 /// Realtime AI agent transport with authorization and approval workflow integration
 /// </summary>
-public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
     private readonly LiveConversationAgentSession _thread;
@@ -83,8 +83,8 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioProducer
         );
     }
 
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
 
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default)

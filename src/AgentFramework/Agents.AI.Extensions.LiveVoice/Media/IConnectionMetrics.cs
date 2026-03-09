@@ -1,4 +1,4 @@
-namespace Agents.AI.RealtimeVoice.Azure.Media;
+namespace Agents.AI.Extensions.LiveVoice.Media;
 
 /// <summary>
 /// Exposes real-time memory and throughput metrics for a single call connection,

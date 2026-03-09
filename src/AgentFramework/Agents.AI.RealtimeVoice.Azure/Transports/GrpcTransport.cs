@@ -1,6 +1,6 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.Realtimevoice.V1;
 using Grpc.Core;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
-internal sealed class GrpcTransport : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+internal sealed class GrpcTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly IServerStreamWriter<ServerEnvelope>? _serverWriter;
     private readonly ParticipantTransportMetadata _metadata;
@@ -64,8 +64,8 @@ internal sealed class GrpcTransport : IChannelTransport, IAudioProducer, IAudioC
         return _serverWriter.WriteAsync(new ServerEnvelope { Chat = chat }, cancellationToken);
     }
 
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) => _audioHandler = handler;
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) => _messageHandler = handler;
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
 
     public Task HandleInboundAsync(IAsyncStreamReader<ClientEnvelope> reader, CancellationToken ct)

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using static Agents.AI.RealtimeVoice.Azure.Monitoring.ConversationSessionActivitySource;
 
 namespace Agents.AI.RealtimeVoice.Azure.Monitoring;
@@ -37,6 +38,15 @@ public sealed class SessionTelemetry : IDisposable
     private readonly Counter<long> _fraudAlertsCounter;
     #endregion
 
+    #region Analysis
+
+    // Cross-signal analysis metrics
+    private readonly Histogram<double> _signalDivergenceHistogram;
+    private readonly Histogram<double> _audioAnalysisLatencyHistogram;
+    private readonly Histogram<double> _emotionConfidenceHistogram;
+    private readonly Counter<long> _signalDivergenceCounter;
+    private readonly Histogram<double> _speechStartToResponseHistogram;
+    #endregion
 
     // Histograms
     private readonly Histogram<double> _sessionDurationHistogram;
@@ -153,6 +163,29 @@ public sealed class SessionTelemetry : IDisposable
         _voiceBiometricConfidenceHistogram = _meter.CreateHistogram<double>(
             "conversation.voice_biometric.confidence",
             description: "Voice biometric verification confidence");
+
+        // Cross-signal analysis metrics
+        _signalDivergenceHistogram = _meter.CreateHistogram<double>(
+    "conversation.signal.divergence",
+    description: "Divergence score between text sentiment and audio emotion");
+
+        _audioAnalysisLatencyHistogram = _meter.CreateHistogram<double>(
+            "conversation.signal.audio_analysis_latency",
+            unit: "ms",
+            description: "Audio analysis pipeline latency per window");
+
+        _emotionConfidenceHistogram = _meter.CreateHistogram<double>(
+            "conversation.signal.emotion_confidence",
+            description: "Audio emotion detection confidence");
+
+        _signalDivergenceCounter = _meter.CreateCounter<long>(
+            "conversation.signal.divergence_events",
+            description: "Count of cross-signal divergence events detected");
+
+        _speechStartToResponseHistogram = _meter.CreateHistogram<double>(
+            "conversation.voice.speech_start_to_response",
+            unit: "ms",
+            description: "Perceived latency from user speech end to agent response start");
 
     }
 
@@ -368,6 +401,40 @@ public sealed class SessionTelemetry : IDisposable
         }
 
         return tagList;
+    }
+    #endregion
+
+
+    #region Cross-Signal Metrics
+
+    public void RecordSignalAnalysis(
+        string sessionId,
+        ConversationSignalAnalysis analysis,
+        double analysisLatencyMs)
+    {
+        var tags = CreateTagList(sessionId);
+
+        if (analysis.Divergence.HasValue)
+        {
+            _signalDivergenceHistogram.Record(analysis.Divergence.Value, tags);
+        }
+
+        if (analysis.AudioEmotion?.Confidence is { } confidence)
+        {
+            _emotionConfidenceHistogram.Record(confidence, tags);
+        }
+
+        _audioAnalysisLatencyHistogram.Record(analysisLatencyMs, tags);
+
+        if (analysis.IsDivergent)
+        {
+            _signalDivergenceCounter.Add(1, tags);
+        }
+    }
+
+    public void RecordSpeechToResponseLatency(string sessionId, double latencyMs)
+    {
+        _speechStartToResponseHistogram.Record(latencyMs, CreateTagList(sessionId));
     }
     #endregion
 

@@ -1,8 +1,9 @@
 using System.Buffers;
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.Transports;
 using Extensions.AI.Contents;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Showcase.ConsolePlayground;
 
-public class TestCallParticipant : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public class TestCallParticipant : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly ILogger<TestCallParticipant>? _logger;
     private SpeakerOutput? _speakerOutput;
@@ -94,13 +95,14 @@ public class TestCallParticipant : IChannelTransport, IAudioProducer, IAudioCons
 
     public Task SendAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) { }
-    public void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler) { }
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler) { }
+    public void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler) { }
     public void SetOnDisconnected(Func<string, Task> handler) => _disconnectedHandler = handler;
     public Task ConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public async ValueTask DisposeAsync()
     {
         if (_disconnectedHandler is not null) { try { await _disconnectedHandler(ChannelId); } catch { } }
     }
+
 }
 

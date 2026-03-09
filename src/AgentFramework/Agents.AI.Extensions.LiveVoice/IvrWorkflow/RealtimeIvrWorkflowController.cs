@@ -491,4 +491,5 @@ public sealed class RealtimeIvrStepConfiguration
     /// Gets or sets the tools available during this step.
     /// </summary>
     public required IReadOnlyList<AITool> AvailableTools { get; init; }
+
 }

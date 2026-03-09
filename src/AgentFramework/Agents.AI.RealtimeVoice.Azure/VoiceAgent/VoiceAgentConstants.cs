@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Agents.AI.Extensions.LiveVoice.Agent;
+namespace Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 
 public static class VoiceAgentConstants
 {
@@ -19,7 +19,7 @@ public static class VoiceAgentConstants
 
     }
 
-    public static class  LatencyInstructions
+    public static class LatencyInstructions
     {
         public const string ToolCallLatencyInstruction = """
         The tool call is taking too much time, let user know we are working on their request

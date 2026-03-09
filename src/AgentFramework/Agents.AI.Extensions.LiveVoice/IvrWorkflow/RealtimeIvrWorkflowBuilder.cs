@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Microsoft.Extensions.AI;
 using Microsoft.Shared.Diagnostics;
@@ -92,6 +93,7 @@ public sealed class RealtimeIvrWorkflowBuilder
         _commonTools.AddRange(tools);
         return this;
     }
+
 
     /// <summary>
     /// Adds a workflow step using a fluent builder.
@@ -198,7 +200,7 @@ public sealed class RealtimeIvrWorkflowBuilder
                 MaxRetries = step.MaxRetries,
                 MaxDuration = step.MaxDuration,
                 RequiredAuthLevel = step.RequiredAuthLevel,
-                OnCompleted = step.OnCompleted
+                OnCompleted = step.OnCompleted,
             };
         }).ToList();
 
@@ -592,7 +594,7 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
             MaxRetries = _maxRetries,
             MaxDuration = _maxDuration,
             RequiredAuthLevel = _requiredAuthLevel,
-            OnCompleted = _onCompleted
+            OnCompleted = _onCompleted,
         };
     }
 }

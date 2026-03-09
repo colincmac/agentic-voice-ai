@@ -1,6 +1,7 @@
 using Agents.AI.Extensions;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.Extensions.LiveVoice.Media;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;

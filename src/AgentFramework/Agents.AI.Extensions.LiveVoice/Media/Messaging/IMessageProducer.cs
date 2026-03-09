@@ -1,14 +1,14 @@
 using Agents.AI.Extensions.Helpers.Streaming;
 
-namespace Agents.AI.RealtimeVoice.Azure.Media.Messaging;
+namespace Agents.AI.Extensions.LiveVoice.Media.Messaging;
 
 /// <summary>
 /// A transport that receives inbound messages and forwards them into the session via a registered callback.
 /// </summary>
-public interface IMessageConsumer
+public interface IMessageProducer
 {
     /// <summary>
     /// Register an inbound message handler. The router calls this to hook messages pushed from the transport.
     /// </summary>
-    void SetOnMessageReceived(Func<string, MessageUpdate, CancellationToken, Task> handler);
+    void SetOnMessageReceivedCallback(Func<string, MessageUpdate, CancellationToken, Task> handler);
 }

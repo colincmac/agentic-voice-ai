@@ -6,7 +6,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Shared.Diagnostics;
 
-namespace Agents.AI.RealtimeVoice.Azure.Media;
+namespace Agents.AI.Extensions.LiveVoice.Media;
 
 
 /// <summary>

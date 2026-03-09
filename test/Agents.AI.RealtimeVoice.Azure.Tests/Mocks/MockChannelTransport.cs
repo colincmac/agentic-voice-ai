@@ -1,4 +1,6 @@
 using Agents.AI.Extensions.Helpers.Streaming;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.Extensions.LiveVoice.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Media.Audio;
 using Agents.AI.RealtimeVoice.Azure.Media.Messaging;
 using Agents.AI.RealtimeVoice.Azure.Models;
@@ -10,7 +12,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 /// Mock implementation of IChannelTransport for testing.
 /// Implements all media interfaces so tests can exercise any capability.
 /// </summary>
-public class MockChannelTransport : IChannelTransport, IAudioProducer, IAudioConsumer, IMessageProducer, IMessageConsumer
+public class MockChannelTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProduce
 {
     private Func<string, ReadOnlyMemory<byte>, CancellationToken, Task>? _audioHandler;
     private Func<string, MessageUpdate, CancellationToken, Task>? _messageHandler;
@@ -63,7 +65,7 @@ public class MockChannelTransport : IChannelTransport, IAudioProducer, IAudioCon
         return Task.CompletedTask;
     }
 
-    public void SetOnAudioReceived(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler)
+    public void SetOnAudioReceivedCallback(Func<string, ReadOnlyMemory<byte>, CancellationToken, Task> handler)
     {
         _audioHandler = handler;
     }
