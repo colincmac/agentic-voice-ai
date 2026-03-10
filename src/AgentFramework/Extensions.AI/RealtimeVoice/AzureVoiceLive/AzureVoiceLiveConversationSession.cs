@@ -23,6 +23,8 @@ namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 /// Responses, which are model-generated audio or text Items that are added to the Conversation.
 /// An OpenAI session has a max duration of 30minutes
 /// </summary>
+[Obsolete("Please use `AzureVoiceLiveClientSession` instead")]
+
 public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
 {
 

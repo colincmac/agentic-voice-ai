@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.ClientModel.Primitives;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -11,32 +12,28 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure.AI.VoiceLive;
+using Microsoft.Extensions.AI;
 using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
-using Sdk = OpenAI.Realtime;
-using Microsoft.Extensions.AI;
+using Sdk = Azure.AI.VoiceLive;
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 #pragma warning disable OPENAI002 // OpenAI Realtime API is experimental
 #pragma warning disable SA1204 // Static elements should appear before instance elements
 #pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access
 #pragma warning disable IL3050 // Members annotated with 'RequiresDynamicCodeAttribute' require dynamic access
 
-namespace Microsoft.Extensions.AI;
+namespace Extensions.AI.Realtime.AzureVoiceLive;
 
-/// <summary>Represents an <see cref="IRealtimeClientSession"/> for the OpenAI Realtime API over WebSocket.</summary>
+/// <summary>Represents an <see cref="IRealtimeClientSession"/> for the Azure Voice Live API over WebSocket.</summary>
 public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 {
-    /// <summary>The model to use for the session.</summary>
-    private readonly string _model;
+    private readonly SessionTarget _sessionTarget;
 
     /// <summary>Metadata about this session's provider and model, used for OpenTelemetry.</summary>
     private readonly ChatClientMetadata _metadata;
 
-    /// <summary>Owned <see cref="Sdk.RealtimeClient"/> created from the (apiKey, model) constructor path.</summary>
-    private Sdk.RealtimeClient? _ownedRealtimeClient;
-
-    /// <summary>The SDK session client for communication with the Realtime API.</summary>
-    private Sdk.RealtimeSessionClient? _sessionClient;
+    private readonly  VoiceLiveSession _sessionClient;
 
     /// <summary>Whether the session has been disposed (0 = false, 1 = true).</summary>
     private int _disposed;
@@ -44,66 +41,42 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     /// <inheritdoc />
     public RealtimeSessionOptions? Options { get; private set; }
 
-    /// <summary>Initializes a new instance of the <see cref="OpenAIRealtimeClientSession"/> class.</summary>
-    /// <param name="apiKey">The API key used for authentication.</param>
-    /// <param name="model">The model to use for the session.</param>
-    public AzureVoiceLiveClientSession(string apiKey, string model)
-    {
-        _ownedRealtimeClient = new Sdk.RealtimeClient(Throw.IfNull(apiKey));
-        _model = Throw.IfNull(model);
-        _metadata = new("openai", defaultModelId: _model);
-    }
-
     /// <summary>Initializes a new instance of the <see cref="OpenAIRealtimeClientSession"/> class from an already-connected session client.</summary>
     /// <param name="sessionClient">The connected SDK session client.</param>
     /// <param name="model">The model name for metadata.</param>
-    internal AzureVoiceLiveClientSession(Sdk.RealtimeSessionClient sessionClient, string model)
+    internal AzureVoiceLiveClientSession(VoiceLiveSession sessionClient, SessionTarget sessionTarget)
     {
         _sessionClient = Throw.IfNull(sessionClient);
-        _model = model ?? string.Empty;
-        _metadata = new("openai", defaultModelId: _model);
-    }
-
-    /// <summary>Connects the WebSocket to the OpenAI Realtime API.</summary>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous connect operation.</returns>
-    /// <exception cref="InvalidOperationException">The session was not created with an owned realtime client.</exception>
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
-    {
-        if (_ownedRealtimeClient is null)
-        {
-            Throw.InvalidOperationException("Cannot connect a session that was not created with an owned realtime client.");
-        }
-
-        _sessionClient = await _ownedRealtimeClient.StartConversationSessionAsync(
-            _model, cancellationToken: cancellationToken).ConfigureAwait(false);
+        _sessionTarget = Throw.IfNull(sessionTarget);
+        _metadata = new("azure_voice_live", defaultModelId: _sessionTarget.ToString());
     }
 
     private async Task UpdateSessionAsync(RealtimeSessionOptions options, CancellationToken cancellationToken)
     {
-        if (_sessionClient is not null)
-        {
-            // Allow callers to provide a pre-configured SDK-specific options instance.
-            object? rawOptions = options.RawRepresentationFactory?.Invoke();
+        VoiceLiveSessionOptions? sessionOptions = null;
+        var rawOptions = options.RawRepresentationFactory?.Invoke();
 
-            if (rawOptions is Sdk.RealtimeTranscriptionSessionOptions rawTransOptions)
-            {
-                await _sessionClient.ConfigureTranscriptionSessionAsync(rawTransOptions, cancellationToken).ConfigureAwait(false);
-            }
-            else if (options.SessionKind == RealtimeSessionKind.Transcription)
-            {
-                var transOpts = BuildTranscriptionSessionOptions(options);
-                await _sessionClient.ConfigureTranscriptionSessionAsync(transOpts, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                var convOpts = BuildConversationSessionOptions(options, rawOptions as Sdk.RealtimeConversationSessionOptions);
-                await _sessionClient.ConfigureConversationSessionAsync(convOpts, cancellationToken).ConfigureAwait(false);
-            }
+        if (rawOptions is string json)
+        {
+            var data = BinaryData.FromString(json);
+
+            sessionOptions = ModelReaderWriter.Read<VoiceLiveSessionOptions>(
+                data,
+                new ModelReaderWriterOptions("J"),
+                AzureAIVoiceLiveContext.Default);
+
         }
+        else if (rawOptions is VoiceLiveSessionOptions opts)
+        {
+            sessionOptions = opts;
+        }
+
+        var convOpts = BuildConversationSessionOptions(options, rawOptions as Sdk.VoiceLiveSessionOptions);
+        await _sessionClient.ConfigureConversationSessionAsync(convOpts, cancellationToken).ConfigureAwait(false);
 
         Options = options;
     }
+
 
     /// <inheritdoc />
     public async Task SendAsync(RealtimeClientMessage message, CancellationToken cancellationToken = default)
@@ -203,7 +176,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         return default;
     }
 
-    #region Send Helpers (MEAI → SDK)
+    #region Send Helpers
 
     private async Task SendResponseCreateAsync(CreateResponseRealtimeClientMessage responseCreate, CancellationToken cancellationToken)
     {

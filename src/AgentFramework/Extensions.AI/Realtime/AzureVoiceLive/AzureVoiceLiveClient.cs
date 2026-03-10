@@ -5,60 +5,52 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure;
+using Azure.AI.VoiceLive;
+using Azure.Core;
+using Azure.Identity;
 using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
-using OpenAI.Realtime;
-using Azure.AI.VoiceLive;
+using Microsoft.Extensions.AI;
 
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 #pragma warning disable OPENAI002 // OpenAI Realtime API is experimental
 
-namespace Microsoft.Extensions.AI;
+namespace Extensions.AI.Realtime.AzureVoiceLive;
 
 /// <summary>Represents an <see cref="IRealtimeClient"/> for the OpenAI Realtime API.</summary>
 public sealed class AzureVoiceLiveClient : IRealtimeClient
 {
-    /// <summary>The OpenAI Realtime client.</summary>
-    private readonly RealtimeClient _realtimeClient;
+\    private readonly VoiceLiveClient _realtimeClient;
 
     /// <summary>The model to use for realtime sessions.</summary>
-    private readonly string _model;
+    private readonly SessionTarget _sessionTarget;
 
+    public const string AzureVoiceLiveProvider = "azure_voice_live";
     /// <summary>Metadata about this client's provider and model, used for OpenTelemetry.</summary>
     private readonly ChatClientMetadata _metadata;
 
-    /// <summary>Initializes a new instance of the <see cref="OpenAIRealtimeClient"/> class.</summary>
-    /// <param name="apiKey">The API key used for authentication.</param>
-    /// <param name="model">The model to use for realtime sessions.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="apiKey"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
-    public AzureVoiceLiveClient(string apiKey, string model)
+    public AzureVoiceLiveClient(Uri endpoint, AzureKeyCredential credential, string model) : this(new VoiceLiveClient(endpoint, credential), SessionTarget.FromModel(model))
     {
-        _realtimeClient = new RealtimeClient(Throw.IfNull(apiKey));
-        _model = Throw.IfNull(model);
-        _metadata = new("openai", defaultModelId: _model);
     }
 
-    /// <summary>Initializes a new instance of the <see cref="OpenAIRealtimeClient"/> class.</summary>
-    /// <param name="realtimeClient">The OpenAI Realtime client to use.</param>
-    /// <param name="model">The model to use for realtime sessions.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="realtimeClient"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
-    public AzureVoiceLiveClient(RealtimeClient realtimeClient, string model)
+    public AzureVoiceLiveClient(Uri endpoint, TokenCredential credential, string model) : this(new VoiceLiveClient(endpoint, credential), SessionTarget.FromModel(model))
+    {
+    }
+
+    public AzureVoiceLiveClient(VoiceLiveClient realtimeClient, SessionTarget sessionTarget)
     {
         _realtimeClient = Throw.IfNull(realtimeClient);
-        _model = Throw.IfNull(model);
-        _metadata = new("openai", defaultModelId: _model);
+        _sessionTarget = Throw.IfNull(sessionTarget);
+        _metadata = new(AzureVoiceLiveProvider, defaultModelId: _sessionTarget.Model);
     }
 
     /// <inheritdoc />
     public async Task<IRealtimeClientSession> CreateSessionAsync(RealtimeSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        var sessionClient = options?.SessionKind == RealtimeSessionKind.Transcription
-            ? await _realtimeClient.StartTranscriptionSessionAsync(cancellationToken: cancellationToken).ConfigureAwait(false)
-            : await _realtimeClient.StartConversationSessionAsync(_model, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, cancellationToken);
+        var session = new AzureVoiceLiveClientSession(sessionClient, _sessionTarget);
 
-        var session = new OpenAIRealtimeClientSession(sessionClient, _model);
         try
         {
             if (options is not null)
