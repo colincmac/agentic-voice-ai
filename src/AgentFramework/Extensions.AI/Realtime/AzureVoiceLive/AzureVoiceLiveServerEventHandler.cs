@@ -11,7 +11,7 @@ namespace Extensions.AI.Realtime.AzureVoiceLive;
 
 public static class AzureVoiceLiveServerEventHandler
 {
-    internal static async IAsyncEnumerable<RealtimeServerMessage> FromVoiceLiveSessionUpdatesAsync(
+    public static async IAsyncEnumerable<RealtimeServerMessage> FromVoiceLiveSessionUpdatesAsync(
          IAsyncEnumerable<SessionUpdate> streamingRealtimeUpdates,
          [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -20,7 +20,7 @@ public static class AzureVoiceLiveServerEventHandler
         string? conversationId = null;
         string? sessionId = null;
         string? modelId = null;
-        string? lastMessageId = null;
+        string? eventId = null;
         ChatRole? lastRole = null;
 
         // Local helper to construct updates with current accumulated state.
@@ -28,12 +28,8 @@ public static class AzureVoiceLiveServerEventHandler
         {
             var update = new RealtimeServerMessage(lastRole, contents)
             {
-                ConversationId = conversationId,
-                CreatedAt = createdAt,
-                MessageId = lastMessageId,
-                ModelId = modelId,
+                MessageId = eventId,
                 RawRepresentation = null, // set below after switch when we have streamingUpdate
-                ResponseId = responseId,
             };
 
             return update;
@@ -84,7 +80,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateResponseAudioDelta audioDelta when !audioDelta.Delta.IsEmpty:
                     {
-                        lastMessageId = audioDelta.ItemId;
+                        eventId = audioDelta.ItemId;
                         responseId = audioDelta.ResponseId;
                         lastRole = ChatRole.Assistant;
                         var update = CreateUpdate([new DataContent(audioDelta.Delta.ToArray(), "audio/pcm")]);
@@ -97,7 +93,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateResponseAudioTranscriptDelta transcriptDelta:
                     {
-                        lastMessageId = transcriptDelta.ItemId;
+                        eventId = transcriptDelta.ItemId;
                         responseId = transcriptDelta.ResponseId;
                         lastRole = ChatRole.Assistant;
                         var update = CreateUpdate([new AudioTranscriptionContent(transcriptDelta.Delta)]);
@@ -110,7 +106,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateResponseFunctionCallArgumentsDone functionCall:
                     {
-                        lastMessageId = functionCall.ItemId;
+                        eventId = functionCall.ItemId;
                         responseId = functionCall.ResponseId;
                         lastRole = ChatRole.Assistant;
                         var parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(functionCall.Arguments);
@@ -123,7 +119,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateResponseAudioTranscriptDone textFinished:
                     {
-                        lastMessageId = textFinished.ItemId;
+                        eventId = textFinished.ItemId;
                         responseId = textFinished.ResponseId;
                         lastRole = ChatRole.Assistant;
 
@@ -153,7 +149,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateInputAudioBufferSpeechStarted speechStarted:
                     {
-                        lastMessageId = speechStarted.ItemId;
+                        eventId = speechStarted.ItemId;
                         lastRole = ChatRole.User;
                         var update = CreateUpdate([
                             new AudioTranscriptionContent(referenceItemId: speechStarted.ItemId) { StartTime = speechStarted.AudioStart },
@@ -169,7 +165,7 @@ public static class AzureVoiceLiveServerEventHandler
                     {
                         if (!string.IsNullOrEmpty(inputAudioTxDelta.Delta))
                         {
-                            lastMessageId = inputAudioTxDelta.ItemId;
+                            eventId = inputAudioTxDelta.ItemId;
                             lastRole = ChatRole.User;
 
                             var update = CreateUpdate([new AudioTranscriptionContent(text: inputAudioTxDelta.Delta, referenceItemId: inputAudioTxDelta.ItemId, referenceContentIndex: inputAudioTxDelta.ContentIndex)]);
@@ -183,7 +179,7 @@ public static class AzureVoiceLiveServerEventHandler
                     {
                         if (!string.IsNullOrEmpty(inputAudioTxFinished.Transcript))
                         {
-                            lastMessageId = inputAudioTxFinished.ItemId;
+                            eventId = inputAudioTxFinished.ItemId;
                             lastRole = ChatRole.User;
 
                             var update = CreateUpdate([new TextContent(inputAudioTxFinished.Transcript)]);
@@ -197,7 +193,7 @@ public static class AzureVoiceLiveServerEventHandler
 
                 case SessionUpdateInputAudioBufferSpeechStopped speechFinished:
                     {
-                        lastMessageId = speechFinished.ItemId;
+                        eventId = speechFinished.ItemId;
                         lastRole = ChatRole.User;
                         var update = CreateUpdate([
                             new RealtimeVadContent(VadEventType.InputSpeechEnded)
