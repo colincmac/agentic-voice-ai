@@ -2,11 +2,11 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
-    <AspNetCoreVersion>10.0.0</AspNetCoreVersion>
+    <AspNetCoreVersion>10.0.4</AspNetCoreVersion>
     <MicrosoftAIEvaluationVersion>10.1.0</MicrosoftAIEvaluationVersion>
 
     <MicrosoftExtensionsVersion>10.1.0</MicrosoftExtensionsVersion>
-    <MicrosoftExtensionsVersionAI>10.1.1-preview.1.25612.2</MicrosoftExtensionsVersionAI>
+    <MicrosoftExtensionsVersionAI>10.3.0</MicrosoftExtensionsVersionAI>
 
     <MicrosoftAgentsFrameworkVersion>1.0.0-preview.251204.1</MicrosoftAgentsFrameworkVersion>
     <AspireVersion>13.1.0</AspireVersion>
@@ -40,7 +40,7 @@
     
     <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.2.0-beta.8" />
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />
-    <PackageVersion Include="Azure.AI.VoiceLive" Version="1.0.0" />
+    <PackageVersion Include="Azure.AI.VoiceLive" Version="1.1.0-beta.3" />
     <PackageVersion Include="Azure.Communication.CallAutomation" Version="1.6.0-beta.1" />
     <PackageVersion Include="Azure.Communication.Common" Version="1.4.0" />
     <PackageVersion Include="Azure.Communication.Identity" Version="1.4.0-beta.1" />
@@ -102,8 +102,8 @@
     <PackageVersion Include="Microsoft.Azure.AppConfiguration.AspNetCore" Version="8.5.0-preview" />
     <PackageVersion Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.0" />
     <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="$(AspNetCoreVersion)" />
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.1.1" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.1.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="$(MicrosoftExtensionsVersionAI)" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="$(MicrosoftExtensionsVersionAI)" />
     <PackageVersion Include="Microsoft.Extensions.AI.AzureAIInference" Version="10.0.0-preview.1.25559.3" />
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="$(MicrosoftExtensionsVersionAI)" />
     
@@ -115,11 +115,11 @@
     
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery.Yarp" Version="$(MicrosoftExtensionsVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Azure" Version="1.13.1" />
-    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.1" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="$(MicrosoftExtensionsVersion)" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="$(MicrosoftExtensionsVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Telemetry.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
@@ -140,7 +140,7 @@
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.2" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="0.3.0-preview.2" />
     <PackageVersion Include="NAudio" Version="2.2.1" />
-    <PackageVersion Include="OpenAI" Version="2.8.0" />
+    <PackageVersion Include="OpenAI" Version="2.9.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />

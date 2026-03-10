@@ -193,7 +193,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
             {
                 if (options.Voice is { } voice)
                 {
-                    activity?.AddTag(GenAI.Realtime.RealtimeVoice, voice);
+                    activity?.AddTag(GenAI.Realtime.Voice, voice);
                 }
                 if (options.AdditionalProperties is { } props && EnableSensitiveData)
                 {
@@ -316,7 +316,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
             if (SessionId is not null)
             {
                 activity.AddTag(GenAI.AttributeGenAiConversationId, SessionId);
-                activity.AddTag(GenAI.Realtime.RealtimeSessionId, SessionId);
+                activity.AddTag(GenAI.Realtime.SessionId, SessionId);
             }
         }
 
