@@ -71,8 +71,8 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             sessionOptions = opts;
         }
 
-        var convOpts = BuildConversationSessionOptions(options, rawOptions as Sdk.VoiceLiveSessionOptions);
-        await _sessionClient.ConfigureConversationSessionAsync(convOpts, cancellationToken).ConfigureAwait(false);
+        var convOpts = BuildConversationSessionOptions(options, sessionOptions);
+        await _sessionClient.ConfigureSessionAsync(convOpts, cancellationToken).ConfigureAwait(false);
 
         Options = options;
     }
@@ -358,7 +358,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         }
     }
 
-    private static Sdk.RealtimeConversationSessionOptions BuildConversationSessionOptions(RealtimeSessionOptions options, Sdk.RealtimeConversationSessionOptions? seedOptions = null)
+    private static Sdk.RealtimeConversationSessionOptions BuildConversationSessionOptions(VoiceLiveSessionOptions options, Sdk.RealtimeConversationSessionOptions? seedOptions = null)
     {
         var convOptions = seedOptions ?? new Sdk.RealtimeConversationSessionOptions();
 

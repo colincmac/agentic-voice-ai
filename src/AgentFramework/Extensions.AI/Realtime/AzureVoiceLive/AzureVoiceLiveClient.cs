@@ -21,7 +21,7 @@ namespace Extensions.AI.Realtime.AzureVoiceLive;
 /// <summary>Represents an <see cref="IRealtimeClient"/> for the OpenAI Realtime API.</summary>
 public sealed class AzureVoiceLiveClient : IRealtimeClient
 {
-\    private readonly VoiceLiveClient _realtimeClient;
+    private readonly VoiceLiveClient _realtimeClient;
 
     /// <summary>The model to use for realtime sessions.</summary>
     private readonly SessionTarget _sessionTarget;
