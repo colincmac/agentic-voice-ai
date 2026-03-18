@@ -5,19 +5,20 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
 using Microsoft.Shared.Diagnostics;
-using OpenAI.Realtime;
+using Sdk = OpenAI.Realtime;
 
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 #pragma warning disable OPENAI002 // OpenAI Realtime API is experimental
 
-namespace Microsoft.Extensions.AI;
+namespace Extensions.AI.Realtime.OpenAI;
 
 /// <summary>Represents an <see cref="IRealtimeClient"/> for the OpenAI Realtime API.</summary>
 public sealed class OpenAIRealtimeClient : IRealtimeClient
 {
     /// <summary>The OpenAI Realtime client.</summary>
-    private readonly RealtimeClient _realtimeClient;
+    private readonly Sdk.RealtimeClient _realtimeClient;
 
     /// <summary>The model to use for realtime sessions.</summary>
     private readonly string _model;
@@ -32,7 +33,7 @@ public sealed class OpenAIRealtimeClient : IRealtimeClient
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
     public OpenAIRealtimeClient(string apiKey, string model)
     {
-        _realtimeClient = new RealtimeClient(Throw.IfNull(apiKey));
+        _realtimeClient = new Sdk.RealtimeClient(Throw.IfNull(apiKey));
         _model = Throw.IfNull(model);
         _metadata = new("openai", defaultModelId: _model);
     }
@@ -42,7 +43,7 @@ public sealed class OpenAIRealtimeClient : IRealtimeClient
     /// <param name="model">The model to use for realtime sessions.</param>
     /// <exception cref="ArgumentNullException"><paramref name="realtimeClient"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
-    public OpenAIRealtimeClient(RealtimeClient realtimeClient, string model)
+    public OpenAIRealtimeClient(Sdk.RealtimeClient realtimeClient, string model)
     {
         _realtimeClient = Throw.IfNull(realtimeClient);
         _model = Throw.IfNull(model);

@@ -53,8 +53,5 @@
   <ItemGroup>
     <ProjectReference Include="..\Extensions.AI\Extensions.AI.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Realtime\" />
-  </ItemGroup>
 
 </Project>

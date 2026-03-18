@@ -8,7 +8,7 @@
     <MicrosoftExtensionsVersion>10.1.0</MicrosoftExtensionsVersion>
     <MicrosoftExtensionsVersionAI>10.3.0</MicrosoftExtensionsVersionAI>
 
-    <MicrosoftAgentsFrameworkVersion>1.0.0-preview.251204.1</MicrosoftAgentsFrameworkVersion>
+    <MicrosoftAgentsFrameworkVersion>1.0.0-rc4</MicrosoftAgentsFrameworkVersion>
     <AspireVersion>13.1.0</AspireVersion>
     <DaprVersion>1.16.1</DaprVersion>
     
@@ -78,13 +78,13 @@
     <PackageVersion Include="Microsoft.Agents.AI" Version="$(MicrosoftAgentsFrameworkVersion)" />
     <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="$(MicrosoftAgentsFrameworkVersion)" />
     <PackageVersion Include="Microsoft.Agents.AI.AzureAI" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hosting" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.A2A" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.AGUI" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hosting.AGUI" Version="$(MicrosoftAgentsFrameworkVersion)" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hosting.AGUI.AspNetCore" Version="$(MicrosoftAgentsFrameworkVersion)" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.A2A" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.AGUI" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.AGUI" Version="1.0.0-preview.260311.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hosting.AGUI.AspNetCore" Version="1.0.0-preview.260311.1" />
 
 
     <!-- Base & Microsoft.Extensions.* -->

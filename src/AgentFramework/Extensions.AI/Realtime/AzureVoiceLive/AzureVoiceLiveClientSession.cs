@@ -14,14 +14,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.AI.VoiceLive;
 using Microsoft.Extensions.AI;
-using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
-using Sdk = Azure.AI.VoiceLive;
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 #pragma warning disable OPENAI002 // OpenAI Realtime API is experimental
-#pragma warning disable SA1204 // Static elements should appear before instance elements
-#pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access
-#pragma warning disable IL3050 // Members annotated with 'RequiresDynamicCodeAttribute' require dynamic access
+
 
 namespace Extensions.AI.Realtime.AzureVoiceLive;
 
@@ -33,7 +29,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     /// <summary>Metadata about this session's provider and model, used for OpenTelemetry.</summary>
     private readonly ChatClientMetadata _metadata;
 
-    private readonly  VoiceLiveSession _sessionClient;
+    private readonly VoiceLiveSession _sessionClient;
 
     /// <summary>Whether the session has been disposed (0 = false, 1 = true).</summary>
     private int _disposed;
@@ -41,9 +37,9 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     /// <inheritdoc />
     public RealtimeSessionOptions? Options { get; private set; }
 
-    /// <summary>Initializes a new instance of the <see cref="OpenAIRealtimeClientSession"/> class from an already-connected session client.</summary>
+    /// <summary>Initializes a new instance of the <see cref="AzureVoiceLiveClientSession"/> class from an already-connected session client.</summary>
     /// <param name="sessionClient">The connected SDK session client.</param>
-    /// <param name="model">The model name for metadata.</param>
+    /// <param name="sessionTarget">The model target for metadata.</param>
     internal AzureVoiceLiveClientSession(VoiceLiveSession sessionClient, SessionTarget sessionTarget)
     {
         _sessionClient = Throw.IfNull(sessionClient);
@@ -53,37 +49,18 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
     private async Task UpdateSessionAsync(RealtimeSessionOptions options, CancellationToken cancellationToken)
     {
-        VoiceLiveSessionOptions? sessionOptions = null;
-        var rawOptions = options.RawRepresentationFactory?.Invoke();
-
-        if (rawOptions is string json)
-        {
-            var data = BinaryData.FromString(json);
-
-            sessionOptions = ModelReaderWriter.Read<VoiceLiveSessionOptions>(
-                data,
-                new ModelReaderWriterOptions("J"),
-                AzureAIVoiceLiveContext.Default);
-
-        }
-        else if (rawOptions is VoiceLiveSessionOptions opts)
-        {
-            sessionOptions = opts;
-        }
-
-        var convOpts = BuildConversationSessionOptions(options, sessionOptions);
-        await _sessionClient.ConfigureSessionAsync(convOpts, cancellationToken).ConfigureAwait(false);
+        var sessionOptions = BuildSessionOptions(options, TryGetRawSessionOptions(options.RawRepresentationFactory?.Invoke()));
+        await _sessionClient.ConfigureSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
 
         Options = options;
     }
-
 
     /// <inheritdoc />
     public async Task SendAsync(RealtimeClientMessage message, CancellationToken cancellationToken = default)
     {
         _ = Throw.IfNull(message);
 
-        if (cancellationToken.IsCancellationRequested || _sessionClient is null)
+        if (cancellationToken.IsCancellationRequested)
         {
             return;
         }
@@ -109,16 +86,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
                     break;
 
                 case InputAudioBufferCommitRealtimeClientMessage:
-                    if (message.MessageId is not null)
-                    {
-                        var cmd = new Sdk.RealtimeClientCommandInputAudioBufferCommit { EventId = message.MessageId };
-                        await _sessionClient.SendCommandAsync(cmd, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await _sessionClient.CommitPendingAudioAsync(cancellationToken).ConfigureAwait(false);
-                    }
-
+                    await SendInputAudioCommitAsync(message, cancellationToken).ConfigureAwait(false);
                     break;
 
                 default:
@@ -136,15 +104,9 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     public async IAsyncEnumerable<RealtimeServerMessage> GetStreamingResponseAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (_sessionClient is null)
+        await foreach (var update in _sessionClient.GetUpdatesAsync(cancellationToken).ConfigureAwait(false))
         {
-            yield break;
-        }
-
-        await foreach (var update in _sessionClient.ReceiveUpdatesAsync(cancellationToken).ConfigureAwait(false))
-        {
-            var serverMessage = MapServerUpdate(update);
-            if (serverMessage is not null)
+            if (MapServerUpdate(update) is { } serverMessage)
             {
                 yield return serverMessage;
             }
@@ -160,7 +122,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             serviceKey is not null ? null :
             serviceType == typeof(ChatClientMetadata) ? _metadata :
             serviceType.IsInstanceOfType(this) ? this :
-            _sessionClient is not null && serviceType.IsInstanceOfType(_sessionClient) ? _sessionClient :
+            serviceType.IsInstanceOfType(_sessionClient) ? _sessionClient :
             null;
     }
 
@@ -172,7 +134,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             return default;
         }
 
-        _sessionClient?.Dispose();
+        _sessionClient.Dispose();
         return default;
     }
 
@@ -180,135 +142,56 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
     private async Task SendResponseCreateAsync(CreateResponseRealtimeClientMessage responseCreate, CancellationToken cancellationToken)
     {
-        var responseOptions = new Sdk.RealtimeResponseOptions();
-
-        // Audio output options.
-        if (responseCreate.OutputAudioOptions is not null || !string.IsNullOrEmpty(responseCreate.OutputVoice))
+        if (TryGetRawJsonPayload(responseCreate.RawRepresentation) is { } rawPayload)
         {
-            responseOptions.AudioOptions = new Sdk.RealtimeResponseAudioOptions();
-            if (responseCreate.OutputAudioOptions is not null)
-            {
-                responseOptions.AudioOptions.OutputAudioOptions.AudioFormat = ToSdkAudioFormat(responseCreate.OutputAudioOptions);
-            }
-
-            if (!string.IsNullOrEmpty(responseCreate.OutputVoice))
-            {
-                responseOptions.AudioOptions.OutputAudioOptions.Voice = new Sdk.RealtimeVoice(responseCreate.OutputVoice);
-            }
+            await _sessionClient.SendCommandAsync(rawPayload, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
-        // Conversation mode.
-        if (responseCreate.ExcludeFromConversation is bool excludeFromConversation)
+        if (responseCreate.Items is not null)
         {
-            responseOptions.DefaultConversationConfiguration = excludeFromConversation
-                ? Sdk.RealtimeResponseDefaultConversationConfiguration.None
-                : Sdk.RealtimeResponseDefaultConversationConfiguration.Auto;
-        }
-
-        // Input items.
-        if (responseCreate.Items is { } items)
-        {
-            foreach (var item in items)
+            foreach (var item in responseCreate.Items)
             {
-                if (ToRealtimeItem(item) is Sdk.RealtimeItem sdkItem)
+                if (ToConversationRequestItem(item) is { } sdkItem)
                 {
-                    responseOptions.InputItems.Add(sdkItem);
+                    await _sessionClient.AddItemAsync(sdkItem, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
 
-        if (!string.IsNullOrEmpty(responseCreate.Instructions))
+        var responseOptions = BuildResponseOptions(responseCreate);
+
+        if (responseOptions is null)
         {
-            responseOptions.Instructions = responseCreate.Instructions;
+            await _sessionClient.StartResponseAsync(cancellationToken).ConfigureAwait(false);
+            return;
         }
 
-        if (responseCreate.MaxOutputTokens.HasValue)
-        {
-            responseOptions.MaxOutputTokenCount = responseCreate.MaxOutputTokens.Value;
-        }
-
-        if (responseCreate.AdditionalProperties is { Count: > 0 })
-        {
-            var metadata = new Dictionary<string, BinaryData>();
-            foreach (var kvp in responseCreate.AdditionalProperties)
-            {
-                metadata[kvp.Key] = BinaryData.FromString(kvp.Value?.ToString() ?? string.Empty);
-            }
-
-            responseOptions.Metadata = metadata;
-        }
-
-        if (responseCreate.OutputModalities is not null)
-        {
-            foreach (var modality in responseCreate.OutputModalities)
-            {
-                responseOptions.OutputModalities.Add(new Sdk.RealtimeOutputModality(modality));
-            }
-        }
-
-        if (responseCreate.ToolMode is { } toolMode)
-        {
-            responseOptions.ToolChoice = ToSdkToolChoice(toolMode);
-        }
-
-        if (responseCreate.Tools is not null)
-        {
-            foreach (var tool in responseCreate.Tools)
-            {
-                if (ToRealtimeTool(tool) is Sdk.RealtimeTool sdkTool)
-                {
-                    responseOptions.Tools.Add(sdkTool);
-                }
-            }
-        }
-
-        if (responseCreate.MessageId is not null)
-        {
-            var cmd = new Sdk.RealtimeClientCommandResponseCreate
-            {
-                ResponseOptions = responseOptions,
-                EventId = responseCreate.MessageId,
-            };
-            await _sessionClient!.SendCommandAsync(cmd, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await _sessionClient!.StartResponseAsync(responseOptions, cancellationToken).ConfigureAwait(false);
-        }
+        await _sessionClient.StartResponseAsync(responseOptions, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SendConversationItemCreateAsync(CreateConversationItemRealtimeClientMessage itemCreate, CancellationToken cancellationToken)
     {
-        if (itemCreate.Item is null)
+        if (TryGetRawJsonPayload(itemCreate.RawRepresentation) is { } rawPayload)
         {
+            await _sessionClient.SendCommandAsync(rawPayload, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var sdkItem = ToRealtimeItem(itemCreate.Item);
+        if (itemCreate.RawRepresentation is ConversationRequestItem rawItem)
+        {
+            await _sessionClient.AddItemAsync(rawItem, cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
+        var sdkItem = ToConversationRequestItem(itemCreate.Item);
         if (sdkItem is null)
         {
             return;
         }
 
-        string? previousId = null;
-        if (itemCreate.RawRepresentation is Sdk.RealtimeClientCommandConversationItemCreate rawCmd)
-        {
-            previousId = rawCmd.PreviousItemId;
-        }
-
-        if (itemCreate.MessageId is not null || previousId is not null)
-        {
-            var cmd = new Sdk.RealtimeClientCommandConversationItemCreate(sdkItem)
-            {
-                EventId = itemCreate.MessageId,
-                PreviousItemId = previousId,
-            };
-            await _sessionClient!.SendCommandAsync(cmd, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await _sessionClient!.AddItemAsync(sdkItem, cancellationToken).ConfigureAwait(false);
-        }
+        await _sessionClient.AddItemAsync(sdkItem, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SendInputAudioAppendAsync(InputAudioBufferAppendRealtimeClientMessage audioAppend, CancellationToken cancellationToken)
@@ -318,353 +201,354 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             return;
         }
 
-        BinaryData audioData = ExtractAudioBinaryData(audioAppend.Content);
+        var audioBytes = ExtractAudioBinaryData(audioAppend.Content).ToArray();
 
-        if (audioAppend.MessageId is not null)
-        {
-            var cmd = new Sdk.RealtimeClientCommandInputAudioBufferAppend(audioData) { EventId = audioAppend.MessageId };
-            await _sessionClient!.SendCommandAsync(cmd, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await _sessionClient!.SendInputAudioAsync(audioData, cancellationToken).ConfigureAwait(false);
-        }
+        await _sessionClient.SendInputAudioAsync(audioBytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendInputAudioCommitAsync(RealtimeClientMessage _, CancellationToken cancellationToken)
+    {
+        await _sessionClient.CommitInputAudioAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SendRawCommandAsync(RealtimeClientMessage message, CancellationToken cancellationToken)
     {
-        if (message.RawRepresentation is Sdk.RealtimeClientCommand sdkCmd)
+        if (TryGetRawJsonPayload(message.RawRepresentation) is { } rawPayload)
         {
-            await _sessionClient!.SendCommandAsync(sdkCmd, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        string? jsonString = message.RawRepresentation switch
-        {
-            string s => s,
-            JsonObject obj => obj.ToJsonString(),
-            _ => null,
-        };
-
-        if (jsonString is not null)
-        {
-            // Inject event_id if the message has one but the raw JSON does not.
-            if (message.MessageId is not null && !jsonString.Contains("\"event_id\"", StringComparison.Ordinal))
+            if (message.MessageId is not null)
             {
-                jsonString = jsonString.Insert(1, $"\"event_id\":{JsonSerializer.Serialize(message.MessageId, OpenAIRealtimeJsonContext.Default.String)},");
+                string jsonString = rawPayload.ToString();
+                if (!jsonString.Contains("\"event_id\"", StringComparison.Ordinal))
+                {
+                    jsonString = jsonString.Insert(1, $"\"event_id\":{JsonSerializer.Serialize(message.MessageId, OpenAIRealtimeJsonContext.Default.String)},");
+                    rawPayload = BinaryData.FromString(jsonString);
+                }
             }
 
-            await _sessionClient!.SendCommandAsync(BinaryData.FromString(jsonString), null).ConfigureAwait(false);
+            await _sessionClient.SendCommandAsync(rawPayload, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static Sdk.RealtimeConversationSessionOptions BuildConversationSessionOptions(VoiceLiveSessionOptions options, Sdk.RealtimeConversationSessionOptions? seedOptions = null)
+    private static VoiceLiveSessionOptions BuildSessionOptions(RealtimeSessionOptions options, VoiceLiveSessionOptions? seedOptions = null)
     {
-        var convOptions = seedOptions ?? new Sdk.RealtimeConversationSessionOptions();
+        var sessionOptions = seedOptions ?? new VoiceLiveSessionOptions();
 
-        // Audio configuration. Reuse any existing options from the seed to preserve provider-specific settings.
-        var audioOptions = convOptions.AudioOptions ?? new Sdk.RealtimeConversationSessionAudioOptions();
-        var inputAudioOptions = audioOptions.InputAudioOptions ?? new Sdk.RealtimeConversationSessionInputAudioOptions();
-        var outputAudioOptions = audioOptions.OutputAudioOptions ?? new Sdk.RealtimeConversationSessionOutputAudioOptions();
-
-        if (options.InputAudioFormat is not null)
+        if (options.Model is not null)
         {
-            inputAudioOptions.AudioFormat = ToSdkAudioFormat(options.InputAudioFormat);
+            sessionOptions.Model = options.Model;
+        }
+
+        if (options.Instructions is not null)
+        {
+            sessionOptions.Instructions = options.Instructions;
+        }
+
+        if (options.InputAudioFormat is not null && ToVoiceLiveInputAudioFormat(options.InputAudioFormat) is { } inputAudioFormat)
+        {
+            sessionOptions.InputAudioFormat = inputAudioFormat;
         }
 
         if (options.TranscriptionOptions is not null)
         {
-            inputAudioOptions.AudioTranscriptionOptions = new Sdk.RealtimeAudioTranscriptionOptions
+            sessionOptions.InputAudioTranscription = new AudioInputTranscriptionOptions(ToVoiceLiveTranscriptionModel(options.TranscriptionOptions.ModelId))
             {
                 Language = options.TranscriptionOptions.SpeechLanguage,
-                Model = options.TranscriptionOptions.ModelId,
-                Prompt = options.TranscriptionOptions.Prompt,
             };
         }
 
-        if (options.OutputAudioFormat is not null)
+        if (options.OutputAudioFormat is not null && ToVoiceLiveOutputAudioFormat(options.OutputAudioFormat) is { } outputAudioFormat)
         {
-            outputAudioOptions.AudioFormat = ToSdkAudioFormat(options.OutputAudioFormat);
+            sessionOptions.OutputAudioFormat = outputAudioFormat;
         }
 
         if (options.Voice is not null)
         {
-            outputAudioOptions.Voice = new Sdk.RealtimeVoice(options.Voice);
-        }
-
-        audioOptions.InputAudioOptions = inputAudioOptions;
-        audioOptions.OutputAudioOptions = outputAudioOptions;
-        convOptions.AudioOptions = audioOptions;
-
-        if (options.Instructions is not null)
-        {
-            convOptions.Instructions = options.Instructions;
+            sessionOptions.Voice = ToAzureVoiceProvider(options.Voice);
         }
 
         if (options.MaxOutputTokens.HasValue)
         {
-            convOptions.MaxOutputTokenCount = options.MaxOutputTokens.Value;
-        }
-
-        if (options.Model is not null)
-        {
-            convOptions.Model = options.Model;
+            sessionOptions.MaxResponseOutputTokens = options.MaxOutputTokens.Value;
         }
 
         if (options.OutputModalities is not null)
         {
+            sessionOptions.Modalities.Clear();
             foreach (var modality in options.OutputModalities)
             {
-                convOptions.OutputModalities.Add(new Sdk.RealtimeOutputModality(modality));
+                if (ToVoiceLiveInteractionModality(modality) is { } sdkModality)
+                {
+                    sessionOptions.Modalities.Add(sdkModality);
+                }
             }
         }
 
         if (options.ToolMode is { } toolMode)
         {
-            convOptions.ToolChoice = ToSdkToolChoice(toolMode);
+            sessionOptions.ToolChoice = ToVoiceLiveToolChoice(toolMode);
         }
 
         if (options.Tools is not null)
         {
+            sessionOptions.Tools.Clear();
             foreach (var tool in options.Tools)
             {
-                if (ToRealtimeTool(tool) is Sdk.RealtimeTool sdkTool)
+                if (ToVoiceLiveToolDefinition(tool) is { } sdkTool)
                 {
-                    convOptions.Tools.Add(sdkTool);
+                    sessionOptions.Tools.Add(sdkTool);
                 }
             }
         }
 
-        return convOptions;
+        return sessionOptions;
     }
 
-    private static Sdk.RealtimeTranscriptionSessionOptions BuildTranscriptionSessionOptions(RealtimeSessionOptions options)
+    private static VoiceLiveSessionOptions? BuildResponseOptions(CreateResponseRealtimeClientMessage responseCreate)
     {
-        var transOptions = new Sdk.RealtimeTranscriptionSessionOptions();
+        bool hasOverrides = false;
+        var responseOptions = new VoiceLiveSessionOptions();
 
-        if (options.InputAudioFormat is not null || options.TranscriptionOptions is not null)
+        if (responseCreate.Instructions is not null)
         {
-            var inputAudioOptions = new Sdk.RealtimeTranscriptionSessionInputAudioOptions();
+            responseOptions.Instructions = responseCreate.Instructions;
+            hasOverrides = true;
+        }
 
-            if (options.InputAudioFormat is not null)
-            {
-                inputAudioOptions.AudioFormat = ToSdkAudioFormat(options.InputAudioFormat);
-            }
+        if (responseCreate.OutputVoice is not null)
+        {
+            responseOptions.Voice = ToAzureVoiceProvider(responseCreate.OutputVoice);
+            hasOverrides = true;
+        }
 
-            if (options.TranscriptionOptions is not null)
+        if (responseCreate.OutputAudioOptions is not null && ToVoiceLiveOutputAudioFormat(responseCreate.OutputAudioOptions) is { } outputAudioFormat)
+        {
+            responseOptions.OutputAudioFormat = outputAudioFormat;
+            hasOverrides = true;
+        }
+
+        if (responseCreate.MaxOutputTokens.HasValue)
+        {
+            responseOptions.MaxResponseOutputTokens = responseCreate.MaxOutputTokens.Value;
+            hasOverrides = true;
+        }
+
+        if (responseCreate.OutputModalities is not null)
+        {
+            responseOptions.Modalities.Clear();
+            foreach (var modality in responseCreate.OutputModalities)
             {
-                inputAudioOptions.AudioTranscriptionOptions = new Sdk.RealtimeAudioTranscriptionOptions
+                if (ToVoiceLiveInteractionModality(modality) is { } sdkModality)
                 {
-                    Language = options.TranscriptionOptions.SpeechLanguage,
-                    Model = options.TranscriptionOptions.ModelId,
-                    Prompt = options.TranscriptionOptions.Prompt,
-                };
+                    responseOptions.Modalities.Add(sdkModality);
+                }
             }
 
-            transOptions.AudioOptions = new Sdk.RealtimeTranscriptionSessionAudioOptions
-            {
-                InputAudioOptions = inputAudioOptions,
-            };
+            hasOverrides = true;
         }
 
-        return transOptions;
+        if (responseCreate.ToolMode is { } toolMode)
+        {
+            responseOptions.ToolChoice = ToVoiceLiveToolChoice(toolMode);
+            hasOverrides = true;
+        }
+
+        if (responseCreate.Tools is not null)
+        {
+            responseOptions.Tools.Clear();
+            foreach (var tool in responseCreate.Tools)
+            {
+                if (ToVoiceLiveToolDefinition(tool) is { } sdkTool)
+                {
+                    responseOptions.Tools.Add(sdkTool);
+                }
+            }
+
+            hasOverrides = true;
+        }
+
+        return hasOverrides ? responseOptions : null;
     }
 
-    private static Sdk.RealtimeTool? ToRealtimeTool(AITool tool)
+    private static VoiceLiveSessionOptions? TryGetRawSessionOptions(object? rawOptions)
     {
-        if (tool is AIFunction aiFunction && !string.IsNullOrEmpty(aiFunction.Name))
+        if (rawOptions is null)
         {
-            return OpenAIExtensions.ToOpenAIRealtimeFunctionTool(aiFunction);
+            return null;
         }
 
-        if (tool is HostedMcpServerTool mcpTool)
+        if (rawOptions is VoiceLiveSessionOptions sessionOptions)
         {
-            return ToRealtimeMcpTool(mcpTool);
+            return sessionOptions;
+        }
+
+        if (rawOptions is string json)
+        {
+            return ModelReaderWriter.Read<VoiceLiveSessionOptions>(
+                BinaryData.FromString(json),
+                new ModelReaderWriterOptions("J"),
+                AzureAIVoiceLiveContext.Default);
         }
 
         return null;
     }
 
-    private static Sdk.RealtimeMcpTool ToRealtimeMcpTool(HostedMcpServerTool mcpTool)
+    private static BinaryData? TryGetRawJsonPayload(object? rawRepresentation) => rawRepresentation switch
     {
-        Sdk.RealtimeMcpTool sdkTool;
+        BinaryData data => data,
+        string json => BinaryData.FromString(json),
+        JsonObject jsonObject => BinaryData.FromString(jsonObject.ToJsonString()),
+        _ => null,
+    };
 
-        if (Uri.TryCreate(mcpTool.ServerAddress, UriKind.Absolute, out var uri))
-        {
-            sdkTool = new Sdk.RealtimeMcpTool(mcpTool.ServerName, uri);
-
-            if (mcpTool.Headers is { } headers)
-            {
-                var sdkHeaders = new Dictionary<string, string>();
-                foreach (var kvp in headers)
-                {
-                    sdkHeaders[kvp.Key] = kvp.Value;
-                }
-
-                sdkTool.Headers = sdkHeaders;
-            }
-        }
-        else
-        {
-            sdkTool = new Sdk.RealtimeMcpTool(mcpTool.ServerName, new Sdk.RealtimeMcpToolConnectorId(mcpTool.ServerAddress));
-        }
-
-        if (mcpTool.ServerDescription is not null)
-        {
-            sdkTool.ServerDescription = mcpTool.ServerDescription;
-        }
-
-        if (mcpTool.AllowedTools is { Count: > 0 })
-        {
-            sdkTool.AllowedTools = new Sdk.RealtimeMcpToolFilter();
-            foreach (var toolName in mcpTool.AllowedTools)
-            {
-                sdkTool.AllowedTools.ToolNames.Add(toolName);
-            }
-        }
-
-        if (mcpTool.ApprovalMode is not null)
-        {
-            sdkTool.ToolCallApprovalPolicy = mcpTool.ApprovalMode switch
-            {
-                HostedMcpServerToolAlwaysRequireApprovalMode => Sdk.RealtimeDefaultMcpToolCallApprovalPolicy.AlwaysRequireApproval,
-                HostedMcpServerToolNeverRequireApprovalMode => Sdk.RealtimeDefaultMcpToolCallApprovalPolicy.NeverRequireApproval,
-                HostedMcpServerToolRequireSpecificApprovalMode specific => ToSdkCustomApprovalPolicy(specific),
-                _ => Sdk.RealtimeDefaultMcpToolCallApprovalPolicy.AlwaysRequireApproval,
-            };
-        }
-
-        return sdkTool;
-    }
-
-    private static Sdk.RealtimeMcpToolCallApprovalPolicy ToSdkCustomApprovalPolicy(HostedMcpServerToolRequireSpecificApprovalMode mode)
+    private static ConversationRequestItem? ToConversationRequestItem(RealtimeConversationItem? contentItem)
     {
-        var custom = new Sdk.RealtimeCustomMcpToolCallApprovalPolicy();
-
-        if (mode.AlwaysRequireApprovalToolNames is { Count: > 0 })
+        if (contentItem is null)
         {
-            custom.ToolsAlwaysRequiringApproval = new Sdk.RealtimeMcpToolFilter();
-            foreach (var name in mode.AlwaysRequireApprovalToolNames)
-            {
-                custom.ToolsAlwaysRequiringApproval.ToolNames.Add(name);
-            }
+            return null;
         }
 
-        if (mode.NeverRequireApprovalToolNames is { Count: > 0 })
+        if (contentItem.RawRepresentation is ConversationRequestItem rawItem)
         {
-            custom.ToolsNeverRequiringApproval = new Sdk.RealtimeMcpToolFilter();
-            foreach (var name in mode.NeverRequireApprovalToolNames)
-            {
-                custom.ToolsNeverRequiringApproval.ToolNames.Add(name);
-            }
+            return rawItem;
         }
 
-        return custom;
-    }
-
-    private static Sdk.RealtimeItem? ToRealtimeItem(RealtimeConversationItem? contentItem)
-    {
-        if (contentItem?.Contents is null or { Count: 0 })
+        if (contentItem.Contents is not { Count: > 0 })
         {
             return null;
         }
 
         var firstContent = contentItem.Contents[0];
+        ConversationRequestItem? item;
 
         if (firstContent is FunctionResultContent functionResult)
         {
-            string resultJson = functionResult.Result is not null
-                ? JsonSerializer.Serialize(functionResult.Result, AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(object)))
-                : string.Empty;
-            return Sdk.RealtimeItem.CreateFunctionCallOutputItem(
-                functionResult.CallId ?? string.Empty,
-                resultJson);
-        }
+            string resultJson = functionResult.Result as string ??
+                (functionResult.Result is not null
+                    ? JsonSerializer.Serialize(functionResult.Result, AIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(object)))
+                    : string.Empty);
 
-        if (firstContent is FunctionCallContent functionCall)
-        {
-            var arguments = functionCall.Arguments is not null
-                ? BinaryData.FromString(JsonSerializer.Serialize(functionCall.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject))
-                : BinaryData.FromString("{}");
-            return Sdk.RealtimeItem.CreateFunctionCallItem(
-                functionCall.CallId ?? string.Empty,
-                functionCall.Name,
-                arguments);
+            item = new FunctionCallOutputItem(functionResult.CallId ?? string.Empty, resultJson);
         }
-
-        if (firstContent is McpServerToolApprovalResponseContent approvalResponse)
+        else if (firstContent is FunctionCallContent functionCall)
         {
-            return Sdk.RealtimeItem.CreateMcpApprovalResponseItem(
-                approvalResponse.Id ?? string.Empty,
-                approvalResponse.Approved);
+            string argumentsJson = functionCall.Arguments is not null
+                ? JsonSerializer.Serialize(functionCall.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject)
+                : "{}";
+
+            item = new FunctionCallItem(functionCall.CallId ?? string.Empty, functionCall.Name, argumentsJson);
         }
-
-        // Message item with content parts.
-        var contentParts = new List<Sdk.RealtimeMessageContentPart>();
-        foreach (var content in contentItem.Contents)
+        else
         {
-            if (content is TextContent textContent)
+            var contentParts = new List<MessageContentPart>();
+            foreach (var content in contentItem.Contents)
             {
-                contentParts.Add(new Sdk.RealtimeInputTextMessageContentPart(textContent.Text ?? string.Empty));
-            }
-            else if (content is DataContent dataContent)
-            {
-                if (dataContent.MediaType?.StartsWith("audio/", StringComparison.Ordinal) == true)
+                if (content is TextContent textContent)
                 {
-                    contentParts.Add(new Sdk.RealtimeInputAudioMessageContentPart(
-                        BinaryData.FromBytes(dataContent.Data.ToArray())));
+                    contentParts.Add(new InputTextContentPart(textContent.Text ?? string.Empty));
                 }
-                else if (dataContent.MediaType?.StartsWith("image/", StringComparison.Ordinal) == true && dataContent.Uri is not null)
+                else if (content is DataContent dataContent)
                 {
-                    contentParts.Add(new Sdk.RealtimeInputImageMessageContentPart(new Uri(dataContent.Uri)));
+                    if (dataContent.MediaType?.StartsWith("audio/", StringComparison.Ordinal) == true)
+                    {
+                        contentParts.Add(new InputAudioContentPart(Convert.ToBase64String(ExtractAudioBinaryData(dataContent).ToArray())));
+                    }
                 }
             }
+
+            if (contentParts.Count == 0)
+            {
+                return null;
+            }
+
+            item = contentItem.Role switch
+            {
+                { Value: var role } when role == ChatRole.Assistant.Value => new AssistantMessageItem(contentParts),
+                { Value: var role } when role == ChatRole.System.Value => new SystemMessageItem(contentParts),
+                _ => new UserMessageItem(contentParts),
+            };
         }
 
-        if (contentParts.Count == 0)
+        if (item is not null && contentItem.Id is not null)
         {
-            return null;
+            item.Id = contentItem.Id;
         }
 
-        var role = contentItem.Role?.Value switch
-        {
-            "assistant" => Sdk.RealtimeMessageRole.Assistant,
-            "system" => Sdk.RealtimeMessageRole.System,
-            _ => Sdk.RealtimeMessageRole.User,
-        };
-
-        var messageItem = new Sdk.RealtimeMessageItem(role, contentParts);
-        if (contentItem.Id is not null)
-        {
-            messageItem.Id = contentItem.Id;
-        }
-
-        return messageItem;
+        return item;
     }
 
-    private static Sdk.RealtimeToolChoice ToSdkToolChoice(ChatToolMode toolMode) => toolMode switch
+    private static ToolChoiceOption ToVoiceLiveToolChoice(ChatToolMode toolMode) => toolMode switch
     {
-        RequiredChatToolMode r when r.RequiredFunctionName is not null =>
-            new Sdk.RealtimeToolChoice(new Sdk.RealtimeCustomFunctionToolChoice(r.RequiredFunctionName)),
-        RequiredChatToolMode => Sdk.RealtimeDefaultToolChoice.Required,
-        NoneChatToolMode => Sdk.RealtimeDefaultToolChoice.None,
-        _ => Sdk.RealtimeDefaultToolChoice.Auto,
+        RequiredChatToolMode required when required.RequiredFunctionName is not null => new ToolChoiceOption(required.RequiredFunctionName),
+        RequiredChatToolMode => ToolChoiceLiteral.Required,
+        NoneChatToolMode => ToolChoiceLiteral.None,
+        _ => ToolChoiceLiteral.Auto,
     };
 
-    private static Sdk.RealtimeAudioFormat? ToSdkAudioFormat(RealtimeAudioFormat? format)
+    private static InputAudioFormat? ToVoiceLiveInputAudioFormat(RealtimeAudioFormat? format) => format?.MediaType switch
     {
-        if (format is null)
+        "audio/pcm" => InputAudioFormat.Pcm16,
+        "audio/pcmu" => InputAudioFormat.G711Ulaw,
+        "audio/pcma" => InputAudioFormat.G711Alaw,
+        _ => null,
+    };
+
+    private static OutputAudioFormat? ToVoiceLiveOutputAudioFormat(RealtimeAudioFormat? format) => format?.MediaType switch
+    {
+        "audio/pcm" => OutputAudioFormat.Pcm16,
+        "audio/pcmu" => OutputAudioFormat.G711Ulaw,
+        "audio/pcma" => OutputAudioFormat.G711Alaw,
+        _ => null,
+    };
+
+    private static InteractionModality? ToVoiceLiveInteractionModality(string? modality) => modality?.ToLowerInvariant() switch
+    {
+        "audio" => InteractionModality.Audio,
+        "text" => InteractionModality.Text,
+        _ => null,
+    };
+
+    private static VoiceProvider ToAzureVoiceProvider(string voice) => voice.ToLowerInvariant() switch
+    {
+        "alloy" or "ash" or "ballad" or "coral" or "echo" or "sage" or "shimmer" or "verse" => new OpenAIVoice(voice),
+        _ => new AzureStandardVoice(voice),
+    };
+
+    private static VoiceLiveToolDefinition? ToVoiceLiveToolDefinition(AITool tool)
+    {
+        if (tool is AIFunctionDeclaration aiFunction)
         {
-            return null;
+            var realtimeTool = OpenAIClientExtensions.ToOpenAIRealtimeFunctionTool(aiFunction);
+            return new VoiceLiveFunctionDefinition(aiFunction.Name)
+            {
+                Description = realtimeTool.FunctionDescription,
+                Parameters = realtimeTool.FunctionParameters,
+            };
         }
 
-        return format.MediaType switch
+        if (tool is HostedMcpServerTool mcpTool)
         {
-            "audio/pcm" => new Sdk.RealtimePcmAudioFormat(),
-            "audio/pcmu" => new Sdk.RealtimePcmuAudioFormat(),
-            "audio/pcma" => new Sdk.RealtimePcmaAudioFormat(),
-            _ => null,
-        };
+            var definition = new VoiceLiveMcpServerDefinition(mcpTool.ServerName, mcpTool.ServerAddress);
+
+            if (mcpTool.Headers is { Count: > 0 })
+            {
+                foreach (var kvp in mcpTool.Headers)
+                {
+                    definition.Headers.Add(kvp.Key, kvp.Value);
+                }
+            }
+
+            if (mcpTool.AllowedTools is { Count: > 0 })
+            {
+                foreach (var toolName in mcpTool.AllowedTools)
+                {
+                    definition.AllowedTools.Add(toolName);
+                }
+            }
+
+            return definition;
+        }
+
+        return null;
     }
 
     private static BinaryData ExtractAudioBinaryData(DataContent content)
@@ -674,7 +558,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
         if (commaIndex >= 0 && commaIndex < dataUri.Length - 1)
         {
-            string base64 = dataUri.Substring(commaIndex + 1);
+            string base64 = dataUri[(commaIndex + 1)..];
             return BinaryData.FromBytes(Convert.FromBase64String(base64));
         }
 
@@ -685,153 +569,154 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
     #region Receive Helpers (SDK → MEAI)
 
-    private RealtimeServerMessage? MapServerUpdate(Sdk.RealtimeServerUpdate update) => update switch
+    private RealtimeServerMessage? MapServerUpdate(SessionUpdate update) => update switch
     {
-        Sdk.RealtimeServerUpdateError e => MapError(e),
-        Sdk.RealtimeServerUpdateSessionCreated e => HandleSessionEvent(e.Session, e),
-        Sdk.RealtimeServerUpdateSessionUpdated e => HandleSessionEvent(e.Session, e),
-        Sdk.RealtimeServerUpdateResponseCreated e => MapResponseCreatedOrDone(e.EventId, e.Response, RealtimeServerMessageType.ResponseCreated, e),
-        Sdk.RealtimeServerUpdateResponseDone e => MapResponseCreatedOrDone(e.EventId, e.Response, RealtimeServerMessageType.ResponseDone, e),
-        Sdk.RealtimeServerUpdateResponseOutputItemAdded e => MapResponseOutputItem(e.EventId, e.ResponseId, e.OutputIndex, e.Item, RealtimeServerMessageType.ResponseOutputItemAdded, e),
-        Sdk.RealtimeServerUpdateResponseOutputItemDone e => MapResponseOutputItem(e.EventId, e.ResponseId, e.OutputIndex, e.Item, RealtimeServerMessageType.ResponseOutputItemDone, e),
-        Sdk.RealtimeServerUpdateResponseOutputAudioDelta e => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioDelta)
+        SessionUpdateError error => MapError(error),
+        SessionUpdateSessionCreated created => HandleSessionEvent(created.Session, created),
+        SessionUpdateSessionUpdated updated => HandleSessionEvent(updated.Session, updated),
+        SessionUpdateResponseCreated created => MapResponseCreatedOrDone(created.EventId, created.Response, RealtimeServerMessageType.ResponseCreated, created),
+        SessionUpdateResponseDone done => MapResponseCreatedOrDone(done.EventId, done.Response, RealtimeServerMessageType.ResponseDone, done),
+        SessionUpdateResponseOutputItemAdded added => MapResponseOutputItem(added.EventId, added.ResponseId, added.OutputIndex, added.Item, RealtimeServerMessageType.ResponseOutputItemAdded, added),
+        SessionUpdateResponseOutputItemDone done => MapResponseOutputItem(done.EventId, done.ResponseId, done.OutputIndex, done.Item, RealtimeServerMessageType.ResponseOutputItemDone, done),
+        SessionUpdateResponseTextDelta textDelta => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputTextDelta)
         {
-            MessageId = e.EventId,
-            ResponseId = e.ResponseId,
-            ItemId = e.ItemId,
-            OutputIndex = e.OutputIndex,
-            ContentIndex = e.ContentIndex,
-            Audio = e.Delta is not null ? Convert.ToBase64String(e.Delta.ToArray()) : null,
-            RawRepresentation = e,
+            MessageId = textDelta.EventId,
+            ResponseId = textDelta.ResponseId,
+            ItemId = textDelta.ItemId,
+            OutputIndex = textDelta.OutputIndex,
+            ContentIndex = textDelta.ContentIndex,
+            Text = textDelta.Delta,
+            RawRepresentation = textDelta,
         },
-        Sdk.RealtimeServerUpdateResponseOutputAudioDone e => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioDone)
+        SessionUpdateResponseTextDone textDone => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputTextDone)
         {
-            MessageId = e.EventId,
-            ResponseId = e.ResponseId,
-            ItemId = e.ItemId,
-            OutputIndex = e.OutputIndex,
-            ContentIndex = e.ContentIndex,
-            RawRepresentation = e,
+            MessageId = textDone.EventId,
+            ResponseId = textDone.ResponseId,
+            ItemId = textDone.ItemId,
+            OutputIndex = textDone.OutputIndex,
+            ContentIndex = textDone.ContentIndex,
+            Text = textDone.Text,
+            RawRepresentation = textDone,
         },
-        Sdk.RealtimeServerUpdateResponseOutputAudioTranscriptDelta e => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioTranscriptionDelta)
+        SessionUpdateResponseAudioDelta audioDelta => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioDelta)
         {
-            MessageId = e.EventId,
-            ResponseId = e.ResponseId,
-            ItemId = e.ItemId,
-            OutputIndex = e.OutputIndex,
-            ContentIndex = e.ContentIndex,
-            Text = e.Delta,
-            RawRepresentation = e,
+            MessageId = audioDelta.EventId,
+            ResponseId = audioDelta.ResponseId,
+            ItemId = audioDelta.ItemId,
+            OutputIndex = audioDelta.OutputIndex,
+            ContentIndex = audioDelta.ContentIndex,
+            Audio = audioDelta.Delta is not null ? Convert.ToBase64String(audioDelta.Delta.ToArray()) : null,
+            RawRepresentation = audioDelta,
         },
-        Sdk.RealtimeServerUpdateResponseOutputAudioTranscriptDone e => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioTranscriptionDone)
+        SessionUpdateResponseAudioDone audioDone => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioDone)
         {
-            MessageId = e.EventId,
-            ResponseId = e.ResponseId,
-            ItemId = e.ItemId,
-            OutputIndex = e.OutputIndex,
-            ContentIndex = e.ContentIndex,
-            Text = e.Transcript,
-            RawRepresentation = e,
+            MessageId = audioDone.EventId,
+            ResponseId = audioDone.ResponseId,
+            ItemId = audioDone.ItemId,
+            OutputIndex = audioDone.OutputIndex,
+            ContentIndex = audioDone.ContentIndex,
+            RawRepresentation = audioDone,
         },
-        Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionDelta e => MapInputTranscriptionDelta(e),
-        Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionCompleted e => MapInputTranscriptionCompleted(e),
-        Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionFailed e => MapInputTranscriptionFailed(e),
-        Sdk.RealtimeServerUpdateConversationItemAdded e => MapConversationItem(e.EventId, e.Item, RealtimeServerMessageType.ResponseOutputItemAdded, e),
-        Sdk.RealtimeServerUpdateConversationItemDone e => MapConversationItem(e.EventId, e.Item, RealtimeServerMessageType.ResponseOutputItemDone, e),
-        Sdk.RealtimeServerUpdateResponseMcpCallInProgress e => MapMcpCallEvent(e.EventId, e.ItemId, e.OutputIndex, new RealtimeServerMessageType("McpCallInProgress"), e),
-        Sdk.RealtimeServerUpdateResponseMcpCallCompleted e => MapMcpCallEvent(e.EventId, e.ItemId, e.OutputIndex, new RealtimeServerMessageType("McpCallCompleted"), e),
-        Sdk.RealtimeServerUpdateResponseMcpCallFailed e => MapMcpCallEvent(e.EventId, e.ItemId, e.OutputIndex, new RealtimeServerMessageType("McpCallFailed"), e),
-        Sdk.RealtimeServerUpdateMcpListToolsInProgress e => MapMcpListToolsEvent(e.EventId, e.ItemId, new RealtimeServerMessageType("McpListToolsInProgress"), e),
-        Sdk.RealtimeServerUpdateMcpListToolsCompleted e => MapMcpListToolsEvent(e.EventId, e.ItemId, new RealtimeServerMessageType("McpListToolsCompleted"), e),
-        Sdk.RealtimeServerUpdateMcpListToolsFailed e => MapMcpListToolsEvent(e.EventId, e.ItemId, new RealtimeServerMessageType("McpListToolsFailed"), e),
+        SessionUpdateResponseAudioTranscriptDelta transcriptDelta => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioTranscriptionDelta)
+        {
+            MessageId = transcriptDelta.EventId,
+            ResponseId = transcriptDelta.ResponseId,
+            ItemId = transcriptDelta.ItemId,
+            OutputIndex = transcriptDelta.OutputIndex,
+            ContentIndex = transcriptDelta.ContentIndex,
+            Text = transcriptDelta.Delta,
+            RawRepresentation = transcriptDelta,
+        },
+        SessionUpdateResponseAudioTranscriptDone transcriptDone => new OutputTextAudioRealtimeServerMessage(RealtimeServerMessageType.OutputAudioTranscriptionDone)
+        {
+            MessageId = transcriptDone.EventId,
+            ResponseId = transcriptDone.ResponseId,
+            ItemId = transcriptDone.ItemId,
+            OutputIndex = transcriptDone.OutputIndex,
+            ContentIndex = transcriptDone.ContentIndex,
+            Text = transcriptDone.Transcript,
+            RawRepresentation = transcriptDone,
+        },
+        SessionUpdateConversationItemInputAudioTranscriptionDelta delta => MapInputTranscriptionDelta(delta),
+        SessionUpdateConversationItemInputAudioTranscriptionCompleted completed => MapInputTranscriptionCompleted(completed),
+        SessionUpdateConversationItemInputAudioTranscriptionFailed failed => MapInputTranscriptionFailed(failed),
+        SessionUpdateConversationItemCreated created => MapConversationItem(created.EventId, created.Item, RealtimeServerMessageType.ResponseOutputItemAdded, created),
+        SessionUpdateConversationItemRetrieved retrieved => MapConversationItem(retrieved.EventId, retrieved.Item, RealtimeServerMessageType.ResponseOutputItemDone, retrieved),
+        SessionUpdateResponseMcpCallInProgress inProgress => MapMcpCallEvent(inProgress.EventId, inProgress.ItemId, inProgress.OutputIndex, new RealtimeServerMessageType("McpCallInProgress"), inProgress),
+        SessionUpdateResponseMcpCallCompleted completed => MapMcpCallEvent(completed.EventId, completed.ItemId, completed.OutputIndex, new RealtimeServerMessageType("McpCallCompleted"), completed),
+        SessionUpdateResponseMcpCallFailed failed => MapMcpCallEvent(failed.EventId, failed.ItemId, failed.OutputIndex, new RealtimeServerMessageType("McpCallFailed"), failed),
+        SessionUpdateMcpListToolsInProgress inProgress => MapMcpListToolsEvent(inProgress.EventId, inProgress.ItemId, new RealtimeServerMessageType("McpListToolsInProgress"), inProgress),
+        SessionUpdateMcpListToolsCompleted completed => MapMcpListToolsEvent(completed.EventId, completed.ItemId, new RealtimeServerMessageType("McpListToolsCompleted"), completed),
+        SessionUpdateMcpListToolsFailed failed => MapMcpListToolsEvent(failed.EventId, failed.ItemId, new RealtimeServerMessageType("McpListToolsFailed"), failed),
         _ => new RealtimeServerMessage
         {
             Type = RealtimeServerMessageType.RawContentOnly,
+            MessageId = update.EventId,
             RawRepresentation = update,
         },
     };
 
-    private static ErrorRealtimeServerMessage MapError(Sdk.RealtimeServerUpdateError e)
+    private static AudioInputTranscriptionOptionsModel ToVoiceLiveTranscriptionModel(string? modelId) => modelId?.ToLowerInvariant() switch
     {
-        var msg = new ErrorRealtimeServerMessage
+        "whisper-1" => AudioInputTranscriptionOptionsModel.Whisper1,
+        "gpt-4o-transcribe" => AudioInputTranscriptionOptionsModel.Gpt4oTranscribe,
+        "gpt-4o-mini-transcribe" => AudioInputTranscriptionOptionsModel.Gpt4oMiniTranscribe,
+        "azure-speech" => AudioInputTranscriptionOptionsModel.AzureSpeech,
+        _ => AudioInputTranscriptionOptionsModel.Gpt4oMiniTranscribe,
+    };
+
+    private static ErrorRealtimeServerMessage MapError(SessionUpdateError error)
+    {
+        var message = new ErrorRealtimeServerMessage
         {
-            MessageId = e.EventId,
-            Error = new ErrorContent(e.Error?.Message),
-            RawRepresentation = e,
+            MessageId = error.EventId,
+            RawRepresentation = error,
         };
 
-        if (e.Error?.Code is not null)
+        if (error.Error is not null)
         {
-            msg.Error.ErrorCode = e.Error.Code;
+            message.Error = new ErrorContent(error.Error.Message)
+            {
+                ErrorCode = error.Error.Code,
+                Details = error.Error.Param,
+            };
+            message.OriginatingMessageId = error.Error.EventId;
         }
 
-        if (e.Error?.ParameterName is not null)
-        {
-            msg.Error.Details = e.Error.ParameterName;
-        }
-
-        return msg;
+        return message;
     }
 
-    private RealtimeServerMessage HandleSessionEvent(Sdk.RealtimeSession? session, Sdk.RealtimeServerUpdate update)
+    private RealtimeServerMessage HandleSessionEvent(VoiceLiveSessionResponse? session, SessionUpdate update)
     {
-        if (session is Sdk.RealtimeConversationSession convSession)
+        if (session is not null)
         {
-            Options = MapConversationSessionToOptions(convSession);
+            Options = MapSessionToOptions(session);
         }
 
         return new RealtimeServerMessage
         {
             Type = RealtimeServerMessageType.RawContentOnly,
+            MessageId = update.EventId,
             RawRepresentation = update,
         };
     }
 
-    private RealtimeSessionOptions MapConversationSessionToOptions(Sdk.RealtimeConversationSession session)
+    private RealtimeSessionOptions MapSessionToOptions(VoiceLiveSessionResponse session)
     {
-        RealtimeAudioFormat? inputAudioFormat = null;
-        TranscriptionOptions? transcription = null;
-        RealtimeAudioFormat? outputAudioFormat = null;
-        string? voice = null;
-
-        if (session.AudioOptions is { } audioOptions)
-        {
-            if (audioOptions.InputAudioOptions is { } inputOpts)
-            {
-                inputAudioFormat = MapSdkAudioFormat(inputOpts.AudioFormat);
-
-                if (inputOpts.AudioTranscriptionOptions is { } transcriptionOpts)
-                {
-                    transcription = new TranscriptionOptions
-                    {
-                        SpeechLanguage = transcriptionOpts.Language,
-                        ModelId = transcriptionOpts.Model,
-                        Prompt = transcriptionOpts.Prompt,
-                    };
-                }
-            }
-
-            if (audioOptions.OutputAudioOptions is { } outputOpts)
-            {
-                outputAudioFormat = MapSdkAudioFormat(outputOpts.AudioFormat);
-
-                if (outputOpts.Voice.HasValue)
-                {
-                    voice = outputOpts.Voice.Value.ToString();
-                }
-            }
-        }
-
-        int? maxOutputTokens = null;
-        if (session.MaxOutputTokenCount is { } maxTokens)
-        {
-            maxOutputTokens = maxTokens.CustomMaxOutputTokenCount ?? int.MaxValue;
-        }
-
         List<string>? outputModalities = null;
-        if (session.OutputModalities is { Count: > 0 } modalities)
+        if (session.Modalities is { Count: > 0 } modalities)
         {
             outputModalities = modalities.Select(m => m.ToString()).ToList();
+        }
+
+        TranscriptionOptions? transcriptionOptions = null;
+        if (session.InputAudioTranscription is { } transcription)
+        {
+            transcriptionOptions = new TranscriptionOptions
+            {
+                SpeechLanguage = transcription.Language,
+                ModelId = transcription.Model.ToString(),
+            };
         }
 
         return new RealtimeSessionOptions
@@ -839,23 +724,24 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             SessionKind = RealtimeSessionKind.Conversation,
             Model = session.Model,
             Instructions = session.Instructions,
-            MaxOutputTokens = maxOutputTokens,
+            MaxOutputTokens = session.MaxResponseOutputTokens.NumericValue,
             OutputModalities = outputModalities,
-            InputAudioFormat = inputAudioFormat,
-            TranscriptionOptions = transcription,
-            OutputAudioFormat = outputAudioFormat,
-            Voice = voice,
-
-            // Preserve client-side properties that the server cannot round-trip.
+            InputAudioFormat = MapSdkAudioFormat(session.InputAudioFormat, session.InputAudioSamplingRate),
+            TranscriptionOptions = transcriptionOptions,
+            OutputAudioFormat = MapSdkAudioFormat(session.OutputAudioFormat),
+            Voice = GetVoiceName(session.Voice),
             Tools = Options?.Tools,
             ToolMode = Options?.ToolMode,
         };
     }
 
     private static ResponseCreatedRealtimeServerMessage MapResponseCreatedOrDone(
-        string? eventId, Sdk.RealtimeResponse? response, RealtimeServerMessageType type, Sdk.RealtimeServerUpdate update)
+        string? eventId,
+        SessionResponse? response,
+        RealtimeServerMessageType type,
+        SessionUpdate update)
     {
-        var msg = new ResponseCreatedRealtimeServerMessage(type)
+        var message = new ResponseCreatedRealtimeServerMessage(type)
         {
             MessageId = eventId,
             RawRepresentation = update,
@@ -863,75 +749,65 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
         if (response is null)
         {
-            return msg;
+            return message;
         }
 
-        msg.ResponseId = response.Id;
-        msg.Status = response.Status?.ToString();
-
-        if (response.AudioOptions?.OutputAudioOptions is { } audioOut)
-        {
-            msg.OutputAudioOptions = MapSdkAudioFormat(audioOut.AudioFormat);
-            if (audioOut.Voice.HasValue)
-            {
-                msg.OutputVoice = audioOut.Voice.Value.ToString();
-            }
-        }
-
-        if (response.MaxOutputTokenCount is { } maxTokens)
-        {
-            msg.MaxOutputTokens = maxTokens.CustomMaxOutputTokenCount ?? int.MaxValue;
-        }
+        message.ResponseId = response.Id;
+        message.Status = response.Status.ToString();
+        message.OutputAudioOptions = MapSdkAudioFormat(response.OutputAudioFormat);
+        message.OutputVoice = GetVoiceName(response.Voice);
+        message.MaxOutputTokens = response.MaxOutputTokens.NumericValue;
 
         if (response.Metadata is { Count: > 0 } metadata)
         {
-            var dict = new AdditionalPropertiesDictionary();
+            var additionalProperties = new AdditionalPropertiesDictionary();
             foreach (var kvp in metadata)
             {
-                dict[kvp.Key] = kvp.Value;
+                additionalProperties[kvp.Key] = kvp.Value;
             }
 
-            msg.AdditionalProperties = dict;
+            message.AdditionalProperties = additionalProperties;
         }
 
-        if (response.OutputModalities is { Count: > 0 } modalities)
+        if (response.Modalities is { Count: > 0 } modalities)
         {
-            msg.OutputModalities = modalities.Select(m => m.ToString()).ToList();
+            message.OutputModalities = modalities.Select(m => m.ToString()).ToList();
         }
 
-        if (response.StatusDetails?.Error is { } error)
+        if (response.StatusDetails is { } statusDetails)
         {
-            msg.Error = new ErrorContent(error.Kind)
-            {
-                ErrorCode = error.Code,
-            };
+            message.Error = new ErrorContent(statusDetails.ToString());
         }
 
         if (response.Usage is { } usage)
         {
-            msg.Usage = MapUsageDetails(usage);
+            message.Usage = MapUsageDetails(usage);
         }
 
-        if (response.OutputItems is { Count: > 0 } outputItems)
+        if (response.Output is { Count: > 0 } outputItems)
         {
             var items = new List<RealtimeConversationItem>();
             foreach (var item in outputItems)
             {
-                if (MapRealtimeItem(item) is RealtimeConversationItem contentItem)
+                if (MapRealtimeItem(item) is { } mappedItem)
                 {
-                    items.Add(contentItem);
+                    items.Add(mappedItem);
                 }
             }
 
-            msg.Items = items;
+            message.Items = items;
         }
 
-        return msg;
+        return message;
     }
 
     private static ResponseOutputItemRealtimeServerMessage MapResponseOutputItem(
-        string? eventId, string? responseId, int outputIndex, Sdk.RealtimeItem? item,
-        RealtimeServerMessageType type, Sdk.RealtimeServerUpdate update)
+        string? eventId,
+        string? responseId,
+        int outputIndex,
+        SessionResponseItem? item,
+        RealtimeServerMessageType type,
+        SessionUpdate update)
     {
         return new ResponseOutputItemRealtimeServerMessage(type)
         {
@@ -944,7 +820,10 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     }
 
     private static ResponseOutputItemRealtimeServerMessage MapConversationItem(
-        string? eventId, Sdk.RealtimeItem? item, RealtimeServerMessageType type, Sdk.RealtimeServerUpdate update)
+        string? eventId,
+        SessionResponseItem? item,
+        RealtimeServerMessageType type,
+        SessionUpdate update)
     {
         var mapped = item is not null ? MapRealtimeItem(item) : null;
         if (mapped is null)
@@ -964,54 +843,58 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         };
     }
 
-    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionDelta(Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionDelta e)
+    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionDelta(SessionUpdateConversationItemInputAudioTranscriptionDelta update)
     {
         return new InputAudioTranscriptionRealtimeServerMessage(RealtimeServerMessageType.InputAudioTranscriptionDelta)
         {
-            MessageId = e.EventId,
-            ItemId = e.ItemId,
-            ContentIndex = e.ContentIndex,
-            Transcription = e.Delta,
-            RawRepresentation = e,
+            MessageId = update.EventId,
+            ItemId = update.ItemId,
+            ContentIndex = update.ContentIndex,
+            Transcription = update.Delta,
+            RawRepresentation = update,
         };
     }
 
-    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionCompleted(Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionCompleted e)
+    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionCompleted(SessionUpdateConversationItemInputAudioTranscriptionCompleted update)
     {
         return new InputAudioTranscriptionRealtimeServerMessage(RealtimeServerMessageType.InputAudioTranscriptionCompleted)
         {
-            MessageId = e.EventId,
-            ItemId = e.ItemId,
-            ContentIndex = e.ContentIndex,
-            Transcription = e.Transcript,
-            RawRepresentation = e,
+            MessageId = update.EventId,
+            ItemId = update.ItemId,
+            ContentIndex = update.ContentIndex,
+            Transcription = update.Transcript,
+            RawRepresentation = update,
         };
     }
 
-    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionFailed(Sdk.RealtimeServerUpdateConversationItemInputAudioTranscriptionFailed e)
+    private static InputAudioTranscriptionRealtimeServerMessage MapInputTranscriptionFailed(SessionUpdateConversationItemInputAudioTranscriptionFailed update)
     {
-        var msg = new InputAudioTranscriptionRealtimeServerMessage(RealtimeServerMessageType.InputAudioTranscriptionFailed)
+        var message = new InputAudioTranscriptionRealtimeServerMessage(RealtimeServerMessageType.InputAudioTranscriptionFailed)
         {
-            MessageId = e.EventId,
-            ItemId = e.ItemId,
-            ContentIndex = e.ContentIndex,
-            RawRepresentation = e,
+            MessageId = update.EventId,
+            ItemId = update.ItemId,
+            ContentIndex = update.ContentIndex,
+            RawRepresentation = update,
         };
 
-        if (e.Error is not null)
+        if (update.Error is not null)
         {
-            msg.Error = new ErrorContent(e.Error.Message)
+            message.Error = new ErrorContent(update.Error.Message)
             {
-                ErrorCode = e.Error.Code,
-                Details = e.Error.ParameterName,
+                ErrorCode = update.Error.Code,
+                Details = update.Error.Param,
             };
         }
 
-        return msg;
+        return message;
     }
 
     private static ResponseOutputItemRealtimeServerMessage MapMcpCallEvent(
-        string? eventId, string? itemId, int outputIndex, RealtimeServerMessageType type, Sdk.RealtimeServerUpdate update)
+        string? eventId,
+        string? itemId,
+        int outputIndex,
+        RealtimeServerMessageType type,
+        SessionUpdate update)
     {
         return new ResponseOutputItemRealtimeServerMessage(type)
         {
@@ -1023,7 +906,10 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     }
 
     private static ResponseOutputItemRealtimeServerMessage MapMcpListToolsEvent(
-        string? eventId, string? itemId, RealtimeServerMessageType type, Sdk.RealtimeServerUpdate update)
+        string? eventId,
+        string? itemId,
+        RealtimeServerMessageType type,
+        SessionUpdate update)
     {
         return new ResponseOutputItemRealtimeServerMessage(type)
         {
@@ -1033,108 +919,123 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         };
     }
 
-    private static RealtimeConversationItem? MapRealtimeItem(Sdk.RealtimeItem item) => item switch
+    private static RealtimeConversationItem? MapConversationRequestItem(ConversationRequestItem item) => item switch
     {
-        Sdk.RealtimeMessageItem messageItem => MapMessageItem(messageItem),
-        Sdk.RealtimeFunctionCallItem funcCallItem => MapFunctionCallItem(funcCallItem),
-        Sdk.RealtimeFunctionCallOutputItem funcOutputItem => new RealtimeConversationItem(
-            [new FunctionResultContent(funcOutputItem.CallId ?? string.Empty, funcOutputItem.FunctionOutput)],
-            funcOutputItem.Id),
-        Sdk.RealtimeMcpToolCallItem mcpItem => MapMcpToolCallItem(mcpItem),
-        Sdk.RealtimeMcpToolCallApprovalRequestItem approvalItem => MapMcpApprovalRequestItem(approvalItem),
-        Sdk.RealtimeMcpToolDefinitionListItem toolListItem => MapMcpToolDefinitionListItem(toolListItem),
+        MessageItem messageItem => MapRequestMessageItem(messageItem),
+        FunctionCallItem functionCallItem => MapRequestFunctionCallItem(functionCallItem),
+        FunctionCallOutputItem functionOutputItem => new RealtimeConversationItem(
+            [new FunctionResultContent(functionOutputItem.CallId ?? string.Empty, functionOutputItem.Output)],
+            functionOutputItem.Id),
         _ => null,
     };
 
-    private static RealtimeConversationItem MapFunctionCallItem(Sdk.RealtimeFunctionCallItem funcCallItem)
+    private static RealtimeConversationItem? MapRealtimeItem(SessionResponseItem item) => item switch
     {
-        var arguments = funcCallItem.FunctionArguments is not null && !funcCallItem.FunctionArguments.IsEmpty
-            ? JsonSerializer.Deserialize(funcCallItem.FunctionArguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject)
-            : null;
+        SessionResponseMessageItem messageItem => MapResponseMessageItem(messageItem),
+        ResponseFunctionCallItem functionCallItem => MapResponseFunctionCallItem(functionCallItem),
+        ResponseFunctionCallOutputItem functionOutputItem => new RealtimeConversationItem(
+            [new FunctionResultContent(functionOutputItem.CallId ?? string.Empty, functionOutputItem.Output)],
+            functionOutputItem.Id),
+        SessionResponseMcpCallItem mcpItem => MapMcpToolCallItem(mcpItem),
+        SessionResponseMcpApprovalRequestItem approvalItem => MapMcpApprovalRequestItem(approvalItem),
+        SessionResponseMcpListToolItem toolListItem => MapMcpToolDefinitionListItem(toolListItem),
+        _ => null,
+    };
+
+    private static RealtimeConversationItem MapRequestFunctionCallItem(FunctionCallItem functionCallItem)
+    {
+        IDictionary<string, object?>? arguments = null;
+        if (!string.IsNullOrEmpty(functionCallItem.Arguments))
+        {
+            arguments = JsonSerializer.Deserialize(functionCallItem.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
+        }
+
         return new RealtimeConversationItem(
-            [new FunctionCallContent(funcCallItem.CallId ?? string.Empty, funcCallItem.FunctionName, arguments)],
-            funcCallItem.Id);
+            [new FunctionCallContent(functionCallItem.CallId ?? string.Empty, functionCallItem.Name, arguments)],
+            functionCallItem.Id);
     }
 
-    private static RealtimeConversationItem MapMessageItem(Sdk.RealtimeMessageItem messageItem)
+    private static RealtimeConversationItem MapResponseFunctionCallItem(ResponseFunctionCallItem functionCallItem)
+    {
+        IDictionary<string, object?>? arguments = null;
+        if (!string.IsNullOrEmpty(functionCallItem.Arguments))
+        {
+            arguments = JsonSerializer.Deserialize(functionCallItem.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
+        }
+
+        return new RealtimeConversationItem(
+            [new FunctionCallContent(functionCallItem.CallId ?? string.Empty, functionCallItem.Name, arguments)],
+            functionCallItem.Id);
+    }
+
+    private static RealtimeConversationItem MapRequestMessageItem(MessageItem messageItem)
     {
         var contents = new List<AIContent>();
-        if (messageItem.Content is not null)
+        foreach (var part in messageItem.Content)
         {
-            foreach (var part in messageItem.Content)
+            if (part is InputTextContentPart textPart)
             {
-                if (part is Sdk.RealtimeInputTextMessageContentPart textPart)
-                {
-                    contents.Add(new TextContent(textPart.Text));
-                }
-                else if (part is Sdk.RealtimeOutputTextMessageContentPart outputTextPart)
-                {
-                    contents.Add(new TextContent(outputTextPart.Text));
-                }
-                else if (part is Sdk.RealtimeInputAudioMessageContentPart audioPart)
-                {
-                    if (audioPart.AudioBytes is not null)
-                    {
-                        contents.Add(new DataContent($"data:audio/pcm;base64,{Convert.ToBase64String(audioPart.AudioBytes.ToArray())}"));
-                    }
-                }
-                else if (part is Sdk.RealtimeOutputAudioMessageContentPart outputAudioPart)
-                {
-                    if (outputAudioPart.Transcript is not null)
-                    {
-                        contents.Add(new TextContent(outputAudioPart.Transcript));
-                    }
-
-                    if (outputAudioPart.AudioBytes is not null)
-                    {
-                        contents.Add(new DataContent($"data:audio/pcm;base64,{Convert.ToBase64String(outputAudioPart.AudioBytes.ToArray())}"));
-                    }
-                }
-                else if (part is Sdk.RealtimeInputImageMessageContentPart imagePart && imagePart.ImageUri is not null)
-                {
-                    contents.Add(new DataContent(imagePart.ImageUri.ToString()));
-                }
+                contents.Add(new TextContent(textPart.Text));
+            }
+            else if (part is InputAudioContentPart audioPart && !string.IsNullOrEmpty(audioPart.Audio))
+            {
+                contents.Add(new DataContent($"data:audio/pcm;base64,{audioPart.Audio}"));
             }
         }
 
-        ChatRole? role = messageItem.Role == Sdk.RealtimeMessageRole.Assistant ? ChatRole.Assistant
-            : messageItem.Role == Sdk.RealtimeMessageRole.User ? ChatRole.User
-            : messageItem.Role == Sdk.RealtimeMessageRole.System ? ChatRole.System
-            : null;
+        ChatRole? role = messageItem switch
+        {
+            AssistantMessageItem => ChatRole.Assistant,
+            SystemMessageItem => ChatRole.System,
+            UserMessageItem => ChatRole.User,
+            _ => null,
+        };
 
         return new RealtimeConversationItem(contents, messageItem.Id, role);
     }
 
-    private static RealtimeConversationItem MapMcpToolCallItem(Sdk.RealtimeMcpToolCallItem mcpItem)
+    private static RealtimeConversationItem MapResponseMessageItem(SessionResponseMessageItem messageItem)
     {
-        string callId = mcpItem.Id ?? string.Empty;
-
-        IDictionary<string, object?>? arguments = null;
-        if (mcpItem.ToolArguments is not null)
+        var contents = new List<AIContent>();
+        foreach (var part in messageItem.Content)
         {
-            string argsJson = mcpItem.ToolArguments.ToString();
-            if (!string.IsNullOrEmpty(argsJson))
+            if (part is ResponseTextContentPart outputTextPart)
             {
-                arguments = JsonSerializer.Deserialize(argsJson, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
+                contents.Add(new TextContent(outputTextPart.Text));
             }
+            else if (part is ResponseAudioContentPart outputAudioPart && outputAudioPart.Transcript is not null)
+            {
+                contents.Add(new TextContent(outputAudioPart.Transcript));
+            }
+        }
+
+        return new RealtimeConversationItem(contents, messageItem.Id, MapMessageRole(messageItem.Role));
+    }
+
+    private static RealtimeConversationItem MapMcpToolCallItem(SessionResponseMcpCallItem mcpItem)
+    {
+        IDictionary<string, object?>? arguments = null;
+        if (!string.IsNullOrEmpty(mcpItem.Arguments))
+        {
+            arguments = JsonSerializer.Deserialize(mcpItem.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
         }
 
         var contents = new List<AIContent>
         {
-            new McpServerToolCallContent(callId, mcpItem.ToolName ?? string.Empty, mcpItem.ServerLabel)
+            new McpServerToolCallContent(mcpItem.Id ?? string.Empty, mcpItem.Name ?? string.Empty, mcpItem.ServerLabel)
             {
                 Arguments = arguments?.AsReadOnly(),
+                RawRepresentation = mcpItem,
             },
         };
 
-        // Parse output/error into result content.
-        if (mcpItem.ToolOutput is not null || mcpItem.Error is not null)
+        if (mcpItem.Output is not null || mcpItem.Error is not null)
         {
             AIContent resultContent = mcpItem.Error is not null
-                ? new ErrorContent(mcpItem.Error.Message)
-                : new TextContent(mcpItem.ToolOutput);
+                ? new ErrorContent(mcpItem.Error.ToString())
+                : new TextContent(mcpItem.Output);
 
-            contents.Add(new McpServerToolResultContent(callId)
+            contents.Add(new McpServerToolResultContent(mcpItem.Id ?? string.Empty)
             {
                 Output = [resultContent],
                 RawRepresentation = mcpItem,
@@ -1144,41 +1045,35 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         return new RealtimeConversationItem(contents, mcpItem.Id);
     }
 
-    private static RealtimeConversationItem MapMcpApprovalRequestItem(Sdk.RealtimeMcpToolCallApprovalRequestItem approvalItem)
+    private static RealtimeConversationItem MapMcpApprovalRequestItem(SessionResponseMcpApprovalRequestItem approvalItem)
     {
-        string approvalId = approvalItem.Id ?? string.Empty;
-
         IDictionary<string, object?>? arguments = null;
-        if (approvalItem.ToolArguments is not null)
+        if (!string.IsNullOrEmpty(approvalItem.Arguments))
         {
-            string argsJson = approvalItem.ToolArguments.ToString();
-            if (!string.IsNullOrEmpty(argsJson))
-            {
-                arguments = JsonSerializer.Deserialize(argsJson, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
-            }
+            arguments = JsonSerializer.Deserialize(approvalItem.Arguments, OpenAIRealtimeJsonContext.Default.IDictionaryStringObject);
         }
 
-        var toolCall = new McpServerToolCallContent(approvalId, approvalItem.ToolName ?? string.Empty, approvalItem.ServerLabel)
+        var toolCall = new McpServerToolCallContent(approvalItem.Id ?? string.Empty, approvalItem.Name ?? string.Empty, approvalItem.ServerLabel)
         {
             Arguments = arguments?.AsReadOnly(),
             RawRepresentation = approvalItem,
         };
 
         return new RealtimeConversationItem(
-            [new McpServerToolApprovalRequestContent(approvalId, toolCall) { RawRepresentation = approvalItem }],
+            [new McpServerToolApprovalRequestContent(approvalItem.Id ?? string.Empty, toolCall) { RawRepresentation = approvalItem }],
             approvalItem.Id);
     }
 
-    private static RealtimeConversationItem MapMcpToolDefinitionListItem(Sdk.RealtimeMcpToolDefinitionListItem toolListItem)
+    private static RealtimeConversationItem MapMcpToolDefinitionListItem(SessionResponseMcpListToolItem toolListItem)
     {
         var contents = new List<AIContent>();
-        foreach (var toolDef in toolListItem.ToolDefinitions)
+        foreach (var tool in toolListItem.Tools)
         {
-            if (toolDef.Name is not null)
+            if (tool.Name is not null)
             {
-                contents.Add(new McpServerToolCallContent(toolDef.Name, toolDef.Name, toolListItem.ServerLabel)
+                contents.Add(new McpServerToolCallContent(tool.Name, tool.Name, toolListItem.ServerLabel)
                 {
-                    RawRepresentation = toolDef,
+                    RawRepresentation = tool,
                 });
             }
         }
@@ -1186,41 +1081,50 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         return new RealtimeConversationItem(contents, toolListItem.Id);
     }
 
-    private static RealtimeUsageDetails? MapUsageDetails(Sdk.RealtimeResponseUsage? usage)
+    private static RealtimeUsageDetails? MapUsageDetails(ResponseTokenStatistics? usage)
     {
         if (usage is null)
         {
             return null;
         }
 
-        var details = new RealtimeUsageDetails
+        return new RealtimeUsageDetails
         {
-            InputTokenCount = usage.InputTokenCount ?? 0,
-            OutputTokenCount = usage.OutputTokenCount ?? 0,
-            TotalTokenCount = usage.TotalTokenCount ?? 0,
+            InputTokenCount = usage.InputTokens,
+            OutputTokenCount = usage.OutputTokens,
+            TotalTokenCount = usage.TotalTokens,
         };
-
-        if (usage.InputTokenDetails is { } inputDetails)
-        {
-            details.InputAudioTokenCount = inputDetails.AudioTokenCount ?? 0;
-            details.InputTextTokenCount = inputDetails.TextTokenCount ?? 0;
-        }
-
-        if (usage.OutputTokenDetails is { } outputDetails)
-        {
-            details.OutputAudioTokenCount = outputDetails.AudioTokenCount ?? 0;
-            details.OutputTextTokenCount = outputDetails.TextTokenCount ?? 0;
-        }
-
-        return details;
     }
 
-    private static RealtimeAudioFormat? MapSdkAudioFormat(Sdk.RealtimeAudioFormat? format) => format switch
+    private static ChatRole? MapMessageRole(ResponseMessageRole role) => role switch
     {
-        Sdk.RealtimePcmAudioFormat pcm => new RealtimeAudioFormat("audio/pcm", pcm.Rate),
-        Sdk.RealtimePcmuAudioFormat => new RealtimeAudioFormat("audio/pcmu", 8000),
-        Sdk.RealtimePcmaAudioFormat => new RealtimeAudioFormat("audio/pcma", 8000),
+        var r when r == ResponseMessageRole.Assistant => ChatRole.Assistant,
+        var r when r == ResponseMessageRole.System => ChatRole.System,
+        var r when r == ResponseMessageRole.User => ChatRole.User,
         _ => null,
+    };
+
+    private static RealtimeAudioFormat? MapSdkAudioFormat(InputAudioFormat? format, int? samplingRate = null) => format?.ToString() switch
+    {
+        "pcm16" or "Pcm16" => new RealtimeAudioFormat("audio/pcm", samplingRate ?? 16000),
+        "g711_ulaw" or "G711Ulaw" => new RealtimeAudioFormat("audio/pcmu", 8000),
+        "g711_alaw" or "G711Alaw" => new RealtimeAudioFormat("audio/pcma", 8000),
+        _ => null,
+    };
+
+    private static RealtimeAudioFormat? MapSdkAudioFormat(OutputAudioFormat? format) => format?.ToString() switch
+    {
+        "pcm16" or "Pcm16" => new RealtimeAudioFormat("audio/pcm", 16000),
+        "g711_ulaw" or "G711Ulaw" => new RealtimeAudioFormat("audio/pcmu", 8000),
+        "g711_alaw" or "G711Alaw" => new RealtimeAudioFormat("audio/pcma", 8000),
+        _ => null,
+    };
+
+    private static string? GetVoiceName(VoiceProvider? voice) => voice switch
+    {
+        AzureStandardVoice azureStandardVoice => azureStandardVoice.Name,
+        AzureCustomVoice azureCustomVoice => azureCustomVoice.Name,
+        _ => voice?.ToString(),
     };
 
     #endregion

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -32,7 +33,7 @@ internal sealed partial class AgentsJsonContext : JsonSerializerContext
 
         JsonSerializerOptions options = new()
         {
-            TypeInfoResolver = JsonTypeInfoResolver.Combine(AgentsJsonContext.DefaultOptions.TypeInfoResolver, ExtensionsAIJsonUtilities.DefaultOptions.TypeInfoResolver),
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(ExtensionsAIJsonUtilities.DefaultOptions.TypeInfoResolver),
 
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };

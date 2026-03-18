@@ -14,14 +14,12 @@ using System.Threading.Tasks;
 using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
 using Sdk = OpenAI.Realtime;
+using Microsoft.Extensions.AI;
 
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 #pragma warning disable OPENAI002 // OpenAI Realtime API is experimental
-#pragma warning disable SA1204 // Static elements should appear before instance elements
-#pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access
-#pragma warning disable IL3050 // Members annotated with 'RequiresDynamicCodeAttribute' require dynamic access
 
-namespace Microsoft.Extensions.AI;
+namespace Extensions.AI.Realtime.OpenAI;
 
 /// <summary>Represents an <see cref="IRealtimeClientSession"/> for the OpenAI Realtime API over WebSocket.</summary>
 public sealed class OpenAIRealtimeClientSession : IRealtimeClientSession
@@ -33,7 +31,7 @@ public sealed class OpenAIRealtimeClientSession : IRealtimeClientSession
     private readonly ChatClientMetadata _metadata;
 
     /// <summary>Owned <see cref="Sdk.RealtimeClient"/> created from the (apiKey, model) constructor path.</summary>
-    private Sdk.RealtimeClient? _ownedRealtimeClient;
+    private readonly Sdk.RealtimeClient? _ownedRealtimeClient;
 
     /// <summary>The SDK session client for communication with the Realtime API.</summary>
     private Sdk.RealtimeSessionClient? _sessionClient;
