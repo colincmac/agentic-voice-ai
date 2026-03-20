@@ -9,7 +9,7 @@ namespace Agents.AI.Realtime;
 /// <summary>
 /// Configuration options for the <see cref="RealtimeAIAgent"/>.
 /// </summary>
-public sealed class RealtimeAIAgentOptions
+public sealed class RealtimeAgentOptions
 {
     /// <summary>
     /// Gets or sets the unique identifier for the agent.
@@ -44,8 +44,8 @@ public sealed class RealtimeAIAgentOptions
     /// <summary>
     /// Creates a deep copy of this options instance.
     /// </summary>
-    /// <returns>A new <see cref="RealtimeAIAgentOptions"/> with the same values.</returns>
-    public RealtimeAIAgentOptions Clone() => new()
+    /// <returns>A new <see cref="RealtimeAgentOptions"/> with the same values.</returns>
+    public RealtimeAgentOptions Clone() => new()
     {
         Id = Id,
         Name = Name,

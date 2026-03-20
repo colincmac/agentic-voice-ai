@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
+using Extensions.AI.Realtime;
 using Microsoft.Shared.DiagnosticIds;
 
 namespace Microsoft.Extensions.AI;
@@ -70,6 +71,14 @@ public class RealtimeSessionOptions
     /// Gets the AI tools available for generating the response.
     /// </summary>
     public IReadOnlyList<AITool>? Tools { get; init; }
+    /// <summary>
+    /// Gets the voice activity detection (VAD) options for the session.
+    /// </summary>
+    /// <remarks>
+    /// When set, configures how the server detects user speech to manage turn-taking.
+    /// When <see langword="null"/>, the provider's default VAD behavior is used.
+    /// </remarks>
+    public VoiceActivityDetectionOptions? VoiceActivityDetection { get; init; }
 
     /// <summary>
     /// Gets a callback responsible for creating the raw representation of the session options from an underlying implementation.
@@ -95,4 +104,23 @@ public class RealtimeSessionOptions
     /// </remarks>
     [JsonIgnore]
     public Func<object?>? RawRepresentationFactory { get; init; }
+
+    public RealtimeSessionOptions Clone()
+    {
+        return new RealtimeSessionOptions
+        {
+            SessionKind = this.SessionKind,
+            Model = this.Model,
+            InputAudioFormat = this.InputAudioFormat,
+            TranscriptionOptions = this.TranscriptionOptions,
+            OutputAudioFormat = this.OutputAudioFormat,
+            Voice = this.Voice,
+            Instructions = this.Instructions,
+            MaxOutputTokens = this.MaxOutputTokens,
+            OutputModalities = this.OutputModalities,
+            ToolMode = this.ToolMode,
+            Tools = this.Tools,
+            RawRepresentationFactory = this.RawRepresentationFactory
+        };
+    }
 }
