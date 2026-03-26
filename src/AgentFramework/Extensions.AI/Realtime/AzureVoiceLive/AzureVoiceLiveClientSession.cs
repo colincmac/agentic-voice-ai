@@ -1037,7 +1037,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
 
             contents.Add(new McpServerToolResultContent(mcpItem.Id ?? string.Empty)
             {
-                Output = [resultContent],
+                Outputs = [resultContent],
                 RawRepresentation = mcpItem,
             });
         }
@@ -1060,7 +1060,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         };
 
         return new RealtimeConversationItem(
-            [new McpServerToolApprovalRequestContent(approvalItem.Id ?? string.Empty, toolCall) { RawRepresentation = approvalItem }],
+            [new ToolApprovalRequestContent(approvalItem.Id ?? string.Empty, toolCall) { RawRepresentation = approvalItem }],
             approvalItem.Id);
     }
 
@@ -1081,14 +1081,14 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         return new RealtimeConversationItem(contents, toolListItem.Id);
     }
 
-    private static RealtimeUsageDetails? MapUsageDetails(ResponseTokenStatistics? usage)
+    private static UsageDetails? MapUsageDetails(ResponseTokenStatistics? usage)
     {
         if (usage is null)
         {
             return null;
         }
 
-        return new RealtimeUsageDetails
+        return new UsageDetails
         {
             InputTokenCount = usage.InputTokens,
             OutputTokenCount = usage.OutputTokens,

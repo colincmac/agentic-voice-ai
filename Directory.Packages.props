@@ -6,7 +6,7 @@
     <MicrosoftAIEvaluationVersion>10.1.0</MicrosoftAIEvaluationVersion>
 
     <MicrosoftExtensionsVersion>10.1.0</MicrosoftExtensionsVersion>
-    <MicrosoftExtensionsVersionAI>10.3.0</MicrosoftExtensionsVersionAI>
+    <MicrosoftExtensionsVersionAI>10.4.1</MicrosoftExtensionsVersionAI>
 
     <MicrosoftAgentsFrameworkVersion>1.0.0-rc4</MicrosoftAgentsFrameworkVersion>
     <AspireVersion>13.1.0</AspireVersion>

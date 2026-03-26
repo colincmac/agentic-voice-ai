@@ -204,11 +204,11 @@ public sealed class RealtimeAIAgent : AIAgent
     /// <see cref="GetStreamingResponseAsync"/> instead.
     /// </remarks>
     /// <exception cref="NotSupportedException">Always thrown. Use the realtime session APIs instead.</exception>
-    protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
         AgentRunOptions? options = null,
-        CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
 
         var runOptions = options as RealtimeAgentRunOptions ?? new();
@@ -427,8 +427,8 @@ public sealed class RealtimeAIAgent : AIAgent
     }
 
 
-    private async Task<RealtimeAIAgentSession?> ConfigureSessionAsync(
-               RealtimeAIAgentSession session,
+    private async Task<(RealtimeAIAgentSession? session, RealtimeAgentContinuationToken? continuationToken)> ConfigureSessionAsync(
+               RealtimeAIAgentSession agentSession,
                RealtimeAgentRunOptions? runOptions,
                IEnumerable<ChatMessage> initialMessages,
                CancellationToken cancellationToken)
@@ -436,7 +436,7 @@ public sealed class RealtimeAIAgent : AIAgent
         var sessionOptions = GetSessionOptions(runOptions);
 
         var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
-        var clientSession = session.ClientSession ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
+        var clientSession = agentSession.ClientSession ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
 
         //try
         //{
@@ -511,18 +511,17 @@ public sealed class RealtimeAIAgent : AIAgent
     }
 
 
-    private RealtimeSessionOptions? GetSessionOptions(RealtimeAgentRunOptions? runOptions = null)
+    private (RealtimeSessionOptions?, RealtimeAgentContinuationToken?) GetSessionOptions(AgentRunOptions? runOptions = null)
     {
-        var requestOptions = runOptions?.SessionOptions?.Clone();
-
+        var requestOptions = (runOptions as RealtimeAgentRunOptions)?.SessionOptions;
         if (_agentOptions?.SessionOptions is null)
         {
-            return requestOptions;
+            return ApplyAgentRunOptionsOverrides(requestOptions, runOptions);
         }
 
         if (requestOptions is null)
         {
-            return null;
+            return ApplyAgentRunOptionsOverrides(_agentOptions?.SessionOptions, runOptions);
         }
 
         // Combine options, giving precedence to requestOptions
