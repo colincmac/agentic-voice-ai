@@ -433,7 +433,7 @@ public sealed class RealtimeAIAgent : AIAgent
                IEnumerable<ChatMessage> initialMessages,
                CancellationToken cancellationToken)
     {
-        var sessionOptions = GetSessionOptions(runOptions);
+        var (sessionOptions, continuationToken) = GetSessionConfiguration(runOptions);
 
         var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
         var clientSession = agentSession.ClientSession ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
@@ -511,7 +511,7 @@ public sealed class RealtimeAIAgent : AIAgent
     }
 
 
-    private (RealtimeSessionOptions?, RealtimeAgentContinuationToken?) GetSessionOptions(AgentRunOptions? runOptions = null)
+    private (RealtimeSessionOptions?, RealtimeAgentContinuationToken?) GetSessionConfiguration(AgentRunOptions? runOptions = null)
     {
         var requestOptions = (runOptions as RealtimeAgentRunOptions)?.SessionOptions;
         if (_agentOptions?.SessionOptions is null)
@@ -525,44 +525,24 @@ public sealed class RealtimeAIAgent : AIAgent
         }
 
         // Combine options, giving precedence to requestOptions
-        requestOptions.Instructions ??= _agentOptions.SessionOptions.Instructions;
-        requestOptions.TurnDetection ??= _agentOptions.SessionOptions.;
-        requestOptions.Voice ??= _agentOptions.SessionOptions.Voice;
-        requestOptions.InputAudioFormat ??= _agentOptions.SessionOptions.InputAudioFormat;
-        requestOptions.OutputAudioFormat ??= _agentOptions.SessionOptions.OutputAudioFormat;
-        requestOptions.InputTranscription ??= _agentOptions.SessionOptions.InputTranscription;
-        requestOptions.ToolMode ??= _agentOptions.SessionOptions.ToolMode;
-        //requestOptions.Tools ??= _agentOptions.SessionOptions.Tools;
-        requestOptions.Modalities ??= _agentOptions.SessionOptions.Modalities;
-        requestOptions.MaxOutputTokens ??= _agentOptions.SessionOptions.MaxOutputTokens;
-
-        if (requestOptions.AdditionalProperties is not null && _agentOptions.SessionOptions.AdditionalProperties is not null)
+        var finalOptions = new RealtimeSessionOptions 
         {
-            foreach (var propertyKey in _agentOptions.SessionOptions.AdditionalProperties.Keys)
-            {
-                _ = requestOptions.AdditionalProperties.TryAdd(propertyKey, _agentOptions.SessionOptions.AdditionalProperties[propertyKey]);
-            }
-        }
-        else
-        {
-            requestOptions.AdditionalProperties ??= _agentOptions.SessionOptions.AdditionalProperties?.Clone();
-        }
+            Instructions = requestOptions.Instructions ?? _agentOptions.SessionOptions.Instructions,
+            VoiceActivityDetection = requestOptions.VoiceActivityDetection ?? _agentOptions.SessionOptions.VoiceActivityDetection,
+            Voice = requestOptions.Voice ?? _agentOptions.SessionOptions.Voice,
+            InputAudioFormat = requestOptions.InputAudioFormat ?? _agentOptions.SessionOptions.InputAudioFormat,
+            OutputAudioFormat = requestOptions.OutputAudioFormat ?? _agentOptions.SessionOptions.OutputAudioFormat,
+            ToolMode = requestOptions.ToolMode ?? _agentOptions.SessionOptions.ToolMode,
+            MaxOutputTokens = requestOptions.MaxOutputTokens,
+            Model = requestOptions.Model ?? _agentOptions.SessionOptions.Model,
+            OutputModalities = requestOptions.OutputModalities ?? _agentOptions.SessionOptions.OutputModalities,
+            SessionKind = RealtimeSessionKind.Conversation,
+            TranscriptionOptions = requestOptions.TranscriptionOptions ?? _agentOptions.SessionOptions.TranscriptionOptions,
+            Tools = requestOptions.Tools ?? _agentOptions.SessionOptions.Tools,
+        };
 
-        if (_agentOptions.SessionOptions.Tools is { Count: > 0 })
-        {
-            if (requestOptions.Tools is { Count: 0 })
-            {
-                // If no tools were specified in the request, use the agent's default tools.
-                requestOptions.Tools = _agentOptions.SessionOptions.Tools;
-            }
-            else
-            {
-                // Merge tools from both the request and the agent, ensuring no duplicates.
-                requestOptions.Tools = EnsureDistinctTools(requestOptions.Tools, _agentOptions.SessionOptions.Tools);
-            }
-        }
 
-        return requestOptions;
+        return ApplyAgentRunOptionsOverrides(finalOptions, runOptions);
 
         static (RealtimeSessionOptions?, RealtimeAgentContinuationToken?) ApplyAgentRunOptionsOverrides(RealtimeSessionOptions? realtimeSessionOptions, AgentRunOptions? agentRunOptions)
         {
@@ -573,21 +553,12 @@ public sealed class RealtimeAIAgent : AIAgent
             {
                 agentContinuationToken = RealtimeAgentContinuationToken.FromToken(continuationToken);
                 realtimeSessionOptions ??= new RealtimeSessionOptions();
-                realtimeSessionOptions.ContinuationToken = agentContinuationToken!.InnerToken;
             }
 
             // Add/Replace any additional properties from the AgentRunOptions, since they should always take precedence.
-            if (agentRunOptions?.AdditionalProperties is { Count: > 0 })
-            {
-                chatOptions ??= new ChatOptions();
-                chatOptions.AdditionalProperties ??= new();
-                foreach (var kvp in agentRunOptions.AdditionalProperties)
-                {
-                    chatOptions.AdditionalProperties[kvp.Key] = kvp.Value;
-                }
-            }
 
-            return (chatOptions, agentContinuationToken);
+
+            return (realtimeSessionOptions, agentContinuationToken);
         }
     }
 }
