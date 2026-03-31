@@ -30,7 +30,7 @@ namespace Agents.AI.Realtime;
 /// it in HTML, executing it as code, or passing it to any security-sensitive context.
 /// </para>
 /// </remarks>
-public sealed class RealtimeAIAgent : AIAgent
+public class RealtimeAIAgent : AIAgent, IRealtimeAgent
 {
     private readonly RealtimeAgentOptions? _agentOptions;
     private readonly AIAgentMetadata _agentMetadata;
@@ -103,7 +103,7 @@ public sealed class RealtimeAIAgent : AIAgent
     /// <param name="sessionOptions">Optional session options that override the agent's defaults.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A <see cref="RealtimeAIAgentSession"/> containing the active realtime session.</returns>
-    public async ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
+    public virtual async ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
         RealtimeSessionOptions? sessionOptions = null,
         CancellationToken cancellationToken = default)
     {
@@ -133,7 +133,7 @@ public sealed class RealtimeAIAgent : AIAgent
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> or <paramref name="message"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The session does not have an active realtime client session.</exception>
-    public async Task SendAsync(
+    public virtual async Task SendAsync(
         RealtimeAIAgentSession session,
         RealtimeClientMessage message,
         CancellationToken cancellationToken = default)
@@ -211,26 +211,80 @@ public sealed class RealtimeAIAgent : AIAgent
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
 
-        var runOptions = options as RealtimeAgentRunOptions ?? new();
+        (RealtimeAIAgentSession safeSession, RealtimeAgentContinuationToken? continuationToken) = await GetConfiguredSessionAsync(session, options, messages, cancellationToken);
 
-        var safeSession = EnsureConversationSession(session);
+        var clientSession = safeSession.ClientSession ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
 
-        var clientSession = safeSession.ClientSession
-    ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
+        // Update the run context with the resolved session so any downstream classes
+        // always have a valid session, even when the caller passed null.
+        EnsureRunContextHasSession(safeSession);
 
         _logger.LogDebug("Starting streaming response from realtime session for agent '{AgentName}' (Id: {AgentId})", GetLoggingAgentName(), Id);
-        List<ChatResponseUpdate> responseUpdates = GetResponseUpdates(continuationToken);
+        //List<ChatResponseUpdate> responseUpdates = GetResponseUpdates(continuationToken);
 
-        await foreach (var serverMessage in clientSession.GetStreamingResponseAsync(cancellationToken).ConfigureAwait(false))
+
+        IAsyncEnumerator<RealtimeServerMessage> responseUpdatesEnumerator;
+
+        try
         {
-            yield return new AgentResponseUpdate
+            // Using the enumerator to ensure we consider the case where no updates are returned for notification.
+            responseUpdatesEnumerator = clientSession.GetStreamingResponseAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await NotifyAIContextProviderOfFailureAsync(safeSession, ex, GetInputMessages([.. messages], continuationToken), cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+
+        bool hasUpdates;
+        try
+        {
+            // Ensure we start the streaming request
+            hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await NotifyAIContextProviderOfFailureAsync(safeSession, ex, GetInputMessages([.. messages], continuationToken), cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+
+        List<RealtimeServerMessage> responseUpdates = [];
+
+        while (hasUpdates)
+        {
+
+            var update = responseUpdatesEnumerator.Current;
+
+            if (update is not null)
             {
-                AuthorName = Name,
-                AgentId = Id,
-                RawRepresentation = serverMessage,
-            };
+                responseUpdates.Add(update);
+                var wrapped = new AgentResponseUpdate()
+                {
+                    AgentId = Id,
+                    AuthorName = Name,
+                    RawRepresentation = update,
+                    MessageId = update.MessageId,
+                };
+
+                if(update is OutputTextAudioRealtimeServerMessage outputMessage)
+                {
+                    wrapped.ResponseId = outputMessage.ResponseId;
+                    wrapped.Contents.Add(new TextContent(outputMessage.Text));
+                    byte[]? audioBytes = outputMessage.Audio is not null
+                        ? Convert.FromBase64String(outputMessage.Audio)
+                        : null;
+                    wrapped.Contents.Add(new DataContent(audioBytes, "audio/pcm"));
+                }
+                yield return wrapped;
+
+                hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
+
+            }
         }
     }
+
+
+
 
     /// <inheritdoc/>
     public override object? GetService(Type serviceType, object? serviceKey = null)
@@ -279,25 +333,6 @@ public sealed class RealtimeAIAgent : AIAgent
     {
         return new(RealtimeAIAgentSession.Deserialize(serializedState, jsonSerializerOptions));
     }
-
-    private static RealtimeAIAgentSession EnsureConversationSession(AgentSession? session)
-    {
-        if (session is not RealtimeAIAgentSession realtimeSession)
-        {
-            throw new InvalidOperationException(
-                "The provided session is not compatible with this agent. " +
-                $"Use {nameof(CreateSessionCoreAsync)} to create a compatible session.");
-        }
-
-        if(realtimeSession.ClientSession is null)
-        {
-            throw new InvalidOperationException(
-                "The provided session does not have an active realtime client session. " +
-                $"Use {nameof(CreateSessionCoreAsync)} to create a session with an active realtime client session.");
-        }
-        return realtimeSession;
-    }
-
 
     private static RealtimeAgentContinuationToken? WrapContinuationToken(ResponseContinuationToken? continuationToken, IEnumerable<ChatMessage>? inputMessages = null, List<ChatResponseUpdate>? responseUpdates = null)
     {
@@ -426,76 +461,23 @@ public sealed class RealtimeAIAgent : AIAgent
         return stateKeys;
     }
 
-
-    private async Task<(RealtimeAIAgentSession? session, RealtimeAgentContinuationToken? continuationToken)> ConfigureSessionAsync(
-               RealtimeAIAgentSession agentSession,
-               RealtimeAgentRunOptions? runOptions,
+    private async Task<(RealtimeAIAgentSession session, RealtimeAgentContinuationToken? continuationToken)> GetConfiguredSessionAsync(
+               AgentSession? agentSession,
+               AgentRunOptions? runOptions,
                IEnumerable<ChatMessage> initialMessages,
                CancellationToken cancellationToken)
     {
         var (sessionOptions, continuationToken) = GetSessionConfiguration(runOptions);
 
-        var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
-        var clientSession = agentSession.ClientSession ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
+        //var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
+        agentSession ??= await this.CreateRealtimeSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
 
-        //try
-        //{
-        //    // Load history and context
-        //    List<ChatMessage> sessionHistory = [];
+        if (agentSession is not RealtimeAIAgentSession typedSession)
+        {
+            throw new InvalidOperationException($"The provided session type '{agentSession.GetType().Name}' is not compatible with this agent. Only sessions of type '{nameof(RealtimeAIAgentSession)}' can be used by this agent.");
+        }
 
-        //    if (aiContext?.Messages is { Count: > 0 })
-        //    {
-        //        sessionHistory.AddRange(aiContext.Messages);
-        //    }
-
-        //    if (aiContext?.Tools is { Count: > 0 })
-        //    {
-        //        sessionOptions ??= new();
-        //        sessionOptions.Tools ??= [];
-
-        //        foreach (var tool in aiContext.Tools.OfType<AIFunction>())
-        //        {
-        //            sessionOptions.Tools.Add(tool);
-        //        }
-        //    }
-
-        //    if (aiContext?.Instructions is not null)
-        //    {
-        //        sessionOptions ??= new();
-        //        sessionOptions.Instructions = string.IsNullOrWhiteSpace(sessionOptions.Instructions)
-        //            ? aiContext.Instructions
-        //            : $"{sessionOptions.Instructions}{Environment.NewLine}{aiContext.Instructions}";
-        //    }
-
-        //    if (!string.IsNullOrWhiteSpace(Instructions))
-        //    {
-        //        sessionOptions ??= new();
-        //        sessionOptions.Instructions = string.IsNullOrWhiteSpace(sessionOptions.Instructions) ? Instructions : $"{Instructions}{Environment.NewLine}{sessionOptions.Instructions}";
-        //    }
-        //    sessionHistory.AddRange(initialMessages);
-
-
-        //    // Reuse existing session if still valid
-        //    if (session.Session is null or { State: RealtimeSessionState.Closed or RealtimeSessionState.Closing or RealtimeSessionState.Error })
-        //    {
-        //        session.Session?.Dispose();
-
-        //        session.Session = await client.GetSessionAsync(
-        //            sessionOptions,
-        //            cancellationToken);
-
-        //    }
-
-        //    if (sessionOptions is not null)
-        //    {
-        //        await session.Session.ConfigureSessionAsync(sessionOptions, cancellationToken);
-        //    }
-
-        //    await SendMessagesToRunAsync(sessionHistory, session, cancellationToken);
-
-        //    return (sessionOptions, sessionHistory);
-        //}
-        //finally { session._sessionGate.Release(); }
+        return (typedSession, continuationToken);
     }
 
     private static IRealtimeClient ApplyRunOptionsTransformationsToClient(RealtimeAgentRunOptions? options, IRealtimeClient conversationClient)
@@ -523,11 +505,18 @@ public sealed class RealtimeAIAgent : AIAgent
         {
             return ApplyAgentRunOptionsOverrides(_agentOptions?.SessionOptions, runOptions);
         }
+        var instructions = !string.IsNullOrWhiteSpace(requestOptions.Instructions) && !string.IsNullOrWhiteSpace(_agentOptions.SessionOptions.Instructions)
+            ? $"{_agentOptions.SessionOptions.Instructions}{Environment.NewLine}{requestOptions.Instructions}"
+            : (!string.IsNullOrWhiteSpace(requestOptions.Instructions)
+            ? requestOptions.Instructions
+            : _agentOptions.SessionOptions.Instructions);
+
+
 
         // Combine options, giving precedence to requestOptions
         var finalOptions = new RealtimeSessionOptions 
         {
-            Instructions = requestOptions.Instructions ?? _agentOptions.SessionOptions.Instructions,
+            Instructions = instructions,
             VoiceActivityDetection = requestOptions.VoiceActivityDetection ?? _agentOptions.SessionOptions.VoiceActivityDetection,
             Voice = requestOptions.Voice ?? _agentOptions.SessionOptions.Voice,
             InputAudioFormat = requestOptions.InputAudioFormat ?? _agentOptions.SessionOptions.InputAudioFormat,
@@ -555,10 +544,26 @@ public sealed class RealtimeAIAgent : AIAgent
                 realtimeSessionOptions ??= new RealtimeSessionOptions();
             }
 
-            // Add/Replace any additional properties from the AgentRunOptions, since they should always take precedence.
-
-
             return (realtimeSessionOptions, agentContinuationToken);
+        }
+    }
+    /// <summary>
+    /// Ensures that <see cref="AIAgent.CurrentRunContext"/> contains the resolved session.
+    /// </summary>
+    /// <remarks>
+    /// The base class sets <see cref="AIAgent.CurrentRunContext"/> with the raw session parameter
+    /// (which may be null) and restores it after each yield in streaming scenarios. After
+    /// <see cref="PrepareSessionAndMessagesAsync"/> resolves or creates a session, we update the
+    /// context so the <see cref="ServiceStoredSimulatingChatClient"/> decorator always has a valid session.
+    /// The original agent from the context is preserved to maintain the top-of-stack agent in
+    /// decorated agent scenarios.
+    /// </remarks>
+    private static void EnsureRunContextHasSession(RealtimeAIAgentSession safeSession)
+    {
+        var context = CurrentRunContext;
+        if (context is not null && context.Session != safeSession)
+        {
+            CurrentRunContext = new(context.Agent, safeSession, context.RequestMessages, context.RunOptions);
         }
     }
 }

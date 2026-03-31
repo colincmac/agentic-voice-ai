@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Agents.AI.RealtimeVoice;
+using Agents.AI.Realtime;
 using Azure.Core;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
@@ -40,10 +40,10 @@ public static class AgentBuilderExtensions
 
         return builder.Use((innerAgent, _) =>
         {
-            // Function calling requires a ChatClientAgent inner agent.
-            if (innerAgent.GetService<FunctionInvokingConversationClient>() is null || innerAgent.GetService<RealtimeAIAgent>() is null)
+            // Function calling requires a RealtimeClientAgent inner agent.
+            if (innerAgent.GetService<FunctionInvokingRealtimeClient>() is null || innerAgent.GetService<RealtimeAIAgent>() is null)
             {
-                throw new InvalidOperationException($"The function invocation middleware can only be used with decorations of a {nameof(AIAgent)} that support usage of FunctionInvokingChatClient decorated chat clients.");
+                throw new InvalidOperationException($"The function invocation middleware can only be used with decorations of a {nameof(AIAgent)} that support usage of FunctionInvokingRealtimeClient decorated realtime clients.");
             }
 
             return new FunctionInvocationRealtimeAgent(innerAgent, callback);
