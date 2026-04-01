@@ -42,5 +42,5 @@ public class RealtimeAgentRunOptions : AgentRunOptions
     /// different chat client to use for this specific invocation. If <see langword="null"/>, the agent's default
     /// chat client will be used without modification.
     /// </value>
-    public Func<IRealtimeClient, IRealtimeClient>? ConversationClientFactory { get; set; }
+    public Func<IRealtimeClient, IRealtimeClient>? RealtimeClientFactory { get; set; }
 }

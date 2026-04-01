@@ -14,6 +14,8 @@ using Extensions.AI.RealtimeVoice;
 using Microsoft.Shared.Diagnostics;
 using Azure.AI.VoiceLive;
 using Extensions.AI.RealtimeVoice.AzureVoiceLive;
+using Extensions.AI.Realtime.AzureVoiceLive;
+using OpenAI.Realtime;
 
 namespace Agents.AI.Hosting;
 
@@ -92,19 +94,19 @@ public enum ClientChatProvider
     AzureAIInference,
     AzureVoiceLive
 }
-public static class LiveConversationClientBuilderExtensions
+public static class RealtimeClientBuilderExtensions
 {
-    /// <summary>Registers a singleton <see cref="ILiveConversationClient"/> in the <see cref="IServiceCollection"/>.</summary>
+    /// <summary>Registers a singleton <see cref="IRealtimeClient"/> in the <see cref="IServiceCollection"/>.</summary>
     /// <param name="serviceCollection">The <see cref="IServiceCollection"/> to which the client should be added.</param>
-    /// <param name="innerClient">The inner <see cref="ILiveConversationClient"/> that represents the underlying backend.</param>
+    /// <param name="innerClient">The inner <see cref="IRealtimeClient"/> that represents the underlying backend.</param>
     /// <param name="lifetime">The service lifetime for the client. Defaults to <see cref="ServiceLifetime.Singleton"/>.</param>
-    /// <returns>A <see cref="LiveConversationClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
+    /// <returns>A <see cref="RealtimeClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
     /// <remarks>The client is registered as a singleton service.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="serviceCollection"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="innerClient"/> is <see langword="null"/>.</exception>
-    public static LiveConversationClientBuilder AddConversationClient(
+    public static RealtimeClientBuilder AddConversationClient(
         this IServiceCollection serviceCollection,
-        ILiveConversationClient innerClient,
+        IRealtimeClient innerClient,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
         _ = Throw.IfNull(serviceCollection);
@@ -113,40 +115,40 @@ public static class LiveConversationClientBuilderExtensions
         return AddConversationClient(serviceCollection, _ => innerClient, lifetime);
     }
 
-    /// <summary>Registers a singleton <see cref="ILiveConversationClient"/> in the <see cref="IServiceCollection"/>.</summary>
+    /// <summary>Registers a singleton <see cref="IRealtimeClient"/> in the <see cref="IServiceCollection"/>.</summary>
     /// <param name="serviceCollection">The <see cref="IServiceCollection"/> to which the client should be added.</param>
-    /// <param name="innerClientFactory">A callback that produces the inner <see cref="ILiveConversationClient"/> that represents the underlying backend.</param>
+    /// <param name="innerClientFactory">A callback that produces the inner <see cref="IRealtimeClient"/> that represents the underlying backend.</param>
     /// <param name="lifetime">The service lifetime for the client. Defaults to <see cref="ServiceLifetime.Singleton"/>.</param>
-    /// <returns>A <see cref="LiveConversationClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
+    /// <returns>A <see cref="RealtimeClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
     /// <remarks>The client is registered as a singleton service.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="serviceCollection"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="innerClientFactory"/> is <see langword="null"/>.</exception>
-    public static LiveConversationClientBuilder AddConversationClient(
+    public static RealtimeClientBuilder AddConversationClient(
         this IServiceCollection serviceCollection,
-        Func<IServiceProvider, ILiveConversationClient> innerClientFactory,
+        Func<IServiceProvider, IRealtimeClient> innerClientFactory,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
         _ = Throw.IfNull(serviceCollection);
         _ = Throw.IfNull(innerClientFactory);
 
-        var builder = new LiveConversationClientBuilder(innerClientFactory);
-        serviceCollection.Add(new ServiceDescriptor(typeof(ILiveConversationClient), builder.Build, lifetime));
+        var builder = new RealtimeClientBuilder(innerClientFactory);
+        serviceCollection.Add(new ServiceDescriptor(typeof(IRealtimeClient), builder.Build, lifetime));
         return builder;
     }
 
-    /// <summary>Registers a keyed singleton <see cref="ILiveConversationClient"/> in the <see cref="IServiceCollection"/>.</summary>
+    /// <summary>Registers a keyed singleton <see cref="IRealtimeClient"/> in the <see cref="IServiceCollection"/>.</summary>
     /// <param name="serviceCollection">The <see cref="IServiceCollection"/> to which the client should be added.</param>
     /// <param name="serviceKey">The key with which to associate the client.</param>
-    /// <param name="innerClient">The inner <see cref="ILiveConversationClient"/> that represents the underlying backend.</param>
+    /// <param name="innerClient">The inner <see cref="IRealtimeClient"/> that represents the underlying backend.</param>
     /// <param name="lifetime">The service lifetime for the client. Defaults to <see cref="ServiceLifetime.Singleton"/>.</param>
-    /// <returns>A <see cref="LiveConversationClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
+    /// <returns>A <see cref="RealtimeClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
     /// <remarks>The client is registered as a scoped service.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="serviceCollection"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="innerClient"/> is <see langword="null"/>.</exception>
-    public static LiveConversationClientBuilder AddKeyedConversationClient(
+    public static RealtimeClientBuilder AddKeyedConversationClient(
         this IServiceCollection serviceCollection,
         object? serviceKey,
-        ILiveConversationClient innerClient,
+        IRealtimeClient innerClient,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
         _ = Throw.IfNull(serviceCollection);
@@ -155,29 +157,29 @@ public static class LiveConversationClientBuilderExtensions
         return AddKeyedConversationClient(serviceCollection, serviceKey, _ => innerClient, lifetime);
     }
 
-    /// <summary>Registers a keyed singleton <see cref="ILiveConversationClient"/> in the <see cref="IServiceCollection"/>.</summary>
+    /// <summary>Registers a keyed singleton <see cref="IRealtimeClient"/> in the <see cref="IServiceCollection"/>.</summary>
     /// <param name="serviceCollection">The <see cref="IServiceCollection"/> to which the client should be added.</param>
     /// <param name="serviceKey">The key with which to associate the client.</param>
-    /// <param name="innerClientFactory">A callback that produces the inner <see cref="ILiveConversationClient"/> that represents the underlying backend.</param>
+    /// <param name="innerClientFactory">A callback that produces the inner <see cref="IRealtimeClient"/> that represents the underlying backend.</param>
     /// <param name="lifetime">The service lifetime for the client. Defaults to <see cref="ServiceLifetime.Singleton"/>.</param>
-    /// <returns>A <see cref="LiveConversationClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
+    /// <returns>A <see cref="RealtimeClientBuilder"/> that can be used to build a pipeline around the inner client.</returns>
     /// <remarks>The client is registered as a scoped service.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="serviceCollection"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="innerClientFactory"/> is <see langword="null"/>.</exception>
-    public static LiveConversationClientBuilder AddKeyedConversationClient(
+    public static RealtimeClientBuilder AddKeyedConversationClient(
         this IServiceCollection serviceCollection,
         object? serviceKey,
-        Func<IServiceProvider, ILiveConversationClient> innerClientFactory,
+        Func<IServiceProvider, IRealtimeClient> innerClientFactory,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
         _ = Throw.IfNull(serviceCollection);
         _ = Throw.IfNull(innerClientFactory);
 
-        var builder = new LiveConversationClientBuilder(innerClientFactory);
-        serviceCollection.Add(new ServiceDescriptor(typeof(ILiveConversationClient), serviceKey, factory: (services, serviceKey) => builder.Build(services), lifetime));
+        var builder = new RealtimeClientBuilder(innerClientFactory);
+        serviceCollection.Add(new ServiceDescriptor(typeof(IRealtimeClient), serviceKey, factory: (services, serviceKey) => builder.Build(services), lifetime));
         return builder;
     }
-    public static LiveConversationClientBuilder AddKeyedConversationClient(
+    public static RealtimeClientBuilder AddKeyedConversationClient(
     this AspireOpenAIClientBuilder builder,
     string serviceKey,
     string deploymentName)
@@ -189,7 +191,7 @@ public static class LiveConversationClientBuilderExtensions
             serviceKey,
             services => CreateInnerRealtimeClient(services, builder, deploymentName));
     }
-    public static LiveConversationClientBuilder AddKeyedConversationVoiceLiveClient(
+    public static RealtimeClientBuilder AddKeyedConversationVoiceLiveClient(
     this AspireOpenAIClientBuilder builder,
     string serviceKey,
     string deploymentName)
@@ -202,7 +204,7 @@ public static class LiveConversationClientBuilderExtensions
             services => CreateInnerVoiceLiveClient(services, builder, deploymentName));
     }
 
-    public static LiveConversationClientBuilder AddKeyedConversationClient(this IHostApplicationBuilder builder, string connectionName)
+    public static RealtimeClientBuilder AddKeyedConversationClient(this IHostApplicationBuilder builder, string connectionName)
     {
         var cs = builder.Configuration.GetConnectionString(connectionName);
 
@@ -219,11 +221,11 @@ public static class LiveConversationClientBuilderExtensions
         };
         // Add OpenTelemetry tracing for the ChatClient activity source
         liveConversationClientBuilder.UseOpenTelemetry();
-        builder.Services.AddOpenTelemetry().WithTracing(t => t.AddSource("Experimental.Microsoft.Extensions.AI"));
+        builder.Services.AddOpenTelemetry().WithTracing(t => t.AddSource("Microsoft.Extensions.AI"));
 
         return liveConversationClientBuilder;
     }
-    private static ILiveConversationClient CreateInnerVoiceLiveClient(
+    private static IRealtimeClient CreateInnerVoiceLiveClient(
     IServiceProvider services,
     AspireOpenAIClientBuilder builder,
     string deploymentName)
@@ -233,28 +235,28 @@ public static class LiveConversationClientBuilderExtensions
             : services.GetRequiredKeyedService<VoiceLiveClient>(builder.ServiceKey);
         var loggerFactory = services.GetService<ILoggerFactory>();
 
-        var conversationClient = new AzureVoiceLiveConversationClient(voiceLiveClient, deploymentName, loggerFactory);
+        var conversationClient = new AzureVoiceLiveClient(voiceLiveClient, SessionTarget.FromModel(deploymentName));
         if (builder.DisableTracing)
         {
             return conversationClient;
         }
-        return new OpenTelemetryConversationClient(conversationClient, loggerFactory?.CreateLogger<OpenTelemetryConversationClient>());
+        return new OpenTelemetryRealtimeClient(conversationClient, loggerFactory?.CreateLogger<OpenTelemetryRealtimeClient>());
     }
-    private static ILiveConversationClient CreateInnerRealtimeClient(
+    private static IRealtimeClient CreateInnerRealtimeClient(
         IServiceProvider services,
         AspireOpenAIClientBuilder builder,
         string deploymentName)
     {
         var openAiClient = builder.ServiceKey is null
-            ? services.GetRequiredService<OpenAIClient>()
-            : services.GetRequiredKeyedService<OpenAIClient>(builder.ServiceKey);
+            ? services.GetRequiredService<RealtimeClient>()
+            : services.GetRequiredKeyedService<RealtimeClient>(builder.ServiceKey);
         var loggerFactory = services.GetService<ILoggerFactory>();
 
-        var conversationClient = new Extensions.AI.RealtimeVoice.OpenAI.OpenAIRealtimeConversationClient(openAiClient, deploymentName, loggerFactory);
+        var conversationClient = new OpenAIRealtimeClient(openAiClient, deploymentName);
         if (builder.DisableTracing)
         {
             return conversationClient;
         }
-        return new OpenTelemetryConversationClient(conversationClient, loggerFactory?.CreateLogger<OpenTelemetryConversationClient>());
+        return new OpenTelemetryRealtimeClient(conversationClient, loggerFactory?.CreateLogger<OpenTelemetryRealtimeClient>());
     }
 }

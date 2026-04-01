@@ -33,22 +33,22 @@ public static class AgentBuilderExtensions
     }
 
 
-    public static AIAgentBuilder Use(this AIAgentBuilder builder, AgentFunctionInvocationMiddleware callback)
-    {
-        _ = Throw.IfNull(builder);
-        _ = Throw.IfNull(callback);
+    //public static AIAgentBuilder Use(this AIAgentBuilder builder, AgentFunctionInvocationMiddleware callback)
+    //{
+    //    _ = Throw.IfNull(builder);
+    //    _ = Throw.IfNull(callback);
 
-        return builder.Use((innerAgent, _) =>
-        {
-            // Function calling requires a RealtimeClientAgent inner agent.
-            if (innerAgent.GetService<FunctionInvokingRealtimeClient>() is null || innerAgent.GetService<RealtimeAIAgent>() is null)
-            {
-                throw new InvalidOperationException($"The function invocation middleware can only be used with decorations of a {nameof(AIAgent)} that support usage of FunctionInvokingRealtimeClient decorated realtime clients.");
-            }
+    //    return builder.Use((innerAgent, _) =>
+    //    {
+    //        // Function calling requires a RealtimeClientAgent inner agent.
+    //        if (innerAgent.GetService<FunctionInvokingRealtimeClient>() is null || innerAgent.GetService<RealtimeAIAgent>() is null)
+    //        {
+    //            throw new InvalidOperationException($"The function invocation middleware can only be used with decorations of a {nameof(AIAgent)} that support usage of FunctionInvokingRealtimeClient decorated realtime clients.");
+    //        }
 
-            return new FunctionInvocationRealtimeAgent(innerAgent, callback);
-        });
-    }
+    //        return new FunctionInvokingRealtimeAIAgent(innerAgent, callback);
+    //    });
+    //}
 
 
 

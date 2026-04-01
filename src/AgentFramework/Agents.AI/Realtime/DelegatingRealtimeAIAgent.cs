@@ -88,4 +88,4 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
         => this.InnerAgent.RunStreamingAsync(messages, session, options, cancellationToken);
 }
 
-}
+

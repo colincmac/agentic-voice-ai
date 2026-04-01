@@ -16,5 +16,5 @@ public interface IRealtimeAgent
     Task SendAsync(
         RealtimeAIAgentSession session,
         RealtimeClientMessage message,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default);
 }

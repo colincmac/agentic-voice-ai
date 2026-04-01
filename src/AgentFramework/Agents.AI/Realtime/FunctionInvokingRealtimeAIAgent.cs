@@ -3,19 +3,30 @@ using System.Collections.Generic;
 using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Extensions.AI.Realtime;
 
 namespace Agents.AI.Realtime;
 
-public class FunctionInvokingRealtimeAIAgent(RealtimeAIAgent innerAgent) : DelegatingRealtimeAIAgent(innerAgent)
+public class FunctionInvokingRealtimeAIAgent: DelegatingRealtimeAIAgent
 {
 
     private readonly Func<AIAgent, FunctionInvocationContext, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>, CancellationToken, ValueTask<object?>> _delegateFunc;
     // Decorate options to add the middleware function
+
+    internal FunctionInvokingRealtimeAIAgent(RealtimeAIAgent innerAgent, Func<AIAgent, FunctionInvocationContext, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>, CancellationToken, ValueTask<object?>> delegateFunc) : base(innerAgent)
+    {
+        this._delegateFunc = delegateFunc;
+    }
+
+    protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(IEnumerable<ChatMessage> messages, AgentSession? session = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
+    => this.InnerAgent.RunStreamingAsync(messages, session, this.AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
+
+
     private AgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
     {
         if (options is null || options.GetType() == typeof(AgentRunOptions))
         {
-            options = new ChatClientAgentRunOptions()
+            options = new RealtimeAgentRunOptions()
             {
                 ResponseFormat = options?.ResponseFormat,
                 AllowBackgroundResponses = options?.AllowBackgroundResponses,
@@ -24,27 +35,45 @@ public class FunctionInvokingRealtimeAIAgent(RealtimeAIAgent innerAgent) : Deleg
             };
         }
 
-        if (options is not ChatClientAgentRunOptions aco)
+        if (options is not RealtimeAgentRunOptions aco)
         {
-            throw new NotSupportedException($"Function Invocation Middleware is only supported without options or with {nameof(ChatClientAgentRunOptions)}.");
+            throw new NotSupportedException($"Function Invocation Middleware is only supported without options or with {nameof(RealtimeAgentRunOptions)}.");
         }
 
-        var originalFactory = aco.ChatClientFactory;
-        aco.ChatClientFactory = chatClient =>
+        var originalFactory = aco.RealtimeClientFactory;
+        aco.RealtimeClientFactory = realtimeClient =>
         {
-            var builder = chatClient.AsBuilder();
+            var builder = realtimeClient.AsBuilder();
 
             if (originalFactory is not null)
             {
                 builder.Use(originalFactory);
             }
-
-            return builder.ConfigureOptions(co
-                => co.Tools = co.Tools?.Select(tool => tool is AIFunction aiFunction
+            // RealtimeSessionOptions properties are init only, so we need to create a new instance with the modified tools list instead of modifying the existing one
+            return builder.ConfigureOptions(options
+                =>
+            {
+                var tools = options.Tools?.Select(tool => tool is AIFunction aiFunction
                         ? new MiddlewareEnabledFunction(this.InnerAgent, aiFunction, this._delegateFunc)
                         : tool)
-                    .ToList())
-                .Build();
+                    .ToList();
+                return new RealtimeSessionOptions()
+                {
+                    Tools = tools,
+                    InputAudioFormat = options.InputAudioFormat,
+                    Instructions = options.Instructions,
+                    MaxOutputTokens = options.MaxOutputTokens,
+                    Model = options.Model,
+                    OutputAudioFormat = options.OutputAudioFormat,
+                    OutputModalities = options.OutputModalities,
+                    RawRepresentationFactory = options.RawRepresentationFactory,
+                    SessionKind = options.SessionKind,
+                    ToolMode = options.ToolMode,
+                    TranscriptionOptions = options.TranscriptionOptions,
+                    Voice = options.Voice,
+                    VoiceActivityDetection = options.VoiceActivityDetection
+                };
+            }).Build();
         };
 
         return options;
@@ -54,7 +83,7 @@ public class FunctionInvokingRealtimeAIAgent(RealtimeAIAgent innerAgent) : Deleg
     {
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            var context = FunctionInvokingChatClient.CurrentContext
+            var context = FunctionInvokingRealtimeClient.CurrentContext
                 ?? new FunctionInvocationContext() // When there is no ambient context, create a new one to hold the arguments
                 {
                     Arguments = arguments,

@@ -482,10 +482,10 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
 
     private static IRealtimeClient ApplyRunOptionsTransformationsToClient(RealtimeAgentRunOptions? options, IRealtimeClient conversationClient)
     {
-        if (options?.ConversationClientFactory is not null)
+        if (options?.RealtimeClientFactory is not null)
         {
             // If we have a custom chat client factory, we should use it to create a new chat client with the transformed tools.
-            conversationClient = options.ConversationClientFactory(conversationClient);
+            conversationClient = options.RealtimeClientFactory(conversationClient);
             _ = Throw.IfNull(conversationClient);
         }
 
