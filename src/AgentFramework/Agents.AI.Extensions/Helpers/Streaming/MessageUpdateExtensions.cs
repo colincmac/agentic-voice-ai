@@ -29,7 +29,7 @@ public static class MessageUpdateExtensions
         RawRepresentation = update,
     };
 
-    public static MessageUpdate FromAgentRunResponseUpdate(AgentRunResponseUpdate update) => new()
+    public static MessageUpdate FromAgentResponseUpdate(AgentResponseUpdate update) => new()
     {
         Contents = update.Contents,
         CreatedAt = update.CreatedAt,
@@ -41,7 +41,7 @@ public static class MessageUpdateExtensions
     };
 
 
-    public static IEnumerable<MessageUpdate> FromAgentRunResponse(AgentRunResponse response) => response.Messages.Select(mu => FromChatMessage(mu, responseId: response.ResponseId));
+    public static IEnumerable<MessageUpdate> FromAgentResponse(AgentResponse response) => response.Messages.Select(mu => FromChatMessage(mu, responseId: response.ResponseId));
 
     public static ChatResponseUpdate ToChatResponseUpdate(this MessageUpdate update)
     {
@@ -75,11 +75,11 @@ public static class MessageUpdateExtensions
         };
     }
 
-    public static AgentRunResponseUpdate ToAgentRunResponseUpdate(this MessageUpdate update)
+    public static AgentResponseUpdate ToAgentResponseUpdate(this MessageUpdate update)
     {
         var roleParsed = !string.IsNullOrEmpty(update.Role) ? new ChatRole(update.Role) : default;
 
-        return new AgentRunResponseUpdate
+        return new AgentResponseUpdate
         {
             Contents = update.Contents,
             CreatedAt = update.CreatedAt,

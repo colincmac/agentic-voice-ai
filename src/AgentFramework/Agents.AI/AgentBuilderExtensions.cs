@@ -32,7 +32,6 @@ public static class AgentBuilderExtensions
         }); 
     }
 
-
     //public static AIAgentBuilder Use(this AIAgentBuilder builder, AgentFunctionInvocationMiddleware callback)
     //{
     //    _ = Throw.IfNull(builder);

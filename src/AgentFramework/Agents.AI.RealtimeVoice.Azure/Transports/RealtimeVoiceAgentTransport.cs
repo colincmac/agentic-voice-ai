@@ -29,7 +29,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer, ISignalConsumer, ITranscriptProducer
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
-    private readonly LiveConversationAgentSession _thread;
+    private readonly RealtimeAIAgentSession _thread;
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly IvrWorkflowState _workflowState = new();
 
@@ -48,7 +48,7 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
 
     public RealtimeVoiceAgentTransport(
         AuthorizingRealtimeAIAgent agent,
-        LiveConversationAgentSession existingThread,
+        RealtimeAIAgentSession existingThread,
         RealtimeIvrWorkflowDefinition workflow,
         AgentRunOptions? runOptions = null,
         PresenceDetectorService? presenceDetector = null,
@@ -222,7 +222,7 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
                 if (nonAudio is { Count: > 0 })
                 {
                     update.Contents = nonAudio;
-                    var msg = MessageUpdateExtensions.FromAgentRunResponseUpdate(update);
+                    var msg = MessageUpdateExtensions.FromAgentResponseUpdate(update);
                     await _messageHandler(ChannelId, msg, cancellationToken).ConfigureAwait(false);
                 }
             }

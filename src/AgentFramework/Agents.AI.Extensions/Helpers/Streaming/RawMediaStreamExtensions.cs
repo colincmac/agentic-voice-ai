@@ -44,9 +44,9 @@ public static class RawMediaStreamExtensions
         return distributor.WriteAsync(bytes, cancellationToken);
     }
 
-    public static ValueTask WriteAsync(this RawMediaStreamChannel distributor, AgentRunResponseUpdate update, CancellationToken cancellationToken = default)
+    public static ValueTask WriteAsync(this RawMediaStreamChannel distributor, AgentResponseUpdate update, CancellationToken cancellationToken = default)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(MessageUpdateExtensions.FromAgentRunResponseUpdate(update), AgentsAIJsonUtilities.DefaultOptions);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(MessageUpdateExtensions.FromAgentResponseUpdate(update), AgentsAIJsonUtilities.DefaultOptions);
         return distributor.WriteAsync(bytes, cancellationToken);
     }
 

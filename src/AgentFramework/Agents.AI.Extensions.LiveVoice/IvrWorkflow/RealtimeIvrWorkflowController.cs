@@ -1,5 +1,6 @@
 using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.RealtimeVoice;
+using Agents.AI.Realtime;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,7 +26,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
     private readonly SemaphoreSlim _stateLock = new(1, 1);
 
     private readonly RealtimeIvrControllerState _state;
-    private LiveConversationAgentSession? _thread;
+    private AgentSession? _thread;
     private bool _isStarted;
     private bool _disposed;
 
@@ -88,7 +89,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
     /// <summary>
     /// Gets the conversation thread associated with this controller.
     /// </summary>
-    public LiveConversationAgentSession? Thread => _thread;
+    public AgentSession? Thread => _thread;
 
     /// <summary>
     /// Initializes the controller and prepares the first step.
@@ -119,7 +120,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
             _state.CurrentPrompt = _workflow.BuildPromptForStep(initialStepId, _state.WorkflowState, _conversationContext);
 
             // Get the thread (create if needed)
-            _thread ??= await _agent.GetNewSessionAsync(cancellationToken);
+            _thread ??= await _agent.CreateRealtimeSessionAsync(null, cancellationToken);
 
             _isStarted = true;
 

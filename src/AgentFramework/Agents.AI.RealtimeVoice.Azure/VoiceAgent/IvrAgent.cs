@@ -90,7 +90,7 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     /// </summary>
     public async Task ApplyStepConfigurationAsync(
         RealtimeIvrStepConfiguration config,
-        LiveConversationAgentSession thread,
+        RealtimeAIAgentSession thread,
         CancellationToken cancellationToken = default)
     {
         await _configUpdateLock.WaitAsync(cancellationToken);
@@ -149,17 +149,17 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     /// </summary>
     public RealtimeIvrStepConfiguration? CurrentStepConfig => _currentStepConfig;
 
-    public Task ConfigureSessionAsync(LiveConversationSessionOptions options, LiveConversationAgentSession thread, CancellationToken cancellationToken = default)
+    public Task ConfigureSessionAsync(LiveConversationSessionOptions options, RealtimeAIAgentSession thread, CancellationToken cancellationToken = default)
     {
         return thread.Session.ConfigureSessionAsync(options, cancellationToken);
     }
 
-    public override Task<AgentRunResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
+    public override Task<AgentResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
         => InnerAgent.RunAsync(messages, thread, AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
 
-    public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public override async IAsyncEnumerable<AgentResponseUpdate> RunStreamingAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (thread is not LiveConversationAgentSession conversationSessionThread)
+        if (thread is not RealtimeAIAgentSession conversationSessionThread)
         {
             throw new ArgumentException("Invalid thread type", nameof(thread));
         }

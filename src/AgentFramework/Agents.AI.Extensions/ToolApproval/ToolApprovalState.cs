@@ -62,7 +62,7 @@ public sealed record ApprovalResult(
 {
     public string ApprovalId { get; set; } = ApprovalId;
     public bool IsApproved => Status == ToolApprovalStatus.Approved;
-    public FunctionApprovalResponseContent ToResponseContent(FunctionCallContent originalFunctionCall) => new FunctionApprovalResponseContent(ApprovalId, IsApproved, originalFunctionCall);
+    public ToolApprovalResponseContent ToResponseContent(FunctionCallContent originalFunctionCall) => new ToolApprovalResponseContent(ApprovalId, IsApproved, originalFunctionCall);
 }
 public sealed class PendingApproval
 {
