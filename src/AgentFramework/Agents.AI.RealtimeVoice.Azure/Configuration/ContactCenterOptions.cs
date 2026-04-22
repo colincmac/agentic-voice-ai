@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Agents.AI.Realtime;
 
 namespace Agents.AI.RealtimeVoice.Azure.Configuration;
 

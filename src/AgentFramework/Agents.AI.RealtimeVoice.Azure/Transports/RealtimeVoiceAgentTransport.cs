@@ -14,6 +14,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Agents.AI.Realtime;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
@@ -66,8 +67,8 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
         {
             ContactId = agent.Id,
             ChannelType = CommunicationChannelType.VoiceAIAgent,
-            RawIdentifier = existingThread.ActiveSessionId ?? agent.Id,
-            DisplayName = agent.DisplayName,
+            RawIdentifier =  agent.Id,
+            DisplayName = agent.Name,
             Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true
@@ -116,7 +117,7 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
     public async Task SendMessageAsync(MessageUpdate message, CancellationToken cancellationToken = default)
     {
         var chat = MessageUpdateExtensions.ToChatMessage(message);
-        await _agent.SendMessagesToRunAsync([chat], _thread, cancellationToken).ConfigureAwait(false);
+        await _agent.SendAsync(_thread, chat, cancellationToken).ConfigureAwait(false);
     }
 
     public Task SendSignalAsync(SessionSignal signal, CancellationToken cancellationToken = default)
@@ -133,7 +134,7 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
     {
         await foreach (var dataContent in _inboundAudioChannel.Reader.ReadAllAsync(ct))
         {
-            await _agent.SendAudioToRunAsync(dataContent, _thread, ct).ConfigureAwait(false);
+            await _agent.SendAudioAsync(_thread, dataContent, ct).ConfigureAwait(false);
         }
     }
 

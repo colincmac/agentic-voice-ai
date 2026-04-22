@@ -30,7 +30,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMessageProducer
 {
     private readonly AIAgent _agent;
-    private readonly A2AAgentSession _thread;
+    private readonly AgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly HubSessionEventBus? _eventBus;
     private readonly ILogger _logger;
@@ -45,7 +45,7 @@ public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMe
 
     public A2AAgentTransport(
         AIAgent agent,
-        A2AAgentSession thread,
+        AgentSession thread,
         AgentRunOptions? runOptions = null,
         HubSessionEventBus? eventBus = null,
         ILoggerFactory? loggerFactory = null)

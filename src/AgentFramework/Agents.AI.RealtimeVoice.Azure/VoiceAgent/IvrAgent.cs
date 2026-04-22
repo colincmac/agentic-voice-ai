@@ -13,6 +13,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Agents.AI.Realtime;
 
 namespace Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 
@@ -29,7 +30,7 @@ namespace Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 /// with isolated workflow state.
 /// </para>
 /// </summary>
-public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
+public class IvrAgent : DelegatingRealtimeAIAgent
 {
     private readonly IServiceProvider? _scopedServices;
     private readonly AgentFunctionInvocationMiddleware _delegateFunc;
@@ -61,7 +62,7 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     public event Func<RealtimeIvrStepConfiguration, CancellationToken, Task>? OnStepTransition;
 
     public IvrAgent(
-        AIAgent innerAgent,
+        RealtimeAIAgent innerAgent,
         IAgentSessionRegistry sessionRegistry,
         RealtimeIvrWorkflowDefinition workflowDefinition,
         AgentFunctionInvocationMiddleware? delegateFunc = null,
@@ -109,7 +110,7 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
                 Tools = [.. config.AvailableTools]
             };
 
-            await ConfigureSessionAsync(sessionOptions, thread, cancellationToken).ConfigureAwait(false);
+            //await ConfigureSessionAsync(sessionOptions, thread, cancellationToken).ConfigureAwait(false);
 
             if (OnStepTransition is not null)
             {
@@ -149,10 +150,10 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     /// </summary>
     public RealtimeIvrStepConfiguration? CurrentStepConfig => _currentStepConfig;
 
-    public Task ConfigureSessionAsync(LiveConversationSessionOptions options, RealtimeAIAgentSession thread, CancellationToken cancellationToken = default)
-    {
-        return thread.Session.ConfigureSessionAsync(options, cancellationToken);
-    }
+    //public Task ConfigureSessionAsync(LiveConversationSessionOptions options, RealtimeAIAgentSession thread, CancellationToken cancellationToken = default)
+    //{
+    //    return thread.ClientSession.(options, cancellationToken);
+    //}
 
     public override Task<AgentResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
         => InnerAgent.RunAsync(messages, thread, AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);

@@ -54,8 +54,8 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
         {
             ContactId = baseAgent.Id,
             ChannelType = CommunicationChannelType.VoiceAIAgent,
-            RawIdentifier = existingThread.ActiveSessionId ?? baseAgent.Id,
-            DisplayName = baseAgent.DisplayName,
+            RawIdentifier = baseAgent.Id,
+            DisplayName = baseAgent.Name,
             Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true
@@ -111,14 +111,14 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
         }
 
         var chat = MessageUpdateExtensions.ToChatMessage(message);
-        await _agent.SendMessagesToRunAsync([chat], _thread, cancellationToken).ConfigureAwait(false);
+        await _agent.SendAsync(_thread, chat, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task RunSendLoopAsync(CancellationToken ct)
     {
         await foreach (var dataContent in _inboundAudioChannel.Reader.ReadAllAsync(ct))
         {
-            await _agent.SendAudioToRunAsync(dataContent, _thread, ct).ConfigureAwait(false);
+            await _agent.SendAudioAsync(_thread, dataContent, ct).ConfigureAwait(false);
         }
     }
 
@@ -204,7 +204,6 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
             }
         }
         
-        _thread.Dispose();
         _cts.Dispose();
         if (_disconnectedHandler is not null)
         {

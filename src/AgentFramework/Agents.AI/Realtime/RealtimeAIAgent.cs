@@ -18,6 +18,9 @@ namespace Agents.AI.Realtime;
 /// </summary>
 /// <remarks>
 /// <para>
+/// **<b>NOTE: The <see cref="RealtimeAIAgent"/> is still a work in progress and certain functionality hasn't been implemented yet.</b>
+/// </para>
+/// <para>
 /// The <see cref="RealtimeAIAgent"/> bridges the <see cref="AIAgent"/> abstraction with real-time
 /// streaming protocols. Unlike <see cref="ChatClientAgent"/>, which uses request/response style interactions,
 /// this agent maintains persistent sessions via <see cref="IRealtimeClientSession"/> for continuous

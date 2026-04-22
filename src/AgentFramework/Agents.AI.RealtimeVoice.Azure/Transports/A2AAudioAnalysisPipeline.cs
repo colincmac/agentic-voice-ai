@@ -20,10 +20,10 @@ public sealed class A2AAudioAnalysisPipeline : IAudioAnalysisPipeline
     private readonly AIAgent _agent;
     private readonly A2AAgentSession _thread;
 
-    public A2AAudioAnalysisPipeline(AIAgent agent)
+    public A2AAudioAnalysisPipeline(AIAgent agent, A2AAgentSession agentSession)
     {
         _agent = agent;
-        _thread = (A2AAgentSession)agent.GetNewThread();
+        _thread = agentSession;
     }
 
     public async Task<AudioAnalysisResult?> AnalyzeAsync(

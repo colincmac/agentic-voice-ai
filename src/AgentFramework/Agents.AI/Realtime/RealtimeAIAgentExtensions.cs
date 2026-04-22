@@ -18,6 +18,16 @@ public static class RealtimeAIAgentExtensions
         _ = Throw.IfNull(message);
         return realtimeAIAgent.SendAsync(session, FromChatMessage(message), cancellationToken);
     }
+    public static Task SendAudioAsync(
+    this IRealtimeAgent realtimeAIAgent,
+    RealtimeAIAgentSession session,
+    DataContent audioContent,
+    CancellationToken cancellationToken = default)
+    {
+        _ = Throw.IfNull(session);
+        _ = Throw.IfNull(audioContent);
+        return realtimeAIAgent.SendAsync(session, FromAudioContent(audioContent), cancellationToken);
+    }
 
     public static RealtimeClientMessage FromChatMessage(this ChatMessage chatMessage)
     {
@@ -27,5 +37,11 @@ public static class RealtimeAIAgentExtensions
             MessageId = chatMessage.MessageId,
             RawRepresentation = chatMessage
         };
+    }
+
+    public static RealtimeClientMessage FromAudioContent(this DataContent audioContent)
+    {
+        _ = Throw.IfNull(audioContent);
+        return new InputAudioBufferAppendRealtimeClientMessage(audioContent);
     }
 }

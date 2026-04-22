@@ -314,7 +314,7 @@ public static class ContactCenterConversationSessionExtensions
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
             var thread = await agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
-
+            
             AgentRunOptions? runOptions = null;
             if (configureRunOptions is not null)
             {
@@ -322,12 +322,12 @@ public static class ContactCenterConversationSessionExtensions
                 configureRunOptions(runOptions);
             }
 
-            return Task.FromResult<IChannelTransport>(new A2AAgentTransport(
+            return new A2AAgentTransport(
                 agent,
                 thread,
                 runOptions,
                 session.SessionEventBus,
-                loggerFactory));
+                loggerFactory);
         });
 
         return participant;
