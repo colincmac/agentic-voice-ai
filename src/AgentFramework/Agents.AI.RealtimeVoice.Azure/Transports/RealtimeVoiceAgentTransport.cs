@@ -274,7 +274,6 @@ public sealed class RealtimeVoiceAgentTransport : IChannelTransport, IAudioConsu
             }
         }
 
-        _thread.Dispose();
         _cts.Dispose();
 
         if (_disconnectedHandler is not null)
