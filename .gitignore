@@ -1,5 +1,5 @@
 .azure/*
-
+*.csproj.lscache
 
 appsettings.Development.json
 **/*/appsettings.Development.json
@@ -66,3 +66,4 @@ msbuild.wrn
 /M365Agent/devTools/m365agentsplayground.log
 /M365Agent/devTools/.testTool.installInfo.json
 .azure
+UpgradeLog.htm

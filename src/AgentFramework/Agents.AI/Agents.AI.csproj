@@ -6,7 +6,9 @@
     <Nullable>enable</Nullable>
     <InjectSharedThrow>true</InjectSharedThrow>
     <InjectHostingExtensions>true</InjectHostingExtensions>
-
+    <NoWarn>
+      $(NoWarn);OPENAI001;MEAI001;
+    </NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="A2A.AspNetCore" />

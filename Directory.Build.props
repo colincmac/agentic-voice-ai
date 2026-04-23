@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <NoWarn>$(NoWarn);MEAI001;</NoWarn>
+
   </PropertyGroup>
   <ItemGroup Condition="'$(InjectSharedThrow)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)\src\Shared\Throw\*.cs" LinkBase="Shared\Throw" />
