@@ -67,6 +67,18 @@ public sealed class RealtimeIvrWorkflowStep
     public Func<IvrWorkflowState, CancellationToken, Task>? OnCompleted { get; init; }
 
     /// <summary>
+    /// Gets the DTMF menu options for this step, used when the session is operating
+    /// in Tier 4 (pure DTMF) mode. Each entry maps a DTMF digit character
+    /// ('0'-'9', '*', '#') to a menu label or action identifier.
+    /// </summary>
+    /// <remarks>
+    /// When null, the DTMF transport collects free-form digit sequences instead of
+    /// presenting a menu. Steps that require natural language input will be skipped
+    /// with a warning in DTMF-only mode.
+    /// </remarks>
+    public IReadOnlyDictionary<char, string>? DtmfMenuOptions { get; init; }
+
+    /// <summary>
     /// Gets the valid step IDs this step can transition to.
     /// </summary>
     public IReadOnlyList<string> ValidTransitions =>

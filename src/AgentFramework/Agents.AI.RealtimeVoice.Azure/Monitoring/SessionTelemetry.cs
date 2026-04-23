@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Agents.AI.Extensions.LiveVoice.Media.Analysis;
+using Agents.AI.RealtimeVoice.Azure.Configuration;
 using static Agents.AI.RealtimeVoice.Azure.Monitoring.ConversationSessionActivitySource;
 
 namespace Agents.AI.RealtimeVoice.Azure.Monitoring;
@@ -46,6 +47,12 @@ public sealed class SessionTelemetry : IDisposable
     private readonly Histogram<double> _emotionConfidenceHistogram;
     private readonly Counter<long> _signalDivergenceCounter;
     private readonly Histogram<double> _speechStartToResponseHistogram;
+    #endregion
+
+    #region Tier Degradation
+    private readonly Counter<long> _sessionsCreatedByTierCounter;
+    private readonly Counter<long> _tierDegradationsCounter;
+    private readonly Counter<long> _midCallFallbacksCounter;
     #endregion
 
     // Histograms
@@ -187,6 +194,18 @@ public sealed class SessionTelemetry : IDisposable
             unit: "ms",
             description: "Perceived latency from user speech end to agent response start");
 
+        // Tier degradation metrics
+        _sessionsCreatedByTierCounter = _meter.CreateCounter<long>(
+            "conversation.tier.sessions_created",
+            description: "Number of sessions created per agent tier");
+
+        _tierDegradationsCounter = _meter.CreateCounter<long>(
+            "conversation.tier.degradations",
+            description: "Number of times a session was assigned to a lower tier due to capacity");
+
+        _midCallFallbacksCounter = _meter.CreateCounter<long>(
+            "conversation.tier.mid_call_fallbacks",
+            description: "Number of mid-call transport swaps to a lower tier");
     }
 
     public Meter SessionMeter => _meter;
@@ -346,6 +365,31 @@ public sealed class SessionTelemetry : IDisposable
     #endregion
 
     #region AI Metrics
+    #endregion
+
+    #region Tier Degradation Metrics
+
+    public void RecordSessionCreatedAtTier(string sessionId, AgentTier tier)
+    {
+        var tags = CreateTagList(sessionId);
+        tags.Add("agent_tier", tier.ToString());
+        _sessionsCreatedByTierCounter.Add(1, tags);
+
+        // If the tier is not the highest priority, it counts as a degradation
+        if (tier != AgentTier.RealtimeVoice)
+        {
+            _tierDegradationsCounter.Add(1, tags);
+        }
+    }
+
+    public void RecordMidCallFallback(string sessionId, AgentTier fromTier, AgentTier toTier)
+    {
+        var tags = CreateTagList(sessionId);
+        tags.Add("from_tier", fromTier.ToString());
+        tags.Add("to_tier", toTier.ToString());
+        _midCallFallbacksCounter.Add(1, tags);
+    }
+
     #endregion
 
     #region ACS Metrics

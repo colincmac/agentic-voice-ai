@@ -63,7 +63,7 @@ public class ConversationHubBuilder
         HostBuilder.Services.AddGrpcClient<BiometricService.BiometricServiceClient>((sp, configure) =>
         {
             var options = sp.GetRequiredService<IOptions<VoiceBiometricsApiOptions>>().Value;
-            
+
             if(string.IsNullOrEmpty(options.Endpoint))
             {
                 throw new InvalidOperationException("Biometrics API endpoint is not configured. Please provide either a valid endpoint or a connection string.");
@@ -112,7 +112,7 @@ public class ConversationHubBuilder
     }
 
     /// <summary>
-    /// Still need to map the CallAutomationAPI endpoints in your app. 
+    /// Still need to map the CallAutomationAPI endpoints in your app.
     /// </summary>
     /// <param name="configureTeamsConnection"></param>
     /// <returns></returns>
@@ -286,5 +286,49 @@ public class ConversationHubBuilder
         //        sp => sp.GetRequiredKeyedService<ChatClientAgent>(orchestratorAgentKey),
         //        workflowFactory);
         //}
+
+    /// <summary>
+    /// Enables capacity-aware tiered degradation for agent sessions.
+    /// When enabled, new sessions are assigned to the best available agent tier
+    /// based on current load, and mid-call fallback is supported when a transport fails.
+    /// </summary>
+    /// <param name="configure">Optional action to configure tier options beyond appsettings.</param>
+    /// <returns>The builder for chaining.</returns>
+    public ConversationHubBuilder WithTieredDegradation(Action<AgentTierOptions>? configure = null)
+    {
+        var section = HostBuilder.Configuration.GetSection(AgentTierOptions.SectionName);
+        if (section.Exists())
+        {
+            HostBuilder.Services.Configure<AgentTierOptions>(section);
+        }
+        else
+        {
+            HostBuilder.Services.Configure<AgentTierOptions>(_ => { });
+        }
+
+        if (configure is not null)
+        {
+            HostBuilder.Services.Configure(configure);
+        }
+
+        // Register the capacity-aware tier resolver
+        HostBuilder.Services.AddSingleton<IAgentTierResolver, CapacityAwareAgentTierResolver>();
+
+        // Register built-in transport factories
+        HostBuilder.Services.AddSingleton<IAgentTransportFactory, RealtimeVoiceTransportFactory>();
+        HostBuilder.Services.AddSingleton<IAgentTransportFactory, SttTtsChatTransportFactory>();
+        HostBuilder.Services.AddSingleton<IAgentTransportFactory, SttTtsSlmTransportFactory>();
+        HostBuilder.Services.AddSingleton<IAgentTransportFactory, NluTransportFactory>();
+        HostBuilder.Services.AddSingleton<IAgentTransportFactory, DtmfTransportFactory>();
+
+        // Register fallback orchestrator
+        HostBuilder.Services.AddSingleton<FallbackOrchestrator>();
+
+        // Replace the default session activator with the tiered one
+        HostBuilder.Services.RemoveAll<IContactCenterConversationSessionActivator>();
+        HostBuilder.Services.AddSingleton<IContactCenterConversationSessionActivator, TieredSessionActivator>();
+
+        return this;
+    }
 
     }
