@@ -12,7 +12,7 @@ public static class RealtimeIvrWorkflowExtensions
     {
         
         // Build a step-specific prompt by merging base prompt with step configuration
-        var stepPrompt = workflow.BuildPromptForStep(step, state, contextSerializerOptions);
+        var stepPrompt = workflow.BuildPromptForStep(step, state, conversationContext: null, contextSerializerOptions);
 
         return new IvrStepAgentConfiguration(stepPrompt, step.AvailableTools);
     }

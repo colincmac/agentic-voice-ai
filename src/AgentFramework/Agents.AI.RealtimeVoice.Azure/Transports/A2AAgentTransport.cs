@@ -30,7 +30,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMessageProducer
 {
     private readonly AIAgent _agent;
-    private readonly A2AAgentThread _thread;
+    private readonly AgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly HubSessionEventBus? _eventBus;
     private readonly ILogger _logger;
@@ -45,13 +45,13 @@ public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMe
 
     public A2AAgentTransport(
         AIAgent agent,
-        A2AAgentThread? thread = null,
+        AgentSession thread,
         AgentRunOptions? runOptions = null,
         HubSessionEventBus? eventBus = null,
         ILoggerFactory? loggerFactory = null)
     {
         _agent = agent;
-        _thread = thread ?? (A2AAgentThread)agent.GetNewThread();
+        _thread = thread;
         _runOptions = runOptions;
         _eventBus = eventBus;
         _logger = loggerFactory?.CreateLogger<A2AAgentTransport>()
@@ -166,7 +166,7 @@ public sealed class A2AAgentTransport : IChannelTransport, IMessageConsumer, IMe
             _runOptions,
             ct).ConfigureAwait(false);
 
-        foreach (var msg in MessageUpdateExtensions.FromAgentRunResponse(response))
+        foreach (var msg in MessageUpdateExtensions.FromAgentResponse(response))
         {
             if (_messageHandler is not null)
             {

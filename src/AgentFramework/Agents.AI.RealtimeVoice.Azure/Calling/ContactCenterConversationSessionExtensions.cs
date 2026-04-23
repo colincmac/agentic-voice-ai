@@ -4,6 +4,7 @@ using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure.Transports;
 using Azure.Communication.CallAutomation;
 using Microsoft.Agents.AI;
@@ -39,6 +40,9 @@ public static class ContactCenterConversationSessionExtensions
         var callInfo = await callConnection.GetCallConnectionPropertiesAsync(cancellationToken);
 
         var callerPhoneNumber = callInfo.Value.SourceCallerIdNumber?.PhoneNumber ?? callInfo.Value.Source.RawId;
+        var conversationContext = session.HubSessionContext.ConversationContext;
+        conversationContext.CallerId = callerPhoneNumber;
+        conversationContext.CallerName = callInfo.Value.SourceDisplayName;
 
         // Remove the old transport first if one was superseded
         if (previousTransportChannelId is not null)
@@ -69,7 +73,7 @@ public static class ContactCenterConversationSessionExtensions
     string participantId,
     string? displayName = null,
     Func<IServiceProvider, Task<AIAgent>>? agentFactory = null,
-    Func<AIAgent, AgentThread>? createThreadOverride = null,
+    Func<AIAgent, AgentSession>? createThreadOverride = null,
     Action<AgentRunOptions>? configureRunOptions = null, CancellationToken cancellationToken = default)
     {
         var participant = await session.GetOrAddParticipantAsync(participantId, displayName, cancellationToken);
@@ -81,7 +85,7 @@ public static class ContactCenterConversationSessionExtensions
                 : await agentFactory(sp);
 
             var thread = createThreadOverride is null
-                ? agent.GetNewThread()
+                ? await agent.CreateSessionAsync(cancellationToken)
                 : createThreadOverride(agent);
 
             AgentRunOptions? runOptions = null;
@@ -111,16 +115,19 @@ public static class ContactCenterConversationSessionExtensions
         string participantId,
         string? displayName = null,
         Action<RealtimeAgentRunOptions>? configureRunOptions = null,
-        Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null,
+        Func<AuthorizingRealtimeAIAgent, Task<RealtimeAIAgentSession>>? createThreadOverride = null,
         CancellationToken cancellationToken = default)
     {
-        var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync(cancellationToken));
+        if(createThreadOverride is null)
+        {
+           createThreadOverride = async (agent) => await agent.CreateRealtimeSessionAsync(null, cancellationToken);
+        }
         var participant = await session.GetOrAddParticipantAsync(participantId, displayName, cancellationToken);
 
         await session.AddTransportToParticipantAsync(participantId, async sp =>
         {
             var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var thread = await createThread(baseAgent);
+            var thread = await createThreadOverride(baseAgent);
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var analyticsService = sp.GetService<ICallAnalyticsService>();
 
@@ -153,7 +160,7 @@ public static class ContactCenterConversationSessionExtensions
                 loggerFactory: loggerFactory);
 
             var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var thread = await createThread(baseAgent);
+            var thread = await createThreadOverride(baseAgent);
             var analyticsService = sp.GetService<ICallAnalyticsService>();
 
             RealtimeAgentRunOptions? runOptions = null;
@@ -184,7 +191,7 @@ public static class ContactCenterConversationSessionExtensions
     //    RealtimeIvrWorkflowDefinition workflowDefinition,
     //    string? displayName = null,
     //    Action<AgentRunOptions>? configureRunOptions = null,
-    //    Func<AuthorizingRealtimeAIAgent, Task<LiveConversationAgentSession>>? createThreadOverride = null,
+    //    Func<AuthorizingRealtimeAIAgent, Task<RealtimeAIAgentSession>>? createThreadOverride = null,
     //    CancellationToken cancellationToken = default)
     //{
     //    var createThread = createThreadOverride ?? (async (agent) => await agent.GetNewSessionAsync(cancellationToken));
@@ -232,6 +239,9 @@ public static class ContactCenterConversationSessionExtensions
         var callInfo = await callConnection.GetCallConnectionPropertiesAsync(cancellationToken);
 
         var callerPhoneNumber = callInfo.Value.SourceCallerIdNumber?.PhoneNumber ?? callInfo.Value.Source.RawId;
+        var conversationContext = session.HubSessionContext.ConversationContext;
+        conversationContext.CallerId = callerPhoneNumber;
+        conversationContext.CallerName = callInfo.Value.SourceDisplayName;
         var participant = await session.GetOrAddParticipantAsync(callerPhoneNumber, callInfo.Value.SourceDisplayName, cancellationToken);
 
         await session.AddTransportToParticipantAsync(callerPhoneNumber, async sp =>
@@ -292,19 +302,19 @@ public static class ContactCenterConversationSessionExtensions
     public static async Task<HubSessionParticipant> AddA2AAgentAsync(
         this ContactCenterConversationSession session,
         string participantId,
-        AIAgent agent,
+        A2AAgent agent,
         string? displayName = null,
         Action<AgentRunOptions>? configureRunOptions = null,
         CancellationToken cancellationToken = default)
     {
         var participant = await session.GetOrAddParticipantAsync(participantId, displayName ?? agent.Name, cancellationToken);
 
-        await session.AddTransportToParticipantAsync(participantId, sp =>
+        await session.AddTransportToParticipantAsync(participantId, async sp =>
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
-            var thread = (A2AAgentThread)agent.GetNewThread();
-
+            var thread = await agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+            
             AgentRunOptions? runOptions = null;
             if (configureRunOptions is not null)
             {
@@ -312,12 +322,12 @@ public static class ContactCenterConversationSessionExtensions
                 configureRunOptions(runOptions);
             }
 
-            return Task.FromResult<IChannelTransport>(new A2AAgentTransport(
+            return new A2AAgentTransport(
                 agent,
                 thread,
                 runOptions,
                 session.SessionEventBus,
-                loggerFactory));
+                loggerFactory);
         });
 
         return participant;

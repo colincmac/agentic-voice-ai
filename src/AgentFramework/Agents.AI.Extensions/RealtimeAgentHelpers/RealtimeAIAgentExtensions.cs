@@ -3,8 +3,7 @@ using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Extensions.SessionManagement;
-using Agents.AI.RealtimeVoice;
-using Extensions.AI.RealtimeVoice;
+using Agents.AI.Realtime;
 using Microsoft.Agents.AI;
 namespace Agents.AI.Extensions;
 

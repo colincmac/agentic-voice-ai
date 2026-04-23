@@ -5,6 +5,7 @@ using Agents.AI.Extensions.LiveVoice.Media;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure.Authorization.VoiceApproval;
 using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Calling.Routing;

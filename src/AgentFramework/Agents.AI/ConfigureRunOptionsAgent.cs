@@ -17,21 +17,21 @@ public class ConfigureRunOptionsAgent : DelegatingAIAgent
         _configureRunOptions = configureRunOptions;
     }
 
-    public override Task<AgentRunResponse> RunAsync(
+    protected override Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
-        AgentThread? thread = null,
+        AgentSession? session = null,
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
-        => this.InnerAgent.RunAsync(messages, thread, ConfigureRunOptions(options), cancellationToken);
+        => this.InnerAgent.RunAsync(messages, session, ConfigureRunOptions(options), cancellationToken);
 
-    public override IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
+    protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
-        AgentThread? thread = null,
+        AgentSession? session = null,
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
-            => this.InnerAgent.RunStreamingAsync(messages, thread, ConfigureRunOptions(options), cancellationToken);
+            => this.InnerAgent.RunStreamingAsync(messages, session, ConfigureRunOptions(options), cancellationToken);
 
-    /// <summary>Creates and configures the <see cref="ChatOptions"/> to pass along to the inner client.</summary>
+    /// <summary>Creates and configures the <see cref="AgentRunOptions"/> to pass along to the inner client.</summary>
     private AgentRunOptions ConfigureRunOptions(AgentRunOptions? options)
     {
         options = options ?? new();

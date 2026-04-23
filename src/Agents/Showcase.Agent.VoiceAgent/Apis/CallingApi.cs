@@ -13,8 +13,9 @@ namespace Showcase.Agent.VoiceAgent.Apis;
 
 public static class CallingApi
 {
-    public const string CALLBACK_PATH = "/automation/callbacks";
     public const string HANDLE_INCOMING_PATH = "/automation/incoming";
+
+    public const string CALLBACK_PATH = "/automation/callbacks";
     public const string MEDIA_STREAMING_PATH_WSS = "/automation/media/wss";
 
     public static void MapCallAutomation(this IEndpointRouteBuilder endpoints, [StringSyntax("Route")] string path = "calling")
@@ -71,6 +72,10 @@ public static class CallingApi
                     };
 
                     AnswerCallResult answerCallResult = await services.CallAutomationClient.AnswerCallAsync(options, cancellationToken);
+
+                    //var callConnection = answerCallResult.CallConnection;
+                    //await callConnection.TransferCallToParticipantAsync(new TransferToParticipantOptions(new Azure.Communication.PhoneNumberIdentifier("+1234567890")), cancellationToken);
+
                     services.Logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
                     return Results.Ok();
                 }
@@ -113,7 +118,6 @@ public static class CallingApi
             ContactCenterConversationSession? session = null;
             HubSessionParticipant? acsChannel = null;
             string? callerPhoneNumber = null;
-
             try
             {
                 // Accept the WebSocket connection

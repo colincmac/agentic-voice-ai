@@ -18,12 +18,12 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class A2AAudioAnalysisPipeline : IAudioAnalysisPipeline
 {
     private readonly AIAgent _agent;
-    private readonly A2AAgentThread _thread;
+    private readonly A2AAgentSession _thread;
 
-    public A2AAudioAnalysisPipeline(AIAgent agent)
+    public A2AAudioAnalysisPipeline(AIAgent agent, A2AAgentSession agentSession)
     {
         _agent = agent;
-        _thread = (A2AAgentThread)agent.GetNewThread();
+        _thread = agentSession;
     }
 
     public async Task<AudioAnalysisResult?> AnalyzeAsync(
@@ -48,7 +48,7 @@ public sealed class A2AAudioAnalysisPipeline : IAudioAnalysisPipeline
         return ParseResponse(response);
     }
 
-    private static AudioAnalysisResult? ParseResponse(AgentRunResponse response)
+    private static AudioAnalysisResult? ParseResponse(AgentResponse response)
     {
         // The A2A agent should return structured data;
         // parse from the response content based on your agent's contract

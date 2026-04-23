@@ -72,7 +72,7 @@ public static class TestAgentsApi
 
             // TODO: How to avoid sync-over-async here?
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-            return AgentWorkflowBuilder.BuildConcurrent([knight, knave, narrator]).AsAgent(name: key);
+            return AgentWorkflowBuilder.BuildConcurrent([knight, knave, narrator]).AsAIAgent(name: key);
 #pragma warning restore VSTHRD002
         });
         return builder;

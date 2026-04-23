@@ -11,9 +11,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Shared.Diagnostics;
-using Microsoft.VisualBasic;
 using OpenAI.Realtime;
-using OpenAI.Responses;
+
 namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 
 
@@ -24,6 +23,8 @@ namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 /// Responses, which are model-generated audio or text Items that are added to the Conversation.
 /// An OpenAI session has a max duration of 30minutes
 /// </summary>
+[Obsolete("Please use `AzureVoiceLiveClientSession` instead")]
+
 public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
 {
 
@@ -645,7 +646,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
             sessionOptions.MaxResponseOutputTokens = options.MaxOutputTokens.Value;
         }
 
-        if(options.TurnDetection is RealtimeTurnDetection turnDection)
+        if(options.TurnDetection is Configuration.RealtimeTurnDetection turnDection)
         {
             sessionOptions.TurnDetection = MapTurnDetectionOption(turnDection);
         }
@@ -668,7 +669,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     /// </summary>
     /// <param name="turnDetection"></param>
     /// <returns></returns>
-    private static TurnDetection MapTurnDetectionOption(RealtimeTurnDetection turnDetection)
+    private static TurnDetection MapTurnDetectionOption(Configuration.RealtimeTurnDetection turnDetection)
     {
         var defaultprefixPadding = TimeSpan.FromMilliseconds(300);
         var defaultSilenceDuration = TimeSpan.FromMilliseconds(500);
@@ -782,8 +783,8 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
         {
             return null;
         }
-        var definition = function.AsOpenAIConversationFunctionTool();
-        return new VoiceLiveFunctionDefinition(function.Name) { Description = definition.Description, Parameters = definition.Parameters };
+        var definition = OpenAIClientExtensions.ToOpenAIRealtimeFunctionTool(function);
+        return new VoiceLiveFunctionDefinition(function.Name) { Description = definition.FunctionDescription, Parameters = definition.FunctionParameters };
     }
 
     private void UpdateSessionState(RealtimeSessionState newState, ErrorContent? error = null, string? reason = null)

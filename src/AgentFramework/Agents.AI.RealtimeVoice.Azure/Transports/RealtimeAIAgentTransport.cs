@@ -10,6 +10,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Agents.AI.Realtime;
 
 namespace Agents.AI.RealtimeVoice.Azure.Transports;
 
@@ -19,7 +20,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
-    private readonly LiveConversationAgentSession _thread;
+    private readonly RealtimeAIAgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -34,7 +35,7 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
 
     public RealtimeAIAgentTransport(
         AuthorizingRealtimeAIAgent baseAgent,
-        LiveConversationAgentSession existingThread,
+        RealtimeAIAgentSession existingThread,
         AgentRunOptions? runOptions = null,
         ILoggerFactory? loggerFactory = null,
         ICallAnalyticsService? analyticsService = null,
@@ -53,8 +54,8 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
         {
             ContactId = baseAgent.Id,
             ChannelType = CommunicationChannelType.VoiceAIAgent,
-            RawIdentifier = existingThread.ActiveSessionId ?? baseAgent.Id,
-            DisplayName = baseAgent.DisplayName,
+            RawIdentifier = baseAgent.Id,
+            DisplayName = baseAgent.Name,
             Role = ChannelRole.PrimaryVoice | ChannelRole.InteractiveMessaging,
             SupportsAudio = true,
             SupportsMessaging = true
@@ -110,14 +111,14 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
         }
 
         var chat = MessageUpdateExtensions.ToChatMessage(message);
-        await _agent.SendMessagesToRunAsync([chat], _thread, cancellationToken).ConfigureAwait(false);
+        await _agent.SendAsync(_thread, chat, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task RunSendLoopAsync(CancellationToken ct)
     {
         await foreach (var dataContent in _inboundAudioChannel.Reader.ReadAllAsync(ct))
         {
-            await _agent.SendAudioToRunAsync(dataContent, _thread, ct).ConfigureAwait(false);
+            await _agent.SendAudioAsync(_thread, dataContent, ct).ConfigureAwait(false);
         }
     }
 
@@ -151,7 +152,7 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
                 if (nonAudio is { Count: > 0 })
                 {
                     update.Contents = nonAudio;
-                    var msg = MessageUpdateExtensions.FromAgentRunResponseUpdate(update);
+                    var msg = MessageUpdateExtensions.FromAgentResponseUpdate(update);
                     await _messageHandler(ChannelId, msg, cancellationToken).ConfigureAwait(false);
 
                     // Analyze agent response for health metrics (fire-and-forget)
@@ -203,7 +204,6 @@ public sealed class RealtimeAIAgentTransport : IChannelTransport, IAudioConsumer
             }
         }
         
-        _thread.Dispose();
         _cts.Dispose();
         if (_disconnectedHandler is not null)
         {

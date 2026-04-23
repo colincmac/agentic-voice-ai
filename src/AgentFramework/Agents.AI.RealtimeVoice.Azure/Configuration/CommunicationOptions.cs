@@ -21,12 +21,14 @@ public class AcsOptions
     public AudioFormat audioFormat { get; set; } = AudioFormat.Pcm24KMono;
     public Uri AcsResourceEndpoint => new(ConnectionString.Split(';').First(s => s.StartsWith("endpoint=", StringComparison.OrdinalIgnoreCase)).Split('=')[1]);
     public string AcsApiVersion { get; set; } = "2025-06-30";
+    public Guid GlobalID { get; set; }
 };
 
 public class TeamsOptions
 {
     public required string ResourceTenantId { get; set; }
     public required string ResourceObjectId { get; set; }
+    public required string PhoneNumber { get; set; }
     //public required string ClientSecret { get; set; }
     //public required string BotId { get; set; }
     //public required string BotDisplayName { get; set; }

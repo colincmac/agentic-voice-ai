@@ -1,5 +1,6 @@
 using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.RealtimeVoice;
+using Agents.AI.Realtime;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,11 +21,12 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
 {
     private readonly AuthorizingRealtimeAIAgent _agent;
     private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly ConversationContext? _conversationContext;
     private readonly ILogger<RealtimeIvrWorkflowController> _logger;
     private readonly SemaphoreSlim _stateLock = new(1, 1);
 
     private readonly RealtimeIvrControllerState _state;
-    private LiveConversationAgentSession? _thread;
+    private AgentSession? _thread;
     private bool _isStarted;
     private bool _disposed;
 
@@ -51,10 +53,12 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
     public RealtimeIvrWorkflowController(
         AuthorizingRealtimeAIAgent agent,
         RealtimeIvrWorkflowDefinition workflow,
+        ConversationContext? conversationContext = null,
         ILogger<RealtimeIvrWorkflowController>? logger = null)
     {
         _agent = agent;
         _workflow = workflow;
+        _conversationContext = conversationContext ?? agent.GetService<ConversationContext>();
         _logger = logger ?? NullLogger<RealtimeIvrWorkflowController>.Instance;
         _state = new RealtimeIvrControllerState
         {
@@ -85,7 +89,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
     /// <summary>
     /// Gets the conversation thread associated with this controller.
     /// </summary>
-    public LiveConversationAgentSession? Thread => _thread;
+    public AgentSession? Thread => _thread;
 
     /// <summary>
     /// Initializes the controller and prepares the first step.
@@ -113,10 +117,10 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
             _state.WorkflowState.CurrentStepIndex = 0;
 
             // Build the prompt for this step
-            _state.CurrentPrompt = _workflow.BuildPromptForStep(initialStepId, _state.WorkflowState);
+            _state.CurrentPrompt = _workflow.BuildPromptForStep(initialStepId, _state.WorkflowState, _conversationContext);
 
             // Get the thread (create if needed)
-            _thread ??= await _agent.GetNewSessionAsync(cancellationToken);
+            _thread ??= await _agent.CreateRealtimeSessionAsync(null, cancellationToken);
 
             _isStarted = true;
 
@@ -204,7 +208,7 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
             _state.WorkflowState.CurrentStepIndex = _workflow.GetStepIndex(targetStepId);
 
             // Build new prompt
-            _state.CurrentPrompt = _workflow.BuildPromptForStep(targetStepId, _state.WorkflowState);
+            _state.CurrentPrompt = _workflow.BuildPromptForStep(targetStepId, _state.WorkflowState, _conversationContext);
 
             _logger.LogInformation(
                 "Transitioned to step {StepId} (reason: {Reason})",

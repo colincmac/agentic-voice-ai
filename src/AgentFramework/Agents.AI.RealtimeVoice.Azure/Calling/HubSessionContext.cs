@@ -1,4 +1,5 @@
 using Azure.Communication.CallAutomation;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling;
@@ -12,6 +13,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 public sealed class HubSessionContext
 {
     private readonly IServiceScope _sessionScope;
+    private readonly ConversationContext _conversationContext;
 
     /// <summary>
     /// Creates a HubSessionContext 
@@ -20,9 +22,15 @@ public sealed class HubSessionContext
     {
         SessionId = sessionId;
         _sessionScope = sessionScope;
+        _conversationContext = sessionScope.ServiceProvider.GetService<ConversationContext>() ?? new ConversationContext();
     }
 
     public string SessionId { get; }
+
+    /// <summary>
+    /// Structured pinned conversation memory for the current session.
+    /// </summary>
+    public ConversationContext ConversationContext => _conversationContext;
 
     /// <summary>
     /// The session-scoped service provider for on-demand service resolution.
@@ -38,11 +46,15 @@ public sealed class HubSessionContext
     /// Resolves a service from the session scope.
     /// </summary>
     public T GetRequiredService<T>() where T : notnull
-        => _sessionScope.ServiceProvider.GetRequiredService<T>();
+        => typeof(T) == typeof(ConversationContext)
+            ? (T)(object)_conversationContext
+            : _sessionScope.ServiceProvider.GetRequiredService<T>();
 
     /// <summary>
     /// Resolves an optional service from the session scope.
     /// </summary>
     public T? GetService<T>() where T : class
-        => _sessionScope.ServiceProvider.GetService<T>();
+        => typeof(T) == typeof(ConversationContext)
+            ? (T)(object)_conversationContext
+            : _sessionScope.ServiceProvider.GetService<T>();
 }

@@ -1,34 +1,27 @@
-using Azure;
-using Microsoft.Extensions.AI;
-using Microsoft.Agents.AI;
-using OpenAI.Realtime;
+using System;
+using System.Collections.Generic;
+using System.Text;
 using Extensions.AI.RealtimeVoice;
-using System.Text.Json;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 
-namespace Agents.AI.RealtimeVoice;
+namespace Agents.AI.Realtime;
 
-public class RealtimeAgentRunOptions: AgentRunOptions
+public class RealtimeAgentRunOptions : AgentRunOptions
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RealtimeAgentRunOptions"/> class.
     /// </summary>
     /// <param name="chatOptions">Optional chat options to pass to the agent's invocation.</param>
-    public RealtimeAgentRunOptions(LiveConversationResponseOptions? sessionOptions = null)
+    public RealtimeAgentRunOptions(RealtimeSessionOptions? sessionOptions = null)
     {
-        this.ResponseOptions = sessionOptions;
+        this.SessionOptions = sessionOptions;
     }
 
     public bool InitiateConversation { get; set; } = true;
 
     /// <summary>Gets or sets optional response options to pass to the agent's invocation.</summary>
-    public LiveConversationResponseOptions? ResponseOptions { get; set; }
-
-    /// <summary>Gets or sets optional response options to pass to the agent's invocation.</summary>
-    public LiveConversationSessionOptions? SessionOptions { get; set; }
-
-
-    public Func<ILiveConversationSession, ILiveConversationSession>? ConversationSessionFactory { get; set; }
-
+    public RealtimeSessionOptions? SessionOptions { get; set; }
 
     /// <summary>
     /// Optional predicate evaluated for every <see cref="AgentRunResponseUpdate"/>.
@@ -38,7 +31,7 @@ public class RealtimeAgentRunOptions: AgentRunOptions
     /// Use this to stop after a condition (e.g. first assistant message, certain tool call, keyword match, etc.).
     /// ex: `update => update.Contents.Any(c => c is RealtimeResponseFinishedContent)`
     /// </summary>
-    public Func<AgentRunResponseUpdate, bool> TerminationPredicate { get; set; } = _ => false;
+    public Func<AgentResponseUpdate, bool> TerminationPredicate { get; set; } = _ => false;
 
 
     /// <summary>
@@ -49,5 +42,5 @@ public class RealtimeAgentRunOptions: AgentRunOptions
     /// different chat client to use for this specific invocation. If <see langword="null"/>, the agent's default
     /// chat client will be used without modification.
     /// </value>
-    public Func<ILiveConversationClient, ILiveConversationClient>? ConversationClientFactory { get; set; }
+    public Func<IRealtimeClient, IRealtimeClient>? RealtimeClientFactory { get; set; }
 }

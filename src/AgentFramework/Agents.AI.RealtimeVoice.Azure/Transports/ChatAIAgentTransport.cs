@@ -11,7 +11,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 public sealed class ChatAIAgentTransport : IChannelTransport, IMessageConsumer, IMessageProducer
 {
     private readonly AIAgent _agent;
-    private readonly AgentThread _thread;
+    private readonly AgentSession _thread;
     private readonly AgentRunOptions? _runOptions;
     private readonly PresenceDetectorService? _presenceDetector;
     private Func<string, MessageUpdate, CancellationToken, Task>? _messageHandler;
@@ -22,7 +22,7 @@ public sealed class ChatAIAgentTransport : IChannelTransport, IMessageConsumer, 
 
     public ChatAIAgentTransport(
         AIAgent agent,
-        AgentThread thread,
+        AgentSession thread,
         AgentRunOptions? runOptions = null,
         PresenceDetectorService? presenceDetector = null)
     {
@@ -77,7 +77,7 @@ public sealed class ChatAIAgentTransport : IChannelTransport, IMessageConsumer, 
                     _thread,
                     _runOptions,
                     ct).ConfigureAwait(false);
-                foreach (var msg in MessageUpdateExtensions.FromAgentRunResponse(response))
+                foreach (var msg in MessageUpdateExtensions.FromAgentResponse(response))
                 {
                     await _messageHandler(ChannelId, msg, ct);
                 }

@@ -1,6 +1,7 @@
 using A2A.AspNetCore;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Hosting;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure;
 using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
 using Agents.AI.RealtimeVoice.Azure.Calling;
@@ -236,7 +237,7 @@ builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
     configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
     liveConversationClientKey: "voicelive", configureOptions: (opt) => {
-        opt.Instructions = prompt;
+        opt.SessionOptions = opt.SessionOptions.With(instructions: prompt);
     });
 
 builder.AddAIAgent(

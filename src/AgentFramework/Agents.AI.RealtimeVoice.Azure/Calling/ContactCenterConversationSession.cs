@@ -2,9 +2,12 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Agents.AI.Extensions.Helpers;
 using Agents.AI.Extensions.Helpers.Streaming;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.Extensions.LiveVoice.Media.Analysis;
 using Agents.AI.RealtimeVoice.Azure.Calling.Routing;
 using Agents.AI.RealtimeVoice.Azure.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Transports;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,6 +36,10 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
     private readonly HubSessionEventBus _eventBus = new();
     private readonly ISessionRouter _router;
     private readonly SessionTelemetry _telemetry;
+    private readonly ConversationContext _conversationContext;
+    private readonly ILiveCallRegistry? _liveCallRegistry;
+    private readonly SessionContextSubscription _contextProjectionSubscription;
+    private readonly Task _contextProjectionTask;
 
     private readonly ConcurrentDictionary<string, HubSessionParticipant> _participants = new();
 
@@ -74,11 +81,22 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         _hubSessionContext = hubSessionContext;
         _router = router;
         _telemetry = telemetry;
+        _conversationContext = hubSessionContext.ConversationContext;
+        _liveCallRegistry = hubSessionContext.GetService<ILiveCallRegistry>();
 
         CreatedAt = DateTimeOffset.UtcNow;
 
         _audioPacketsCounter = CreateAudioPacketsBetweenChannels(_telemetry.SessionMeter);
         _audioBytesCounter = CreateAudioBytesBetweenChannels(_telemetry.SessionMeter);
+        _contextProjectionSubscription = _eventBus.Subscribe(static contextEvent =>
+            contextEvent.Kind is HubSessionEventKind.ChatMessage
+                or HubSessionEventKind.Transcript
+                or HubSessionEventKind.AgentInsight
+                or HubSessionEventKind.TransferInitiated
+                or HubSessionEventKind.TransferCompleted);
+        _contextProjectionTask = Task.Run(
+            () => ProjectConversationContextAsync(_contextProjectionSubscription, _sessionCts.Token),
+            _sessionCts.Token);
 
         TransitionTo(SessionState.Active);
     }
@@ -320,8 +338,19 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         using var activity = _telemetry.StartSessionActivity("TransportSession.Dispose", SessionId);
         activity?.SetTag(SessionActivityAttributeKey, SessionId);
         await CloseAsync("Disposing");
-        await _eventBus.DisposeAsync();
         await _sessionCts.CancelAsync();
+
+        await _contextProjectionSubscription.DisposeAsync();
+
+        try
+        {
+            await _contextProjectionTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        await _eventBus.DisposeAsync();
 
         _initSemaphore.Dispose();
         _sessionCts.Dispose();
@@ -339,5 +368,156 @@ public sealed class ContactCenterConversationSession : IAsyncDisposable
         Closing,
         Closed,
         Failed
+    }
+
+    private async Task ProjectConversationContextAsync(
+        SessionContextSubscription subscription,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var contextEvent in subscription.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _conversationContext.TotalDuration = DateTimeOffset.UtcNow - CreatedAt;
+
+                switch (contextEvent.Payload)
+                {
+                    case MessageUpdate message:
+                        ProjectMessage(message, contextEvent.SourceParticipantId);
+                        break;
+                    case string transcript:
+                        ProjectTranscript(transcript, contextEvent.SourceParticipantId);
+                        break;
+                    case ConversationSignalAnalysis analysis:
+                        ProjectAnalysis(analysis);
+                        break;
+                    case TransferMetadata transfer when contextEvent.Kind is HubSessionEventKind.TransferInitiated:
+                        _conversationContext.ActionsTaken.Add($"Transfer initiated: {transfer.Reason}");
+                        break;
+                    case TransferMetadata transfer when contextEvent.Kind is HubSessionEventKind.TransferCompleted:
+                        _conversationContext.ActionsTaken.Add($"Transfer completed: {transfer.Reason}");
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void ProjectAnalysis(ConversationSignalAnalysis analysis)
+    {
+        if (analysis.TextSentiment is double textSentiment)
+        {
+            _conversationContext.RunningTextSentiment = BlendScore(_conversationContext.RunningTextSentiment, textSentiment);
+        }
+
+        if (analysis.AudioEmotion is { } audioEmotion)
+        {
+            _conversationContext.RunningAudioEmotion = BlendScore(_conversationContext.RunningAudioEmotion, audioEmotion.ValenceScore);
+            _conversationContext.FrustrationDetected = _conversationContext.FrustrationDetected
+                || audioEmotion.Label is "frustrated" or "angry";
+        }
+
+        if (analysis.StressLevel is >= 0.7 || analysis.IsDivergent)
+        {
+            _conversationContext.FrustrationDetected = true;
+            _conversationContext.EscalationSignalCount++;
+        }
+
+        _liveCallRegistry?.UpdateHealth(SessionId, call =>
+        {
+            call.CustomerSentiment = _conversationContext.RunningTextSentiment;
+            call.EscalationRiskScore = Math.Clamp(
+                Math.Max(
+                    Math.Max(analysis.Divergence ?? 0, analysis.StressLevel ?? 0),
+                    _conversationContext.FrustrationDetected ? 0.8 : 0.0),
+                0.0,
+                1.0);
+        });
+    }
+
+    private void ProjectMessage(MessageUpdate message, string sourceParticipantId)
+    {
+        if (TryExtractText(message.Contents) is not { } text)
+        {
+            return;
+        }
+
+        _conversationContext.TurnCount++;
+        _conversationContext.ConversationSummary = SummarizeText(text);
+
+        if (string.Equals(sourceParticipantId, _conversationContext.CallerId, StringComparison.OrdinalIgnoreCase))
+        {
+            var utteranceLengthSec = EstimateUtteranceLengthSeconds(text);
+            _conversationContext.AvgUserUtteranceLengthSec = _conversationContext.AvgUserUtteranceLengthSec <= 0
+                ? utteranceLengthSec
+                : (_conversationContext.AvgUserUtteranceLengthSec + utteranceLengthSec) / 2;
+        }
+
+        _liveCallRegistry?.UpdateHealth(SessionId, call =>
+        {
+            call.LatestUtteranceSummary = _conversationContext.ConversationSummary;
+            call.ActiveTasks = BuildActiveTasks();
+        });
+    }
+
+    private void ProjectTranscript(string transcript, string sourceParticipantId)
+    {
+        if (string.IsNullOrWhiteSpace(transcript))
+        {
+            return;
+        }
+
+        ProjectMessage(
+            new MessageUpdate
+            {
+                Contents = [new TextContent(transcript)],
+                CreatedAt = DateTimeOffset.UtcNow,
+                SenderParticipantId = sourceParticipantId
+            },
+            sourceParticipantId);
+    }
+
+    private IReadOnlyList<string> BuildActiveTasks()
+    {
+        var activeTasks = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(_conversationContext.PrimaryIntent))
+        {
+            activeTasks.Add(_conversationContext.PrimaryIntent);
+        }
+
+        activeTasks.AddRange(_conversationContext.SecondaryIntents.Where(static intent => !string.IsNullOrWhiteSpace(intent)));
+
+        return activeTasks.Count > 0
+            ? activeTasks
+            : [];
+    }
+
+    private static double BlendScore(double current, double next)
+    {
+        return current == 0
+            ? next
+            : ((current * 0.4) + (next * 0.6));
+    }
+
+    private static double EstimateUtteranceLengthSeconds(string text)
+    {
+        return Math.Clamp(text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length / 2.5, 0.5, 30.0);
+    }
+
+    private static string? TryExtractText(IEnumerable<AIContent> contents)
+    {
+        return contents.OfType<TextContent>().FirstOrDefault(static content => !string.IsNullOrWhiteSpace(content.Text))?.Text;
+    }
+
+    private static string SummarizeText(string text)
+    {
+        const int maxLength = 160;
+
+        return text.Length <= maxLength
+            ? text
+            : text[..(maxLength - 3)] + "...";
     }
 }

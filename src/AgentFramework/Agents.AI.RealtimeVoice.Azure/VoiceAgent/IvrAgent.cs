@@ -6,8 +6,8 @@ using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
-using Agents.AI.RealtimeVoice;
-using Extensions.AI.RealtimeVoice;
+using Agents.AI.Realtime;
+using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,7 +29,7 @@ namespace Agents.AI.RealtimeVoice.Azure.VoiceAgent;
 /// with isolated workflow state.
 /// </para>
 /// </summary>
-public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
+public class IvrAgent : DelegatingRealtimeAIAgent
 {
     private readonly IServiceProvider? _scopedServices;
     private readonly AgentFunctionInvocationMiddleware _delegateFunc;
@@ -61,7 +61,7 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     public event Func<RealtimeIvrStepConfiguration, CancellationToken, Task>? OnStepTransition;
 
     public IvrAgent(
-        AIAgent innerAgent,
+        RealtimeAIAgent innerAgent,
         IAgentSessionRegistry sessionRegistry,
         RealtimeIvrWorkflowDefinition workflowDefinition,
         AgentFunctionInvocationMiddleware? delegateFunc = null,
@@ -90,7 +90,7 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     /// </summary>
     public async Task ApplyStepConfigurationAsync(
         RealtimeIvrStepConfiguration config,
-        LiveConversationAgentSession thread,
+        RealtimeAIAgentSession thread,
         CancellationToken cancellationToken = default)
     {
         await _configUpdateLock.WaitAsync(cancellationToken);
@@ -103,13 +103,13 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
                 config.StepId,
                 config.AvailableTools.Count);
 
-            var sessionOptions = new LiveConversationSessionOptions
-            {
-                Instructions = config.SystemPrompt,
-                Tools = [.. config.AvailableTools]
-            };
+            //var sessionOptions = new LiveConversationSessionOptions
+            //{
+            //    Instructions = config.SystemPrompt,
+            //    Tools = [.. config.AvailableTools]
+            //};
 
-            await ConfigureSessionAsync(sessionOptions, thread, cancellationToken).ConfigureAwait(false);
+            //await ConfigureSessionAsync(sessionOptions, thread, cancellationToken).ConfigureAwait(false);
 
             if (OnStepTransition is not null)
             {
@@ -149,32 +149,32 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
     /// </summary>
     public RealtimeIvrStepConfiguration? CurrentStepConfig => _currentStepConfig;
 
-    public Task ConfigureSessionAsync(LiveConversationSessionOptions options, LiveConversationAgentSession thread, CancellationToken cancellationToken = default)
-    {
-        return thread.Session.ConfigureSessionAsync(options, cancellationToken);
-    }
+    //public Task ConfigureSessionAsync(LiveConversationSessionOptions options, RealtimeAIAgentSession thread, CancellationToken cancellationToken = default)
+    //{
+    //    return thread.ClientSession.(options, cancellationToken);
+    //}
 
-    public override Task<AgentRunResponse> RunAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
+    protected override Task<AgentResponse> RunCoreAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
         => InnerAgent.RunAsync(messages, thread, AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
 
-    public override async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(IEnumerable<ChatMessage> messages, AgentThread? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(IEnumerable<ChatMessage> messages, AgentSession? thread = null, AgentRunOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (thread is not LiveConversationAgentSession conversationSessionThread)
+        if (thread is not RealtimeAIAgentSession session)
         {
             throw new ArgumentException("Invalid thread type", nameof(thread));
         }
 
-        var sessionId = conversationSessionThread.ActiveSessionId ?? Id
+        var sessionId = Id
                         ?? throw new InvalidOperationException("Session ID is required for callbacks");
 
-        Task AgentSessionCallback(IEnumerable<ChatMessage> msgs, CancellationToken ct) => this.SendMessagesToRunAsync(msgs, conversationSessionThread, ct);
+        Task AgentSessionCallback(ChatMessage msg, CancellationToken ct) => this.SendAsync(session, msg, ct);
 
         await _sessionRegistry.RegisterSession(sessionId, AgentSessionCallback, cancellationToken).ConfigureAwait(false);
 
         try
         {
             var runOptions = AgentRunOptionsWithFunctionMiddleware(options);
-            await foreach (var update in InnerAgent.RunStreamingAsync(messages, conversationSessionThread, runOptions, cancellationToken))
+            await foreach (var update in InnerAgent.RunStreamingAsync(messages, session, runOptions, cancellationToken))
             {
                 yield return update;
             }
@@ -195,32 +195,61 @@ public class IvrAgent : DelegatingRealtimeAIAgent, IUpdateableRealtimeAgent
         return next(arguments, ct);
     }
 
-    private RealtimeAgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
+    private AgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
     {
-        var runOptions = options as RealtimeAgentRunOptions ?? new();
-
-        runOptions.SessionOptions ??= new LiveConversationSessionOptions();
-        runOptions.SessionOptions.Tools ??= [];
-
-        runOptions.SessionOptions.Tools = [.. ProcessTools(runOptions.SessionOptions.Tools), .. ProcessTools(_additionalTools)];
-
-        IEnumerable<AITool> ProcessTools(IEnumerable<AITool> tools)
+        if (options is null || options.GetType() == typeof(AgentRunOptions))
         {
-            foreach (var tool in tools)
+            options = new RealtimeAgentRunOptions()
             {
-                if (tool is AIFunction funcTool)
-                {
-                    var authorizedFunc = new AuthorizingAgentFunction(this, funcTool, _delegateFunc);
-                    yield return authorizedFunc;
-                }
-                else
-                {
-                    yield return tool;
-                }
-            }
+                ResponseFormat = options?.ResponseFormat,
+                AllowBackgroundResponses = options?.AllowBackgroundResponses,
+                ContinuationToken = options?.ContinuationToken,
+                AdditionalProperties = options?.AdditionalProperties,
+            };
         }
 
-        return runOptions;
+        if (options is not RealtimeAgentRunOptions aco)
+        {
+            throw new NotSupportedException($"Function Invocation Middleware is only supported without options or with {nameof(RealtimeAgentRunOptions)}.");
+        }
+
+        var originalFactory = aco.RealtimeClientFactory;
+        aco.RealtimeClientFactory = realtimeClient =>
+        {
+            var builder = realtimeClient.AsBuilder();
+
+            if (originalFactory is not null)
+            {
+                builder.Use(originalFactory);
+            }
+            // RealtimeSessionOptions properties are init only, so we need to create a new instance with the modified tools list instead of modifying the existing one
+            return builder.ConfigureOptions(options
+                =>
+            {
+                var tools = options.Tools?.Select(tool => tool is AIFunction aiFunction
+                        ? new AuthorizingAgentFunction(this.InnerAgent, aiFunction, this._delegateFunc)
+                        : tool)
+                    .ToList();
+                return new RealtimeSessionOptions()
+                {
+                    Tools = tools,
+                    InputAudioFormat = options.InputAudioFormat,
+                    Instructions = options.Instructions,
+                    MaxOutputTokens = options.MaxOutputTokens,
+                    Model = options.Model,
+                    OutputAudioFormat = options.OutputAudioFormat,
+                    OutputModalities = options.OutputModalities,
+                    RawRepresentationFactory = options.RawRepresentationFactory,
+                    SessionKind = options.SessionKind,
+                    ToolMode = options.ToolMode,
+                    TranscriptionOptions = options.TranscriptionOptions,
+                    Voice = options.Voice,
+                    VoiceActivityDetection = options.VoiceActivityDetection
+                };
+            }).Build();
+        };
+
+        return options;
     }
 
     private sealed class AuthorizingAgentFunction : DelegatingAIFunction
