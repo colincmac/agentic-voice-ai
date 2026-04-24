@@ -147,37 +147,37 @@ public static class ContactCenterConversationSessionExtensions
                 session.SessionId);
         });
 
-        await session.AddTransportToParticipantAsync(participantId, async sp =>
-        {
-            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        //await session.AddTransportToParticipantAsync(participantId, async sp =>
+        //{
+        //    var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 
-            // 1. Create the analysis transport with the session's event bus
-            var analysisTransport = new ConversationAnalysisTransport(
-                audioPipeline: sp.GetRequiredService<IAudioAnalysisPipeline>(),
-                textAnalyzer: sp.GetRequiredService<ITextSentimentAnalyzer>(),
-                eventBus: session.SessionEventBus,
-                analysisWindowMs: 3_000,
-                loggerFactory: loggerFactory);
+        //    // 1. Create the analysis transport with the session's event bus
+        //    var analysisTransport = new ConversationAnalysisTransport(
+        //        audioPipeline: sp.GetRequiredService<IAudioAnalysisPipeline>(),
+        //        textAnalyzer: sp.GetRequiredService<ITextSentimentAnalyzer>(),
+        //        eventBus: session.SessionEventBus,
+        //        analysisWindowMs: 3_000,
+        //        loggerFactory: loggerFactory);
 
-            var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var thread = await createThreadOverride(baseAgent);
-            var analyticsService = sp.GetService<ICallAnalyticsService>();
+        //    var baseAgent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
+        //    var thread = await createThreadOverride(baseAgent);
+        //    var analyticsService = sp.GetService<ICallAnalyticsService>();
 
-            RealtimeAgentRunOptions? runOptions = null;
-            if (configureRunOptions is not null)
-            {
-                runOptions = new RealtimeAgentRunOptions();
-                configureRunOptions(runOptions);
-            }
+        //    RealtimeAgentRunOptions? runOptions = null;
+        //    if (configureRunOptions is not null)
+        //    {
+        //        runOptions = new RealtimeAgentRunOptions();
+        //        configureRunOptions(runOptions);
+        //    }
 
-            return new RealtimeAIAgentTransport(
-                baseAgent,
-                thread,
-                runOptions,
-                loggerFactory,
-                analyticsService,
-                session.SessionId);
-        });
+        //    return new RealtimeAIAgentTransport(
+        //        baseAgent,
+        //        thread,
+        //        runOptions,
+        //        loggerFactory,
+        //        analyticsService,
+        //        session.SessionId);
+        //});
 
         return participant;
     }
