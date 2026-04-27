@@ -2,6 +2,47 @@
 
 This guide walks through the end-to-end process of connecting Azure Communication Services (ACS) with Teams Phone via Teams Phone Extensibility (TPE). It supplements the [official quickstart](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/tpe/teams-phone-extensibility-quickstart) and [answer-calls guide](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/tpe/teams-phone-extensibility-answer-teams-calls) with enterprise-scale automation scripts and operational details not covered in the public docs.
 
+## Scripts
+
+Provisioning is split into two scripts separated by **tenant boundary** and **permission scope**:
+
+| Script | Tenant | Required Roles | Phases |
+|--------|--------|----------------|--------|
+| [`setup_tpe_teams.ps1`](../eng/scripts/setup_tpe_teams.ps1) | Teams (M365) | Global Admin **or** Application Admin + SfB Admin + User Admin | 1. Entra App → 2. Resource Account → 3. License + Phone |
+| [`setup_tpe_azure.ps1`](../eng/scripts/setup_tpe_azure.ps1) | Azure | Contributor on resource group | 1. Bot Service → 2. ACS TPE Authorization |
+
+The Teams script runs **first** and outputs a JSON file (`tpe-teams-output.json`) containing the Entra App Client ID and Resource Account Object ID. The Azure script consumes that file.
+
+For environments where the **same admin** manages both tenants, use the orchestrator [`setup_tpe.ps1`](../eng/scripts/setup_tpe.ps1) which calls both in sequence.
+
+### Dependency Graph
+
+```
+setup_tpe_teams.ps1 (Teams Admin)              setup_tpe_azure.ps1 (Azure Admin)
+─────────────────────────────────               ─────────────────────────────────
+Phase 1: Entra App Registration ──────┬──────► Phase 1: Azure Bot Service
+    │                                 │              (needs Entra App Client ID)
+    ▼                                 │
+Phase 2: Teams Resource Account ──────┤
+    │                                 │
+    ▼                                 └──────► Phase 2: ACS TPE Authorization
+Phase 3: License + Phone Number                      (needs RA Object ID)
+```
+
+### Quick Start
+
+```powershell
+# Option A: Separate admins (recommended for enterprise)
+# --- Teams Admin runs: ---
+.\setup_tpe_teams.ps1 -ConfigFile .\tpe-config.sample.json
+
+# --- Azure Admin runs (after receiving tpe-teams-output.json): ---
+.\setup_tpe_azure.ps1 -ConfigFile .\tpe-config.sample.json -TeamsOutputFile .\tpe-teams-output.json
+
+# Option B: Single admin with access to both tenants
+.\setup_tpe.ps1 -ConfigFile .\tpe-config.sample.json
+```
+
 ## Two-Tenant Architecture
 
 TPE requires resources across **two separate tenants**:
@@ -58,40 +99,13 @@ TPE requires resources across **two separate tenants**:
 
 ## Step-by-Step Provisioning
 
-### Phase 1: Azure Tenant — Create Bot Service
+> **Execution order:** The Teams script runs first (all 3 phases). Once Phase 1 completes, the Azure admin can start in parallel. Azure Phase 2 requires the RA Object ID from Teams Phase 2.
 
-**Persona:** Azure Subscription Contributor
+### Teams Script — Phase 1: Create Entra App Registration
 
-The Bot Service links your Entra App (from the Teams tenant) to Azure. The `ApplicationId` is the Client ID of the Entra app registration you'll create in Phase 2, and the `TenantId` is the **Teams tenant** ID.
+**Script:** `setup_tpe_teams.ps1` Phase 1 | **Persona:** Teams Tenant Global Admin or Application Administrator
 
-```powershell
-# Sign in to the Azure tenant
-az login --tenant $azureTenantId
-
-# Register the Bot Service resource provider (first-time only)
-Register-AzResourceProvider -ProviderNamespace Microsoft.BotService
-
-# Create the bot — ApplicationId is your Entra App Client ID, TenantId is the TEAMS tenant
-az bot create `
-    --resource-group $azureResourceGroupName `
-    --name $azureBotServiceName `
-    --app-type "MultiTenant" `
-    --appid $entraAppClientId `
-    --tenant-id $teamsTenantId `
-    --sku S1 `
-    --location "global" `
-    --subscription $azureSubscriptionId
-```
-
-> **Note:** The webhook URL can be any valid URL (e.g. `https://yourcompany.com`). Microsoft plans to remove this dependency in future.
-
----
-
-### Phase 2: Teams Tenant — Create Entra App Registration
-
-**Persona:** Teams Tenant Global Admin or Application Administrator
-
-Create an app registration **in the Teams tenant** with the `TeamsExtension.ManageCalls` permission for ACS.
+This is the **root dependency** — both the Azure Bot Service and the Teams Resource Account need the Entra App Client ID. Create an app registration **in the Teams tenant** with the `TeamsExtension.ManageCalls` permission for ACS.
 
 ```powershell
 # Install the Entra module
@@ -122,11 +136,13 @@ Write-Host "Entra App Client ID: $($entraApp.AppId)"
 
 > **Troubleshooting:** If consent is blocked, see [consent troubleshooting](https://learn.microsoft.com/en-us/azure/communication-services/concepts/interop/tpe/teams-phone-extensibility-troubleshooting#consent-blocked-due-to-microsoft-entra-app-permission).
 
+After this phase, **share the Entra App Client ID with the Azure admin** so they can create the Bot Service in parallel with the remaining Teams phases.
+
 ---
 
-### Phase 3: Teams Tenant — Provision Resource Account
+### Teams Script — Phase 2: Provision Resource Account
 
-**Persona:** Teams Admin (Skype for Business Administrator + User Administrator)
+**Script:** `setup_tpe_teams.ps1` Phase 2 | **Persona:** Teams Admin (Skype for Business Administrator + User Administrator)
 
 This creates the Teams Resource Account, links it to the Entra app, and associates it with the ACS resource.
 
@@ -158,9 +174,9 @@ Sync-CsOnlineApplicationInstance `
 
 ---
 
-### Phase 4: Teams Tenant — License and Assign Phone Number
+### Teams Script — Phase 3: License and Assign Phone Number
 
-**Persona:** Teams Admin
+**Script:** `setup_tpe_teams.ps1` Phase 3 | **Persona:** Teams Admin
 
 The resource account must be licensed and have a phone number before it can receive calls. There is a propagation delay (15–60 seconds) after creating the resource account before it appears in Entra ID.
 
@@ -205,9 +221,42 @@ Set-CsPhoneNumberAssignment `
 
 ---
 
-### Phase 5: Azure Tenant — Authorize ACS to Accept Calls for the Resource Account
+After this phase completes, share the `tpe-teams-output.json` file (or the RA Object ID) with the Azure admin for Phase 2 of the Azure script.
 
-**Persona:** Azure Subscription Contributor (must be logged in to Azure CLI)
+---
+
+### Azure Script — Phase 1: Create Bot Service
+
+**Script:** `setup_tpe_azure.ps1` Phase 1 | **Persona:** Azure Subscription Contributor
+
+The Bot Service links your Entra App (from the Teams tenant) to Azure. The `ApplicationId` is the Client ID of the Entra App Registration, and the `TenantId` is the **Teams tenant** ID. This phase can run **in parallel** with Teams Phases 2 and 3 once the Entra App Client ID is available.
+
+```powershell
+# Sign in to the Azure tenant
+az login --tenant $azureTenantId
+
+# Register the Bot Service resource provider (first-time only)
+Register-AzResourceProvider -ProviderNamespace Microsoft.BotService
+
+# Create the bot — ApplicationId is your Entra App Client ID, TenantId is the TEAMS tenant
+az bot create `
+    --resource-group $azureResourceGroupName `
+    --name $azureBotServiceName `
+    --app-type "MultiTenant" `
+    --appid $entraAppClientId `
+    --tenant-id $teamsTenantId `
+    --sku S1 `
+    --location "global" `
+    --subscription $azureSubscriptionId
+```
+
+> **Note:** The webhook URL can be any valid URL (e.g. `https://yourcompany.com`). Microsoft plans to remove this dependency in future.
+
+---
+
+### Azure Script — Phase 2: Authorize ACS to Accept Calls (TPE Assignment)
+
+**Script:** `setup_tpe_azure.ps1` Phase 2 | **Persona:** Azure Subscription Contributor (must be logged in to Azure CLI)
 
 This is the step the public docs describe as "Configure your Communication Services resource to accept calls for the Teams resource account." It calls the ACS TPE Assignment API to create an authorization linking the Teams resource account to the ACS resource.
 
@@ -268,14 +317,18 @@ After completing all phases, verify the setup:
 
 ## Provisioning at Scale
 
-For enterprise customers managing many resource accounts, wrap the per-account steps (Phases 3–5) in a loop driven by a CSV or configuration file:
+For enterprise customers managing many resource accounts, the Entra App and Bot Service are created **once**. The per-account steps (Teams Phases 2–3 + Azure Phase 2) are looped per resource account. This is naturally split across the two admin roles:
 
+**Teams Admin** — batch provision resource accounts:
 ```powershell
 $resourceAccounts = Import-Csv "resource-accounts.csv"
 # Expected columns: UPN, DisplayName, PhoneNumber, PhoneNumberType
 
+Connect-MicrosoftTeams -TenantId $teamsTenantId
+Connect-Graph -Scopes User.ReadWrite.All, Organization.Read.All
+
 foreach ($ra in $resourceAccounts) {
-    # Phase 3: Create & link resource account
+    # Teams Phase 2: Create & link resource account
     $account = New-CsOnlineApplicationInstance `
         -UserPrincipalName $ra.UPN `
         -ApplicationId $entraAppClientId `
@@ -287,14 +340,22 @@ foreach ($ra in $resourceAccounts) {
 
     Sync-CsOnlineApplicationInstance -ObjectId $account.ObjectId -ApplicationId $entraAppClientId
 
-    # Phase 4: License & phone number (with retry)
+    # Teams Phase 3: License & phone number (with retry for propagation)
     # ... (wait for propagation, set usage location, assign license, assign phone)
+}
+# Export ObjectIds for the Azure admin
+$resourceAccounts | Select-Object UPN, ObjectId | Export-Csv "ra-objectids.csv"
+```
 
-    # Phase 5: ACS TPE authorization
+**Azure Admin** — batch authorize ACS for each resource account:
+```powershell
+$accounts = Import-Csv "ra-objectids.csv"
+
+foreach ($ra in $accounts) {
     .\eng\scripts\azure_acs_tpe_auth.ps1 `
         -AzureCommunicationServicesName $azureCommunicationServicesName `
         -TeamsTenantId $teamsTenantId `
-        -TeamsResourceAccountObjectId $account.ObjectId `
+        -TeamsResourceAccountObjectId $ra.ObjectId `
         -PrincipalType "teamsResourceAccount"
 }
 ```
