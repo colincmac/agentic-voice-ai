@@ -1,3 +1,4 @@
+**/tpe-config.json
 .azure/*
 *.csproj.lscache
 
@@ -11,6 +12,7 @@ appsettings.Development.json
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/*.code-snippets
+
 
 # Local History for Visual Studio Code
 .history/
