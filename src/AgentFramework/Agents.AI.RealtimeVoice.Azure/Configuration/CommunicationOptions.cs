@@ -29,6 +29,9 @@ public class TeamsOptions
     public required string ResourceTenantId { get; set; }
     public required string ResourceObjectId { get; set; }
     public required string PhoneNumber { get; set; }
+    public string Identity { get; set; } = string.Empty;
+    public string BotSecret { get; set; } = string.Empty;
+
     //public required string ClientSecret { get; set; }
     //public required string BotId { get; set; }
     //public required string BotDisplayName { get; set; }

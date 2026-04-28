@@ -48,7 +48,9 @@ public sealed class AzureVoiceLiveClient : IRealtimeClient
     /// <inheritdoc />
     public async Task<IRealtimeClientSession> CreateSessionAsync(RealtimeSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        var sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, cancellationToken);
+        //var sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, cancellationToken);
+        var sessionClient = await _realtimeClient.StartSessionAsync("gpt-realtime", cancellationToken);
+
         var session = new AzureVoiceLiveClientSession(sessionClient, _sessionTarget);
 
         try

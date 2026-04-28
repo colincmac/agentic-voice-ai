@@ -88,7 +88,8 @@ public class AzureCommunicationService
             return null;
         }
 
-        return await JsonSerializer.DeserializeAsync(message.Response.ContentStream, CallAutomationJsonContext.Default.TeamsExtensionAssignmentResponse, cancellationToken).ConfigureAwait(false);
+        var response = await JsonSerializer.DeserializeAsync(message.Response.ContentStream, CallAutomationJsonContext.Default.TeamsExtensionAssignmentResponse, cancellationToken).ConfigureAwait(false);
+        return response;
     }
     internal class AcsConnectionString
     {

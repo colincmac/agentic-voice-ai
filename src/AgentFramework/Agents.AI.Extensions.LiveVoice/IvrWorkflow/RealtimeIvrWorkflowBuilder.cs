@@ -201,6 +201,7 @@ public sealed class RealtimeIvrWorkflowBuilder
                 MaxDuration = step.MaxDuration,
                 RequiredAuthLevel = step.RequiredAuthLevel,
                 OnCompleted = step.OnCompleted,
+                DtmfMenuOptions = step.DtmfMenuOptions,
             };
         }).ToList();
 
@@ -234,6 +235,7 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     private TimeSpan? _maxDuration;
     private AuthenticationLevel _requiredAuthLevel = AuthenticationLevel.None;
     private Func<IvrWorkflowState, CancellationToken, Task>? _onCompleted;
+    private Dictionary<char, string>? _dtmfMenuOptions;
 
     private readonly JsonSerializerOptions _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
 
@@ -540,6 +542,28 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
 
         return this;
     }
+
+    /// <summary>
+    /// Configures DTMF menu options for this step, used in Tier 4 (pure DTMF) mode.
+    /// </summary>
+    public RealtimeIvrStepBuilder WithDtmfMenu(Dictionary<char, string> options)
+    {
+        _dtmfMenuOptions = new Dictionary<char, string>(options);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Configures DTMF menu options for this step using a fluent builder.
+    /// </summary>
+    public RealtimeIvrStepBuilder WithDtmfMenu(Action<DtmfMenuBuilder> configure)
+    {
+        var builder = new DtmfMenuBuilder();
+        configure(builder);
+        _dtmfMenuOptions = builder.Build();
+
+        return this;
+    }
     private AITool CreateTransitionTool(StateTransition transition)
     {
         var functionName = $"transition_to_{transition.NextStep}";
@@ -595,7 +619,48 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
             MaxDuration = _maxDuration,
             RequiredAuthLevel = _requiredAuthLevel,
             OnCompleted = _onCompleted,
+            DtmfMenuOptions = _dtmfMenuOptions?.AsReadOnly(),
         };
     }
 }
 public record AIToolConfiguration(AITool tool, ToolConfiguration? toolConfiguration = null);
+
+/// <summary>
+/// Fluent builder for constructing DTMF menu options for a workflow step.
+/// </summary>
+public sealed class DtmfMenuBuilder
+{
+    private readonly Dictionary<char, string> _options = new();
+
+    /// <summary>
+    /// Maps a DTMF digit to a menu option label.
+    /// </summary>
+    public DtmfMenuBuilder Option(char digit, string label)
+    {
+        _options[digit] = label;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a "Speak to agent" option mapped to the '0' key.
+    /// </summary>
+    public DtmfMenuBuilder WithSpeakToAgent()
+    {
+        _options['0'] = "Speak to a live agent";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a "Return to main menu" option mapped to the '*' key.
+    /// </summary>
+    public DtmfMenuBuilder WithReturnToMainMenu()
+    {
+        _options['*'] = "Return to main menu";
+
+        return this;
+    }
+
+    internal Dictionary<char, string> Build() => new(_options);
+}

@@ -54,6 +54,13 @@ public class ContactCenterOptions
     /// Voice biometric options
     /// </summary>
     public VoiceBiometricOptions? VoiceBiometrics { get; set; }
+
+    /// <summary>
+    /// Agent tier degradation options for capacity-aware graceful degradation.
+    /// When configured, new sessions are assigned to the best available tier
+    /// based on current load.
+    /// </summary>
+    public AgentTierOptions? AgentTiers { get; set; }
 }
 public sealed class FraudDetectionOptions
 {

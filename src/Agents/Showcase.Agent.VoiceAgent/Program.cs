@@ -1,4 +1,5 @@
 using A2A.AspNetCore;
+using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Hosting;
 using Agents.AI.Realtime;
@@ -13,6 +14,7 @@ using Microsoft.Agents.AI.Hosting;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Azure;
 using OpenTelemetry.Resources;
@@ -28,10 +30,7 @@ AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 var azureSection = builder.Configuration.GetSection("Azure");
 var tenantId = azureSection["TenantId"];
 
-var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-{
-    TenantId = tenantId
-});
+var credential = new AzureCliCredential();
 builder.Services.AddAzureClients(clientBuilder =>
 {
     // Make this the default for clients created by the factory
@@ -53,12 +52,12 @@ else
 }
 builder.Services.AddHttpClient();
 builder.Services.AddHttpLogging(o => { });
-builder.Services.AddAzureClients(clientBuilder =>
-{
-    // Set up any default settings
-    clientBuilder.ConfigureDefaults(
-        builder.Configuration.GetSection("AzureDefaults"));
-});
+//builder.Services.AddAzureClients(clientBuilder =>
+//{
+//    // Set up any default settings
+//    clientBuilder.ConfigureDefaults(
+//        builder.Configuration.GetSection("AzureDefaults"));
+//});
 
 // Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
@@ -265,9 +264,9 @@ builder.AddConversationHub(
     {
         opt.RealtimeAgentServiceKey = AgentConfig.TriageAgent;
     })
-    .AddCallAutomation()
-    .AddToolCollection<WoodgroveDisputeTools>()
-    .AddOperatorDashboard()
+    .AddCallAutomation(false)
+    // .AddToolCollection<WoodgroveDisputeTools>()
+    // .AddOperatorDashboard()
     //.AddBiometricVoiceEvaluation()
     .AddStubCallAnalytics();
 // Add workflow integration with the orchestrator agent and workflow factory
@@ -305,8 +304,9 @@ app.UseHttpLogging();
 //app.UseAuthorization();
 //app.MapAgentIdentityManagement();
 
-app.MapGet("/", () =>
+app.MapGet("/", async ([FromServices] AuthorizingRealtimeAIAgent agent, CancellationToken cancellationToken) =>
 {
+    var session = await agent.CreateRealtimeSessionAsync(null, cancellationToken);
     return "Testing";
 });
 app.MapWellKnownDidDocument();
@@ -315,7 +315,7 @@ app.MapTeams();
 
 app.MapCallAutomation();
 app.MapOperatorCalls();
-app.MapOperatorDashboardHub();
+// app.MapOperatorDashboardHub();
 
 //app.MapAgentDiscovery("/agents");
 app.MapDefaultEndpoints();
