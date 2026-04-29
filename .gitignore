@@ -1,4 +1,8 @@
+/output/
 **/tpe-config.json
+**/tpe-teams-output.json
+**/tpe-secrets.json
+eng/scripts/scratch/
 .azure/*
 *.csproj.lscache
 
