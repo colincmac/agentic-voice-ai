@@ -74,6 +74,16 @@ public sealed class RawMediaStreamChannel : IAsyncDisposable
     public long BufferedBytes => _totalBytesWritten - _totalBytesDistributed;
 
     /// <summary>
+    /// Gets the cumulative number of bytes written into this channel since creation.
+    /// </summary>
+    public long TotalBytesWritten => Interlocked.Read(ref _totalBytesWritten);
+
+    /// <summary>
+    /// Gets the cumulative number of bytes distributed to consumers since creation.
+    /// </summary>
+    public long TotalBytesDistributed => Interlocked.Read(ref _totalBytesDistributed);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="RawMediaStreamChannel"/> class.
     /// </summary>
     /// <param name="capacity">Maximum number of bytes to buffer before pausing writes.</param>
@@ -273,19 +283,36 @@ public sealed class RawMediaStreamChannel : IAsyncDisposable
                 var buffer = result.Buffer;
                 if (!buffer.IsEmpty && !_consumers.IsEmpty)
                 {
-                    // Single allocation per chunk for all consumers
+                    // Copy once from the pipe buffer; each consumer's EnqueueAsync makes its
+                    // own copy so we can safely return the rented array after all enqueues complete.
                     var data = ArrayPool<byte>.Shared.Rent((int)buffer.Length);
                     try
                     {
                         buffer.CopyTo(data);
                         var memory = data.AsMemory(0, (int)buffer.Length);
 
-                        // Fire and forget for each consumer - they handle their own backpressure
-                        foreach (var consumer in _consumers.Values)
+                        var consumers = _consumers.Values;
+                        var enqueueTasks = new ValueTask[consumers.Count];
+                        var i = 0;
+                        foreach (var consumer in consumers)
                         {
-#pragma warning disable CA2012 // Use ValueTasks correctly
-                            _ = consumer.EnqueueAsync(memory, cancellationToken).ConfigureAwait(false);
-#pragma warning restore CA2012 // Use ValueTasks correctly
+                            enqueueTasks[i++] = consumer.EnqueueAsync(memory, cancellationToken);
+                        }
+
+                        for (var j = 0; j < i; j++)
+                        {
+                            try
+                            {
+                                await enqueueTasks[j].ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                throw;
+                            }
+                            catch
+                            {
+                                // Individual consumer failure should not block distribution
+                            }
                         }
 
                         Interlocked.Add(ref _totalBytesDistributed, buffer.Length);

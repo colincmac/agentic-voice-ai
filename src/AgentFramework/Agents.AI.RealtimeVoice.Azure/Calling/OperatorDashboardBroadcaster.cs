@@ -1,4 +1,4 @@
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

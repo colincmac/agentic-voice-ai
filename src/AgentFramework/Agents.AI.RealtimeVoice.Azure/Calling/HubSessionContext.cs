@@ -1,22 +1,19 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
-using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.Extensions.ToolApproval;
-using Agents.AI.RealtimeVoice.Azure.Authorization.Biometrics;
-using Agents.AI.RealtimeVoice.Azure.Authorization.FraudCheck;
-using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
-using Agents.AI.RealtimeVoice.Azure.Authorization.VoiceApproval;
-using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Communication.CallAutomation;
-using Microsoft.Agents.AI;
-using Microsoft.AspNetCore.Http;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling;
 
 
+/// <summary>
+/// Lightweight session-scoped context that provides access to the session's
+/// <see cref="IServiceProvider"/> for on-demand service resolution.
+/// Replaces the previous god-object pattern of eagerly resolving all services.
+/// </summary>
 public sealed class HubSessionContext
 {
-
+    private readonly IServiceScope _sessionScope;
+    private readonly ConversationContext _conversationContext;
 
     /// <summary>
     /// Creates a HubSessionContext 
@@ -24,50 +21,40 @@ public sealed class HubSessionContext
     public HubSessionContext(string sessionId, IServiceScope sessionScope)
     {
         SessionId = sessionId;
-        CallAutomation = sessionScope.ServiceProvider.GetRequiredService<CallAutomationClient>();
-        //OrchestratingAgent = sessionScope.ServiceProvider.GetRequiredService<AIAgent>();
-        AuthorizingAgent = sessionScope.ServiceProvider.GetRequiredService<AuthorizingRealtimeAIAgent>();
-        ApprovalHandlerProvider = sessionScope.ServiceProvider.GetRequiredService<IToolApprovalHandlerProvider>();
-        ToolApprovalStore = sessionScope.ServiceProvider.GetRequiredService<IToolApprovalStore>();
-        LocalSessionApprovalStore = sessionScope.ServiceProvider.GetRequiredService<VoiceApprovalStore>();
-
-        IdentityVerification = sessionScope.ServiceProvider.GetService<IIdentityVerificationService>();
-        FraudDetection = sessionScope.ServiceProvider.GetService<IFraudDetectionMonitor>();
-        VoiceBiometrics = sessionScope.ServiceProvider.GetService<IVoiceBiometricEvaluator>();
+        _sessionScope = sessionScope;
+        _conversationContext = sessionScope.ServiceProvider.GetService<ConversationContext>() ?? new ConversationContext();
     }
 
-
-    //public AIAgent OrchestratingAgent { get; }
-    public AuthorizingRealtimeAIAgent AuthorizingAgent { get; }
-
-    public CallAutomationClient CallAutomation { get; }
-    /// <summary>
-    /// Approval handler provider for tool approval workflow
-    /// </summary>
-    public IToolApprovalHandlerProvider ApprovalHandlerProvider { get; }
-
-    /// <summary>
-    /// Tool approval store for managing tool-specific approval requests
-    /// </summary>
-    public IToolApprovalStore ToolApprovalStore { get; }
-
-    public VoiceApprovalStore LocalSessionApprovalStore { get; }
-
     public string SessionId { get; }
-    /// <summary>
-    /// Entra identity verification service
-    /// </summary>
-    public IIdentityVerificationService? IdentityVerification { get; }
 
     /// <summary>
-    /// Fraud detection monitor
+    /// Structured pinned conversation memory for the current session.
     /// </summary>
-    public IFraudDetectionMonitor? FraudDetection { get; }
+    public ConversationContext ConversationContext => _conversationContext;
 
     /// <summary>
-    /// Voice biometric evaluator
+    /// The session-scoped service provider for on-demand service resolution.
     /// </summary>
-    public IVoiceBiometricEvaluator? VoiceBiometrics { get; }
+    public IServiceProvider SessionServices => _sessionScope.ServiceProvider;
 
+    /// <summary>
+    /// Convenience accessor for <see cref="CallAutomationClient"/> from the session scope.
+    /// </summary>
+    public CallAutomationClient CallAutomation => _sessionScope.ServiceProvider.GetRequiredService<CallAutomationClient>();
 
+    /// <summary>
+    /// Resolves a service from the session scope.
+    /// </summary>
+    public T GetRequiredService<T>() where T : notnull
+        => typeof(T) == typeof(ConversationContext)
+            ? (T)(object)_conversationContext
+            : _sessionScope.ServiceProvider.GetRequiredService<T>();
+
+    /// <summary>
+    /// Resolves an optional service from the session scope.
+    /// </summary>
+    public T? GetService<T>() where T : class
+        => typeof(T) == typeof(ConversationContext)
+            ? (T)(object)_conversationContext
+            : _sessionScope.ServiceProvider.GetService<T>();
 }

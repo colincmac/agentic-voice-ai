@@ -1,5 +1,7 @@
 # Welcome to Microsoft 365 Agents Toolkit!
 
+Configuration & deployment for your Teams app is managed through Microsoft 365 Agents Toolkit for Visual Studio.
+
 ## Prerequisites
 ### Teams development
 - https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/build-and-test/prepare-your-o365-tenant#enable-custom-teams-apps-and-turn-on-custom-app-uploading

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Transactions;
 
 namespace Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 
@@ -195,7 +196,7 @@ public class RealtimeAIPromptTemplate
 
         if (!tools.RequireConfirmation)
         {
-            sb.AppendLine("- When calling a tool, do not ask for any user confirmation. Be proactive.");
+            sb.AppendLine("- When calling a tool, do not ask for any user confirmation unless specified below in specific tool instructions or in the description of the tool. Be proactive.");
         }
 
         sb.AppendLine();
@@ -248,7 +249,7 @@ public class RealtimeAIPromptTemplate
     private static void RenderSupervisorTool(StringBuilder sb, SupervisorToolConfig supervisor)
     {
         sb.AppendLine("## Supervisor Tool");
-        sb.AppendLine("Name: getNextResponseFromSupervisor(relevantContextFromLastUserMessage: string)");
+        sb.AppendLine($"Name: {supervisor.ToolName}(relevantContextFromLastUserMessage: string)");
         sb.AppendLine();
         sb.AppendLine("When to call:");
 
@@ -387,12 +388,18 @@ public class RealtimeAIPromptTemplate
                 sb.AppendLine($"Exit when: {state.ExitWhen}");
             }
 
+            sb.AppendLine($"Valid Next Steps (formatted `<step_name>: <condition>`)");
+
             if (state.Transitions is { Count: > 0 })
             {
                 foreach (var transition in state.Transitions)
                 {
                     sb.AppendLine($"→ {transition.NextStep}: {transition.Condition}");
                 }
+            }
+            else
+            {
+                sb.AppendLine($"→ No additional steps. End the call politely.");
             }
 
             sb.AppendLine();

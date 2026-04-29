@@ -11,6 +11,7 @@ using Showcase.AgentFramework.LiveVoice.Client;
 
 namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 
+[Obsolete("Please use AzureVoiceLiveClient instead")]
 public partial class AzureVoiceLiveConversationClient : ILiveConversationClient
 {
     private readonly VoiceLiveClient _realtimeClient;

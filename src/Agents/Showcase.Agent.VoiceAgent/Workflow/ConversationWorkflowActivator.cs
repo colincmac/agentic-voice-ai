@@ -104,38 +104,3 @@ public static class ConversationWorkflowFactory
     }
 }
 
-/// <summary>
-/// Biometric workflow activator for Contact Center sessions.
-/// </summary>
-/// <remarks>
-/// This activator is obsolete. Use <see cref="WorkflowIntegratedSessionActivator"/> with
-/// <see cref="ConversationWorkflowFactory.CreateCallerIntentWorkflow"/> instead via the
-/// <c>AddWorkflowIntegration</c> extension method.
-/// </remarks>
-[Obsolete("Use WorkflowIntegratedSessionActivator with AddWorkflowIntegration() instead. " +
-          "See ConversationWorkflowFactory for workflow definitions.")]
-public sealed class BiometricWorkflowActivator : IContactCenterConversationSessionActivator
-{
-    private readonly IVoiceBiometricEvaluator _biometricEvaluator;
-    private readonly ILoggerFactory _loggerFactory;
-
-    public BiometricWorkflowActivator(
-        IVoiceBiometricEvaluator biometricEvaluator,
-        ILoggerFactory loggerFactory)
-    {
-        _biometricEvaluator = biometricEvaluator;
-        _loggerFactory = loggerFactory;
-    }
-
-    public ContactCenterConversationSession Create(
-        string sessionId,
-        IServiceScope sessionScope,
-        ILoggerFactory loggerFactory)
-    {
-        // Create the default session structure
-        var hubSessionContext = new HubSessionContext(sessionId, sessionScope);
-        var session = new ContactCenterConversationSession(sessionScope, hubSessionContext, loggerFactory);
-
-        return session;
-    }
-}

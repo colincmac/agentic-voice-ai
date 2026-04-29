@@ -1,4 +1,5 @@
-# Building a Secure Azure Architecture for Model Context Protocol (MCP) Solutions
+# [WIP] Building a Secure Azure Architecture for Model Context Protocol (MCP) Solutions
+*This is heavily a WIP and likely not in sync with the most recent MCP updates*
 
 ## Introduction
 

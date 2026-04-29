@@ -178,7 +178,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
                 {
                     foreach (var kv in props)
                     {
-                        activity.AddTag(kv.Key, kv.Value);
+                        activity?.AddTag(kv.Key, kv.Value);
                     }
                 }
             });
@@ -193,13 +193,13 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
             {
                 if (options.Voice is { } voice)
                 {
-                    activity.AddTag(GenAI.Realtime.RealtimeVoice, voice);
+                    activity?.AddTag(GenAI.Realtime.Voice, voice);
                 }
                 if (options.AdditionalProperties is { } props && EnableSensitiveData)
                 {
                     foreach (var kv in props)
                     {
-                        activity.AddTag(kv.Key, kv.Value);
+                        activity?.AddTag(kv.Key, kv.Value);
                     }
                 }
             });
@@ -216,7 +216,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
         Func<Task> action,
         IEnumerable<ChatMessage>? inputMessages,
         CancellationToken cancellationToken,
-        Action<Activity>? additionalTags = null)
+        Action<Activity?>? additionalTags = null)
     {
         using var activity = StartActivity(operationName);
         var stopwatch = _operationDurationHistogram.Enabled ? Stopwatch.StartNew() : null;
@@ -293,8 +293,8 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
         if (activity is { IsAllDataRequested: true })
         {
             activity
-                .AddTag(GenAI.AttributeGenAiOperationName, GenAI.OperationNameValues.GenerateContent)
-                .AddTag("gen_ai.live.operation", shortOperationName);
+                .AddTag(GenAI.AttributeGenAiOperationName, shortOperationName)
+                .AddTag("gen_ai.live.operation", GenAI.OperationNameValues.GenerateContent);
 
             if (_modelId is not null)
             {
@@ -316,7 +316,7 @@ public sealed partial class OpenTelemetryConversationSession : DelegatingConvers
             if (SessionId is not null)
             {
                 activity.AddTag(GenAI.AttributeGenAiConversationId, SessionId);
-                activity.AddTag(GenAI.Realtime.RealtimeSessionId, SessionId);
+                activity.AddTag(GenAI.Realtime.SessionId, SessionId);
             }
         }
 

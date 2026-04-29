@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,15 +11,19 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Azure.AppConfiguration.AspNetCore" />
+
     <PackageReference Include="Microsoft.Identity.Web.GraphServiceClient" />
     <PackageReference Include="Microsoft.Identity.Web.AgentIdentities" />
 
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" />
     <PackageReference Include="Azure.Communication.CallAutomation" />
     <PackageReference Include="Azure.Communication.Common" />
+    <PackageReference Include="Azure.Messaging.EventGrid" />
     <PackageReference Include="Azure.Communication.Identity" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="Microsoft.Extensions.AI" />
+    
     <PackageReference Include="A2A" />
     <PackageReference Include="A2A.AspNetCore" />
 

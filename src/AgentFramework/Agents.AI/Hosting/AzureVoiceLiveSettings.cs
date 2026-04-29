@@ -58,7 +58,7 @@ public class AzureVoiceLiveSettings()
     /// <value>
     /// The default value is <see langword="false"/>.
     /// </value>
-    public bool DisableTracing { get; set; }
+    public bool DisableTracing { get; set; } = false;
 
     /// <summary>
     /// Gets or sets a boolean value indicating whether potentially sensitive information should be included in telemetry.
@@ -76,6 +76,8 @@ public class AzureVoiceLiveSettings()
     /// environment variable to "true". Explicitly setting this property will override the environment variable.
     /// </remarks>
     public bool EnableSensitiveTelemetryData { get; set; } = false;
+
+    public string? APIVersion { get; set; } = "2026-01-01-preview";
 
     public void ParseConnectionString(string? connectionString)
     {

@@ -2,6 +2,7 @@ using System.ClientModel.Primitives;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Azure.AI.VoiceLive;
 using Extensions.AI.Contents;
 using Extensions.AI.RealtimeVoice;
@@ -10,9 +11,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Shared.Diagnostics;
-using Microsoft.VisualBasic;
 using OpenAI.Realtime;
-using OpenAI.Responses;
+
 namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 
 
@@ -23,6 +23,8 @@ namespace Extensions.AI.RealtimeVoice.AzureVoiceLive;
 /// Responses, which are model-generated audio or text Items that are added to the Conversation.
 /// An OpenAI session has a max duration of 30minutes
 /// </summary>
+[Obsolete("Please use `AzureVoiceLiveClientSession` instead")]
+
 public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
 {
 
@@ -41,7 +43,9 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     private LiveConversationSessionOptions? _options;
     private readonly TaskCompletionSource<string?> _sessionStartTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private RealtimeSessionState _state = RealtimeSessionState.Connecting;
+
     private bool _disposed;
+
     public AzureVoiceLiveConversationSession(
         AzureVoiceLiveConversationClient parentClient,
         string realtimeModelId,
@@ -76,6 +80,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     }
 
     public LiveConversationSessionMetadata Metadata { get; }
+    public LiveConversationSessionOptions? CurrentSessionConfiguration => _options;
 
     private string? _sessionId;
     /// <inheritdoc/>
@@ -94,7 +99,6 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
        
         var session = await EnsureSessionAsync(cancellationToken).ConfigureAwait(false);
 
-        //var sessionResponseOptions = ToVoiceLiveSessionOptions(responseOptions);
         await session.StartResponseAsync(cancellationToken)
             .ConfigureAwait(false);
     }
@@ -142,7 +146,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
 
         foreach (var message in messages)
         {
-            if (ToRealtimeItem(message) is not { } realtimeItem)
+            if (ToConversationRequestItem(message) is not { } realtimeItem)
             {
                 continue;
             }
@@ -286,7 +290,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         lastMessageId = textFinished.ItemId;
                         responseId = textFinished.ResponseId;
                         lastRole = ChatRole.Assistant;
-
+                        
                         var update = CreateUpdate([new TextContent(textFinished.Transcript)]);
                         update.RawRepresentation = textFinished;
                         yield return update;
@@ -345,6 +349,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         {
                             lastMessageId = inputAudioTxFinished.ItemId;
                             lastRole = ChatRole.User;
+
                             var update = CreateUpdate([new TextContent(inputAudioTxFinished.Transcript)]);
                             update.RawRepresentation = inputAudioTxFinished;
                             yield return update;
@@ -367,6 +372,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                         yield return update;
                         break;
                     }
+
                 default:
                     {
                         // Future-proof: unknown subclass we didn’t explicitly handle.
@@ -530,7 +536,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
     }
 
 
-    private static ConversationRequestItem? ToRealtimeItem(ChatMessage message)
+    private static ConversationRequestItem? ToConversationRequestItem(ChatMessage message)
     {
         if (message.RawRepresentation is ConversationRequestItem rawItem)
         {
@@ -568,7 +574,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
                 { Role: var role } when role == ChatRole.User => new UserMessageItem(message.Text),
                 { Role: var role } when role == ChatRole.Assistant => new AssistantMessageItem(message.Text),
                 { Role: var role } when role == ChatRole.System => new SystemMessageItem(message.Text),
-                _ => null
+                _ => new AssistantMessageItem(message.Text)
             };
         }
 
@@ -640,7 +646,7 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
             sessionOptions.MaxResponseOutputTokens = options.MaxOutputTokens.Value;
         }
 
-        if(options.TurnDetection is RealtimeTurnDetection turnDection)
+        if(options.TurnDetection is Configuration.RealtimeTurnDetection turnDection)
         {
             sessionOptions.TurnDetection = MapTurnDetectionOption(turnDection);
         }
@@ -658,14 +664,19 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
         return sessionOptions;
     }
 
-    private static TurnDetection MapTurnDetectionOption(RealtimeTurnDetection turnDetection)
+    /// <summary>
+    /// https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to#turn-detection-parameters
+    /// </summary>
+    /// <param name="turnDetection"></param>
+    /// <returns></returns>
+    private static TurnDetection MapTurnDetectionOption(Configuration.RealtimeTurnDetection turnDetection)
     {
         var defaultprefixPadding = TimeSpan.FromMilliseconds(300);
         var defaultSilenceDuration = TimeSpan.FromMilliseconds(500);
         var defaultSpeechDuration = TimeSpan.FromMilliseconds(80);
         var defaultVadThreshold = 0.3f;
 
-        var defaultDetection = new AzureSemanticVadTurnDetectionEn()
+        var defaultDetection = new AzureSemanticVadTurnDetection()
         {
             AutoTruncate = turnDetection.EnableAutomaticTruncation,
             CreateResponse = turnDetection.EnableAutomaticResponse,
@@ -675,6 +686,11 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
             Threshold = turnDetection.VadThreshold ?? defaultVadThreshold,
             RemoveFillerWords = true,
             SpeechDuration = turnDetection.SpeechDurationMs is null ? defaultSpeechDuration : TimeSpan.FromMilliseconds((int)turnDetection.SpeechDurationMs)
+        };
+        var defaultEouDetection = new AzureSemanticEouDetectionEn()
+        {
+            ThresholdLevel = EouThresholdLevel.Medium,
+            Timeout = TimeSpan.FromSeconds(2)
         };
         return turnDetection.Type switch
         {
@@ -767,8 +783,8 @@ public sealed class AzureVoiceLiveConversationSession : ILiveConversationSession
         {
             return null;
         }
-        var definition = function.AsOpenAIConversationFunctionTool();
-        return new VoiceLiveFunctionDefinition(function.Name) { Description = definition.Description, Parameters = definition.Parameters };
+        var definition = OpenAIClientExtensions.ToOpenAIRealtimeFunctionTool(function);
+        return new VoiceLiveFunctionDefinition(function.Name) { Description = definition.FunctionDescription, Parameters = definition.FunctionParameters };
     }
 
     private void UpdateSessionState(RealtimeSessionState newState, ErrorContent? error = null, string? reason = null)

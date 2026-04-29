@@ -26,17 +26,19 @@ public static class DistributedApplicationBuilderExtensions
             .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
             .WithHttpEndpoint(targetPort: 9090)
             .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
+        var collector = builder.AddOpenTelemetryCollector("otelcollector")
+            .WithConfig("./otelcollector/config.yaml")
+            .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp")
+            .WithAppForwarding();
 
-        var grafana = builder.AddContainer("grafana", "grafana/grafana")
+        var grafana = builder.AddContainer("grafana", "grafana/grafana").WaitFor(collector)
             .WithBindMount("./grafana/config", "/etc/grafana", isReadOnly: true)
             .WithBindMount("./grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
             .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
             .WithHttpEndpoint(targetPort: 3000)
             .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
 
-        var collector = builder.AddOpenTelemetryCollector("otelcollector").WithConfig("./otelcollector/config.yaml")
-            .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp")
-            .WithAppForwarding();
+
         if (appInsightsName is not null)
         {
             var appinsights = builder.AddAzureApplicationInsights("appinsights").AsExisting(appInsightsName, appInsightsResourceGroup);

@@ -8,6 +8,11 @@ public abstract class HubSessionToolApprovalHandler<TRequirement> : ToolApproval
 {
     protected HubSessionContext HubSessionContext { get; }
 
+    /// <summary>
+    /// Convenience accessor for resolving services from the session scope.
+    /// </summary>
+    protected IServiceProvider SessionServices => HubSessionContext.SessionServices;
+
     public HubSessionToolApprovalHandler(HubSessionContext hubSessionContext)
     {
         HubSessionContext = hubSessionContext;

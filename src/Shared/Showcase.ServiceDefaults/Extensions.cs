@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StackExchange.Redis;
 using StackExchange.Redis.Configuration;
@@ -24,9 +25,9 @@ public static class Extensions
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
 
-    public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
+    public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
     {
-        builder.ConfigureOpenTelemetry();
+        builder.ConfigureOpenTelemetry(configureOtel);
 
         builder.AddDefaultHealthChecks();
 
@@ -50,7 +51,7 @@ public static class Extensions
         return builder;
     }
 
-    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
+    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
     {
         builder.Logging.AddOpenTelemetry(logging =>
         {
@@ -62,7 +63,7 @@ public static class Extensions
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
-                    .AddMeter("Showcase.VoiceAgent") // Our custom meter
+                    .AddMeter("*") // Our custom meter
                     .AddMeter("*Microsoft.Agents.AI") // Agent Framework metrics
                     
                     .AddHttpClientInstrumentation()
@@ -71,7 +72,7 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
-                    .AddSource("*Showcase.VoiceAgent")
+                    .AddSource("*")
                     .AddSource("*Microsoft.Agents.AI")
                     .AddAspNetCoreInstrumentation(tracing =>
                         // Don't trace requests to the health endpoint to avoid filling the dashboard with noise
@@ -83,12 +84,12 @@ public static class Extensions
                     .AddHttpClientInstrumentation();
             });
 
-        builder.AddOpenTelemetryExporters();
+        builder.AddOpenTelemetryExporters(configureOtel);
 
         return builder;
     }
 
-    private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
+    private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
     {
 
         var otelBuilder = builder.Services.AddOpenTelemetry();
@@ -96,7 +97,10 @@ public static class Extensions
         {
             otelBuilder.UseOtlpExporter();
         }
-
+        if (configureOtel != null)
+        {
+            otelBuilder.ConfigureResource(configureOtel);
+        }
         if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
         {
             otelBuilder.UseAzureMonitor();

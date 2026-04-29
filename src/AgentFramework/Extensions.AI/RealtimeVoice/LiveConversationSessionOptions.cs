@@ -48,6 +48,9 @@ public class LiveConversationSessionOptions : ChatOptions
     public string? InputNoiceReductionType { get; set; } = "azure_deep_noise_suppression";
 
     public ConversationVoiceOptions? VoiceOptions { get; set; }
+
+    public bool EnableAsyncToolCalls { get; set; } = false;
+
     public string? RawSessionOptionsJson { get; set; }
 
 
@@ -80,6 +83,7 @@ public class LiveConversationResponseOptions
 
     /// <summary>Gets or sets additional model-specific properties.</summary>
     public IDictionary<string, object?>? AdditionalProperties { get; set; }
+    public string? RawResponseOptionsJson { get; set; }
 
 
     public LiveConversationResponseOptions Clone()

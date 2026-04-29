@@ -1,6 +1,14 @@
+/output/
+**/tpe-config.json
+**/tpe-teams-output.json
+**/tpe-secrets.json
+eng/scripts/scratch/
+.azure/*
+*.csproj.lscache
+
 appsettings.Development.json
 **/*/appsettings.Development.json
-
+**/*/Properties/PublishProfiles/*
 .vs
 .vscode/*
 !.vscode/settings.json
@@ -8,6 +16,7 @@ appsettings.Development.json
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/*.code-snippets
+
 
 # Local History for Visual Studio Code
 .history/
@@ -62,3 +71,5 @@ msbuild.wrn
 /M365Agent/devTools/teamsapptesttool.log
 /M365Agent/devTools/m365agentsplayground.log
 /M365Agent/devTools/.testTool.installInfo.json
+.azure
+UpgradeLog.htm

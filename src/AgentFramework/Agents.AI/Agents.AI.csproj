@@ -6,14 +6,15 @@
     <Nullable>enable</Nullable>
     <InjectSharedThrow>true</InjectSharedThrow>
     <InjectHostingExtensions>true</InjectHostingExtensions>
-
+    <NoWarn>
+      $(NoWarn);OPENAI001;MEAI001;
+    </NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="A2A.AspNetCore" />
 
     <PackageReference Include="Aspire.Azure.AI.OpenAI" />
     <PackageReference Include="Aspire.Microsoft.Azure.Cosmos" />
-    <PackageReference Include="Aspire.Microsoft.Extensions.Configuration.AzureAppConfiguration" />
     <PackageReference Include="CommunityToolkit.Aspire.OllamaSharp" />
 
     <PackageReference Include="Azure.AI.OpenAI" />

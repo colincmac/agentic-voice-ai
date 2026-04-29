@@ -1,4 +1,4 @@
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling;
 

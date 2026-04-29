@@ -1,12 +1,16 @@
 using Agents.AI.Extensions;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.Extensions.LiveVoice.Media;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure.Authorization.VoiceApproval;
 using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.RealtimeVoice.Azure.Calling.Routing;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Agents.AI.RealtimeVoice.Azure.Media;
 using Agents.AI.RealtimeVoice.Azure.Monitoring;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Configuration;
@@ -43,7 +47,12 @@ public static class IHostApplicationBuilderExtensions
         // Register ConversationHub as singleton
 
         builder.Services.AddSingleton<ContactCenterConversationHub>();
-        builder.Services.AddSingleton<ConversationSessionMetrics>();
+
+        // Register routing strategy (swappable for conference, hold-aware, etc.)
+        builder.Services.TryAddSingleton<ISessionRouter, BroadcastSessionRouter>();
+
+        // Register centralized telemetry
+        builder.Services.TryAddSingleton<SessionTelemetry>();
 
         // Register LiveCallRegistry for operator dashboard
         builder.Services.AddSingleton<LiveCallRegistry>();
@@ -75,6 +84,8 @@ public static class IHostApplicationBuilderExtensions
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics => metrics.AddMeter(ConversationSessionActivitySource.MeterName))
             .WithTracing(tracing => tracing.AddSource(ConversationSessionActivitySource.ActivitySourceName));
+
+        builder.Services.AddSingleton<WebSocketResourceManager>();
 
 
         return new ConversationHubBuilder(builder);

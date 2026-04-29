@@ -10,7 +10,7 @@ public interface IAgentSessionRegistry
     /// <summary>
     /// Registers a callback for a specific session to receive external messages.
     /// </summary>
-    Task RegisterSession(string sessionId, Func<IEnumerable<ChatMessage>, CancellationToken, Task> messageHandler, CancellationToken cancellationToken = default);
+    Task RegisterSession(string sessionId, Func<ChatMessage, CancellationToken, Task> messageHandler, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Unregisters the session.
@@ -25,9 +25,9 @@ public interface IAgentSessionRegistry
 
 public class AgentSessionRegistry : IAgentSessionRegistry
 {
-    private readonly ConcurrentDictionary<string, Func<IEnumerable<ChatMessage>, CancellationToken, Task>> _activeSessions = new();
+    private readonly ConcurrentDictionary<string, Func<ChatMessage, CancellationToken, Task>> _activeSessions = new();
 
-    public Task RegisterSession(string sessionId, Func<IEnumerable<ChatMessage>, CancellationToken, Task> messageHandler, CancellationToken cancellationToken = default)
+    public Task RegisterSession(string sessionId, Func<ChatMessage, CancellationToken, Task> messageHandler, CancellationToken cancellationToken = default)
     {
         _activeSessions[sessionId] = messageHandler;
         return Task.CompletedTask;
@@ -43,8 +43,8 @@ public class AgentSessionRegistry : IAgentSessionRegistry
     {
         if (_activeSessions.TryGetValue(sessionId, out var handler))
         {
-            await handler([message], cancellationToken);
+            await handler(message, cancellationToken);
         }
-        // If session not found, you might want to log it or store it as a "missed" notification
+        // TODO: If session not found, you might want to log it or store it as a "missed" notification
     }
 }

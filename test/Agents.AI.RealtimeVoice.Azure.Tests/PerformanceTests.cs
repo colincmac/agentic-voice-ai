@@ -1,5 +1,5 @@
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
 using Agents.AI.RealtimeVoice.Azure.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 using Microsoft.Extensions.AI;
@@ -98,7 +98,7 @@ public class PerformanceTests
     public void ConversationSessionMetrics_HighVolumeRecording_DoesNotThrow()
     {
         // Arrange
-        var metrics = new ConversationSessionMetrics();
+        var metrics = new SessionTelemetry();
         const int recordCount = 1000;
 
         // Act & Assert - Should handle high volume without exception
@@ -115,7 +115,7 @@ public class PerformanceTests
     public async Task ConversationSessionMetrics_ParallelRecording_IsThreadSafe()
     {
         // Arrange
-        var metrics = new ConversationSessionMetrics();
+        var metrics = new SessionTelemetry();
         const int threadCount = 10;
         const int operationsPerThread = 100;
 
@@ -144,7 +144,7 @@ public class PerformanceTests
         var transport = new MockChannelTransport("test-channel");
         var handlerCallCount = 0;
 
-        transport.OnAudioReceived(async (channelId, audio, ct) =>
+        transport.SetOnAudioReceivedCallback(async (channelId, audio, ct) =>
         {
             Interlocked.Increment(ref handlerCallCount);
             await Task.Delay(10); // Simulate slow handler
@@ -228,7 +228,7 @@ public class PerformanceTests
         var transport = new MockChannelTransport("test-channel");
         var disposeCount = 0;
 
-        transport.OnDisconnected(_ =>
+        transport.SetOnDisconnected(_ =>
         {
             Interlocked.Increment(ref disposeCount);
             return Task.CompletedTask;

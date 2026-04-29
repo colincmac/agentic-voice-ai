@@ -1,7 +1,7 @@
 # See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
 # This stage is used when running from VS in fast mode (Default for Debug configuration)
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
@@ -9,15 +9,22 @@ EXPOSE 8081
 
 
 # This stage is used to build the service project
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["src/Agents/Directory.Packages.props", "src/Agents/"]
 COPY ["Directory.Packages.props", "."]
+COPY ["src/AgentFramework/Directory.Packages.props", "src/AgentFramework/"]
 COPY ["Directory.Build.props", "."]
 COPY ["Directory.Build.targets", "."]
 COPY ["NuGet.config", "."]
 COPY ["src/Agents/Showcase.Agent.VoiceAgent/Showcase.Agent.VoiceAgent.csproj", "src/Agents/Showcase.Agent.VoiceAgent/"]
+COPY ["src/Shared/Showcase.ServiceDefaults/Showcase.ServiceDefaults.csproj", "src/Shared/Showcase.ServiceDefaults/"]
+COPY ["src/AgentFramework/Agents.AI.Extensions.LiveVoice/Agents.AI.Extensions.LiveVoice.csproj", "src/AgentFramework/Agents.AI.Extensions.LiveVoice/"]
+COPY ["src/AgentFramework/Agents.AI.Extensions/Agents.AI.Extensions.csproj", "src/AgentFramework/Agents.AI.Extensions/"]
+COPY ["src/AgentFramework/Agents.AI/Agents.AI.csproj", "src/AgentFramework/Agents.AI/"]
+COPY ["src/AgentFramework/Extensions.AI/Extensions.AI.csproj", "src/AgentFramework/Extensions.AI/"]
+COPY ["src/AgentFramework/Agents.AI.RealtimeVoice.Azure/Agents.AI.RealtimeVoice.Azure.csproj", "src/AgentFramework/Agents.AI.RealtimeVoice.Azure/"]
+COPY ["src/AgentFramework/Agents.AI.RealtimeVoice.Teams/Agents.AI.RealtimeVoice.Teams.csproj", "src/AgentFramework/Agents.AI.RealtimeVoice.Teams/"]
 RUN dotnet restore "./src/Agents/Showcase.Agent.VoiceAgent/Showcase.Agent.VoiceAgent.csproj"
 COPY . .
 WORKDIR "/src/src/Agents/Showcase.Agent.VoiceAgent"

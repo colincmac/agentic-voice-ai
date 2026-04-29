@@ -1,5 +1,9 @@
+using System.ComponentModel;
+using System.Text.Json;
+using Agents.AI.Extensions.LiveVoice.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Microsoft.Extensions.AI;
+using Microsoft.Shared.Diagnostics;
 
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
@@ -12,17 +16,21 @@ public sealed class RealtimeIvrWorkflowBuilder
     private readonly string _name;
     private readonly List<RealtimeIvrWorkflowStep> _steps = [];
     private RealtimePromptBuilder _promptBuilder;
+    private readonly JsonSerializerOptions _jsonSerializerOptions;
+    private readonly List<AITool> _commonTools = [];
 
-    private RealtimeIvrWorkflowBuilder(string name)
+    private RealtimeIvrWorkflowBuilder(string name, JsonSerializerOptions? jsonSerializerOptions = null)
     {
         _name = name;
         _promptBuilder = RealtimePrompt.CreateBuilder();
+        _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
     }
 
     /// <summary>
     /// Creates a new workflow builder with the specified name.
     /// </summary>
-    public static RealtimeIvrWorkflowBuilder Create(string name) => new(name);
+    public static RealtimeIvrWorkflowBuilder Create(string name, JsonSerializerOptions? jsonSerializerOptions = null) => new(name, jsonSerializerOptions);
+
 
     /// <summary>
     /// Configures the base prompt for all steps using a fluent builder.
@@ -39,6 +47,9 @@ public sealed class RealtimeIvrWorkflowBuilder
     /// </summary>
     public RealtimeIvrWorkflowBuilder WithBasePrompt(RealtimePrompt prompt)
     {
+        if(prompt.Role is null) Throw.ArgumentNullException(nameof(prompt.Role));
+        if(prompt.Personality is null) Throw.ArgumentNullException(nameof(prompt.Personality));
+
         _promptBuilder = RealtimePrompt.CreateBuilder();
         // Copy prompt properties - we'll rebuild from the provided prompt
         _promptBuilder
@@ -77,12 +88,19 @@ public sealed class RealtimeIvrWorkflowBuilder
         return this;
     }
 
+    public RealtimeIvrWorkflowBuilder WithCommonTools(params AITool[] tools)
+    {
+        _commonTools.AddRange(tools);
+        return this;
+    }
+
+
     /// <summary>
     /// Adds a workflow step using a fluent builder.
     /// </summary>
     public RealtimeIvrWorkflowBuilder AddStep(Action<RealtimeIvrStepBuilder> configure)
     {
-        var builder = new RealtimeIvrStepBuilder();
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions);
         configure(builder);
         _steps.Add(builder.Build());
 
@@ -106,7 +124,7 @@ public sealed class RealtimeIvrWorkflowBuilder
         string welcomeMessage,
         Action<RealtimeIvrStepBuilder>? configure = null)
     {
-        var builder = new RealtimeIvrStepBuilder()
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions)
             .WithId("1_greeting")
             .WithGoal("Set tone and invite the reason for calling")
             .WithDescription("Greet the caller warmly and identify the service")
@@ -136,7 +154,7 @@ public sealed class RealtimeIvrWorkflowBuilder
         Action<RealtimeIvrStepBuilder>? configure = null)
     {
         var stepId = $"{_steps.Count + 1}_closing";
-        var builder = new RealtimeIvrStepBuilder()
+        var builder = new RealtimeIvrStepBuilder(_jsonSerializerOptions)
             .WithId(stepId)
             .WithGoal("Confirm outcome and end cleanly")
             .WithDescription("Restate the result and any next steps, invite final questions")
@@ -165,12 +183,33 @@ public sealed class RealtimeIvrWorkflowBuilder
         {
             throw new InvalidOperationException("Workflow must have at least one step.");
         }
+        var steps = _commonTools is { Count: 0 } ? _steps : _steps.Select(step =>
+        {
+            var combinedTools = step.AvailableTools is null
+                ? _commonTools
+                : [.. step.AvailableTools, .. _commonTools];
+            return new RealtimeIvrWorkflowStep
+            {
+                Id = step.Id,
+                ConversationState = step.ConversationState,
+                AvailableTools = combinedTools.AsReadOnly(),
+                ToolRules = step.ToolRules,
+                Guards = step.Guards,
+                Validators = step.Validators,
+                RequiredStateKeys = step.RequiredStateKeys,
+                MaxRetries = step.MaxRetries,
+                MaxDuration = step.MaxDuration,
+                RequiredAuthLevel = step.RequiredAuthLevel,
+                OnCompleted = step.OnCompleted,
+                DtmfMenuOptions = step.DtmfMenuOptions,
+            };
+        }).ToList();
 
         return new RealtimeIvrWorkflowDefinition
         {
             Name = _name,
             BasePrompt = _promptBuilder.Build(),
-            Steps = _steps.AsReadOnly()
+            Steps = steps.AsReadOnly()
         };
     }
 }
@@ -178,7 +217,7 @@ public sealed class RealtimeIvrWorkflowBuilder
 /// <summary>
 /// Fluent builder for constructing individual Realtime IVR workflow steps.
 /// </summary>
-public sealed class RealtimeIvrStepBuilder
+public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializerOptions = null)
 {
     private string _id = string.Empty;
     private string _description = string.Empty;
@@ -196,6 +235,14 @@ public sealed class RealtimeIvrStepBuilder
     private TimeSpan? _maxDuration;
     private AuthenticationLevel _requiredAuthLevel = AuthenticationLevel.None;
     private Func<IvrWorkflowState, CancellationToken, Task>? _onCompleted;
+    private Dictionary<char, string>? _dtmfMenuOptions;
+
+    private readonly JsonSerializerOptions _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
+
+    private static readonly JsonElement handoffSchema = AIFunctionFactory.Create(
+        ([Description("The reason for the handoff")] string? reasonForHandoff) => { }).JsonSchema;
+
+    private static string SanitizeHandoffStepName(string name) => name.Replace(" ", "_").ToLowerInvariant();
 
     /// <summary>
     /// Sets the step identifier.
@@ -497,6 +544,38 @@ public sealed class RealtimeIvrStepBuilder
     }
 
     /// <summary>
+    /// Configures DTMF menu options for this step, used in Tier 4 (pure DTMF) mode.
+    /// </summary>
+    public RealtimeIvrStepBuilder WithDtmfMenu(Dictionary<char, string> options)
+    {
+        _dtmfMenuOptions = new Dictionary<char, string>(options);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Configures DTMF menu options for this step using a fluent builder.
+    /// </summary>
+    public RealtimeIvrStepBuilder WithDtmfMenu(Action<DtmfMenuBuilder> configure)
+    {
+        var builder = new DtmfMenuBuilder();
+        configure(builder);
+        _dtmfMenuOptions = builder.Build();
+
+        return this;
+    }
+    private AITool CreateTransitionTool(StateTransition transition)
+    {
+        var functionName = $"transition_to_{transition.NextStep}";
+        var description = $"Transition to the '{transition.NextStep}' step when: {transition.Condition}";
+        return AIFunctionFactory.CreateDeclaration(
+                functionName,
+                $"Transfer conversation to {transition.NextStep}. {transition.Condition}",
+                handoffSchema
+            );
+    }
+
+    /// <summary>
     /// Builds the workflow step.
     /// </summary>
     public RealtimeIvrWorkflowStep Build()
@@ -539,7 +618,49 @@ public sealed class RealtimeIvrStepBuilder
             MaxRetries = _maxRetries,
             MaxDuration = _maxDuration,
             RequiredAuthLevel = _requiredAuthLevel,
-            OnCompleted = _onCompleted
+            OnCompleted = _onCompleted,
+            DtmfMenuOptions = _dtmfMenuOptions?.AsReadOnly(),
         };
     }
+}
+public record AIToolConfiguration(AITool tool, ToolConfiguration? toolConfiguration = null);
+
+/// <summary>
+/// Fluent builder for constructing DTMF menu options for a workflow step.
+/// </summary>
+public sealed class DtmfMenuBuilder
+{
+    private readonly Dictionary<char, string> _options = new();
+
+    /// <summary>
+    /// Maps a DTMF digit to a menu option label.
+    /// </summary>
+    public DtmfMenuBuilder Option(char digit, string label)
+    {
+        _options[digit] = label;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a "Speak to agent" option mapped to the '0' key.
+    /// </summary>
+    public DtmfMenuBuilder WithSpeakToAgent()
+    {
+        _options['0'] = "Speak to a live agent";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a "Return to main menu" option mapped to the '*' key.
+    /// </summary>
+    public DtmfMenuBuilder WithReturnToMainMenu()
+    {
+        _options['*'] = "Return to main menu";
+
+        return this;
+    }
+
+    internal Dictionary<char, string> Build() => new(_options);
 }

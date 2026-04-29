@@ -177,7 +177,13 @@ public static partial class GenAI
     /// The temperature setting for the GenAI request.
     /// </summary>
     public const string AttributeGenAiRequestTemperature = "gen_ai.request.temperature";
-
+    /// <summary>
+    /// The tool choice mode for the request.
+    /// This is a custom attribute NOT part of the OpenTelemetry GenAI semantic conventions (as of v1.39).
+    /// Values: "none", "auto", "required", or a specific tool name when a tool is forced.
+    /// Custom attribute: "gen_ai.request.tool_choice".
+    /// </summary>
+    public const string AttributeGenAiRequestToolChoice = "gen_ai.request.tool_choice";
     /// <summary>
     /// The top_k sampling setting for the GenAI request.
     /// </summary>
@@ -312,6 +318,13 @@ public static partial class GenAI
         /// Execute a tool.
         /// </summary>
         public const string ExecuteTool = "execute_tool";
+
+        /// <summary>
+        /// Operation name for realtime sessions.
+        /// This is a custom extension not part of the OpenTelemetry GenAI semantic conventions.
+        /// The spec allows using custom values for <c>gen_ai.operation.name</c> when standard values don't apply.
+        /// </summary>
+        public const string RealtimeName = "realtime";
     }
 
     /// <summary>
@@ -441,5 +454,10 @@ public static partial class GenAI
         /// Output tokens (completion, response, etc.).
         /// </summary>
         public const string Output = "output";
+
+        public const string InputAudio = "input_audio";
+        public const string InputText = "input_text";
+        public const string OutputAudio = "output_audio";
+        public const string OutputText = "output_text";
     }
 }

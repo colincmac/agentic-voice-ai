@@ -105,7 +105,8 @@ public static class AspireAzureVoiceLiveExtensions
                     }
                     else
                     {
-                        return new VoiceLiveClient(settings.Endpoint, settings.Credential ?? new DefaultAzureCredential(), options);
+    
+                        return new VoiceLiveClient(settings.Endpoint, settings.Credential ?? new AzureCliCredential(), options);
                     }
                 }
             });

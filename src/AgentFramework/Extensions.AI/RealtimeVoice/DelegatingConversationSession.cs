@@ -30,6 +30,7 @@ namespace Extensions.AI.RealtimeVoice
 
         public virtual IList<AITool> SessionTools => InnerSession.SessionTools;
 
+        public LiveConversationSessionOptions? CurrentSessionConfiguration => InnerSession.CurrentSessionConfiguration;
 
         /// <inheritdoc />
         public virtual event EventHandler<RealtimeSessionStateChangedEventArgs>? StateChanged

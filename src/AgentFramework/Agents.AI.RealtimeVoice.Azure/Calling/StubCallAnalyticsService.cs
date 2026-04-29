@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 

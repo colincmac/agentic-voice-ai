@@ -2,30 +2,72 @@
 
 using Aspire.Hosting.Azure;
 using Azure.Provisioning;
+using Azure.Provisioning.AppContainers;
 using Azure.Provisioning.Authorization;
 using Azure.Provisioning.CosmosDB;
 using Showcase.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var resourceGroupParam = builder.AddParameter(ParameterNameConstants.ResourceGroupName);
 
+var defaultResourceGroupParam = builder.AddParameter(ParameterNameConstants.ResourceGroupName);
+
+var sharedMi = builder.AddAzureUserAssignedIdentity(ParameterNameConstants.ManagedIdentityName);
 var appInsightsNameParam = builder.AddParameter(ParameterNameConstants.ApplicationInsights);
+var lawParam = builder.AddParameter(ParameterNameConstants.LogAnalyticsWorkspace);
+var lawRgParam = builder.AddParameter(ParameterNameConstants.LogAnalyticsWorkspaceRg);
+
+var containerAppParam = builder.AddParameter(ParameterNameConstants.ContainerAppEnvironment);
+var containerRegistryParam = builder.AddParameter(ParameterNameConstants.ContainerRegistry);
+var keyVaultParam = builder.AddParameter(ParameterNameConstants.KeyVault);
+var appConfigParam = builder.AddParameter(ParameterNameConstants.AppConfig);
+
+var redisParam = builder.AddParameter(ParameterNameConstants.AzureCache);
 var cosmosAccountParam = builder.AddParameter(ParameterNameConstants.CosmosAccount);
 
-var foundryResourceParam = builder.AddParameter(ParameterNameConstants.FoundryResourceName);
 
-var openAIChatModelParam = builder.AddParameter(ParameterNameConstants.OpenAIChatModel);
-var openAIChatModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIChatModelVersion);
 
-var openAIRealtimeModelParam = builder.AddParameter(ParameterNameConstants.OpenAIRealtimeModel);
-var openAIRealtimeModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIRealtimeModelVersion);
+//var openAIResourceGroupParam = builder.AddParameter(ParameterNameConstants.OpenAIResourceGroupName);
+//var openAIChatModelParam = builder.AddParameter(ParameterNameConstants.OpenAIChatModel);
+//var openAIChatModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIChatModelVersion);
 
-var openAIParam = builder.AddParameter(ParameterNameConstants.OpenAIName);
-var openAIResourceGroupParam = builder.AddParameter(ParameterNameConstants.OpenAIResourceGroupName);
+//var openAIRealtimeModelParam = builder.AddParameter(ParameterNameConstants.OpenAIRealtimeModel);
+//var openAIRealtimeModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIRealtimeModelVersion);
 
-var embeddingModelParam = builder.AddParameter(ParameterNameConstants.OpenAIEmbeddingModel);
-var embeddingModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIEmbeddingModelVersion);
+//var openAIParam = builder.AddParameter(ParameterNameConstants.OpenAIName);
+
+//var embeddingModelParam = builder.AddParameter(ParameterNameConstants.OpenAIEmbeddingModel);
+//var embeddingModelVersionParam = builder.AddParameter(ParameterNameConstants.OpenAIEmbeddingModelVersion);
+
+
+/**
+ * Monitoring & Telemetry
+ */
+var appinsights = builder.AddAzureApplicationInsights("appinsights")
+    .AsExisting(appInsightsNameParam, defaultResourceGroupParam);
+
+//var law = builder.AddAzureLogAnalyticsWorkspace("law")
+//    .AsExisting(lawParam, lawRgParam);
+
+/**
+ * Compute Environments
+ */
+
+var registry = builder.AddAzureContainerRegistry("acr")
+    .AsExisting(containerRegistryParam, defaultResourceGroupParam);
+
+
+var acaEnvironment = builder.AddAzureContainerAppEnvironment("aca-env")
+    .AsExisting(containerAppParam, defaultResourceGroupParam)
+    .WithDashboard()
+    .ConfigureInfrastructure(config =>
+    {
+        var resources = config.GetProvisionableResources();
+        var containerEnvironment = resources.OfType<ContainerAppManagedEnvironment>().FirstOrDefault();
+        //containerEnvironment?.AppLogsConfiguration = new ContainerAppLogsConfiguration();
+
+
+    });
 
 /**
  * OpenAI Deployments
@@ -39,49 +81,75 @@ var voicelive = builder.AddConnectionString("voicelive");//openai.AddDeployment(
  * Database and Storage Resources
  */
 
-#pragma warning disable ASPIRECOSMOSDB001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var cosmos = builder.AddAzureCosmosDB("cosmosdb")
-    .AsExisting(cosmosAccountParam, resourceGroupParam)
+    .AsExisting(cosmosAccountParam, defaultResourceGroupParam)
+    .PublishAsConnectionString()
     .RunAsPreviewEmulator(emulator =>
     {
         emulator.WithDataVolume();
         emulator.WithDataExplorer();
-
     });
-#pragma warning restore ASPIRECOSMOSDB001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
-var familyAiDb = cosmos.AddCosmosDatabase("FamilyHistory");
-var voiceAgentDb = cosmos.AddCosmosDatabase("ContactCenter");
+var voiceAgentDb = cosmos.AddCosmosDatabase("ContactCenter", "ContactCenter");
 
-/**
- * Monitoring & Telemetry
- */
-builder.AddMonitoring(appInsightsName: appInsightsNameParam);
+var temp2 = builder.AddParameter("redistemprg");
+var temp1 = builder.AddParameter("redistemp");
+var redis = builder.AddAzureManagedRedis("redis")
+    .AsExisting(temp1, temp2).PublishAsConnectionString();
 
+//var appConfig =
+//    builder.AddAzureAppConfiguration("appconfig")
+//    .AsExisting(appConfigParam, defaultResourceGroupParam).ExcludeFromManifest();
+
+var keyVault = builder.AddAzureKeyVault("secrets")
+    .AsExisting(keyVaultParam, defaultResourceGroupParam);
+
+
+//builder.AddMonitoring(appInsightsName: appInsightsNameParam);
 
 #region Projects
 
-var biometricsApi = builder.AddPythonApp(
-    name: "python-biometrics-grpc-api",
-    appDirectory: "../../python-services/voice-biometrics",
-    scriptPath: "server.py")
-    .WithHttpEndpoint(targetPort: 50051, name: "grpc")
-    .WithHttpEndpoint(targetPort: 8090, name: "http")
-    .WithEnvironment("HTTP_HEALTH_PORT", "8090")
-    .WithUv();
+//var biometricsApi = builder.AddPythonApp(
+//    name: "python-biometrics-grpc-api",
+//    appDirectory: "../../python-services/voice-biometrics",
+//    scriptPath: "server.py")
+//    .WithHttpEndpoint(targetPort: 51001, name: "grpc")
+//    .WithHttpEndpoint(targetPort: 51002, name: "http")
+//    .WithEnvironment("HTTP_HEALTH_PORT", "51002")
+//    .WithEnvironment("GRPC_PORT", "51002")
+//    .WithReference(cosmos)
+//    .WithReference(voiceAgentDb)
+//    .WithReference(appinsights)
+//    .WithReference(keyVault)
+//    .WithReference(appConfig)
+//    .WithComputeEnvironment(acaEnvironment)
+//    .WithUv();
 
 var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceagent")
+    // API References
+    //.WithReference(biometricsApi)
+
+    // AI References 
     .WithReference(chat)
     .WithReference(embedding)
     .WithReference(realtime)
     .WithReference(voicelive)
+    // Azure Resources
     .WithReference(voiceAgentDb, "cosmos")
-    .WithReference(biometricsApi)
-    .WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
-    .WaitFor(biometricsApi);
+    .WithReference(appinsights)
+    .WithReference(keyVault)
+    //.WithReference(appConfig)
+    .WithReference(redis)
+    //.WithAzureUserAssignedIdentity(sharedMi)
+    //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
+    .WithExternalHttpEndpoints();
 
+//.WaitFor(biometricsApi);
+
+builder.AddProject<Projects.Showcase_Agent_IntentAgent>("showcase-agent-intentagent");
 
 #endregion
+
 
 builder.Build().Run();
 

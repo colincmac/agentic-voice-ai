@@ -51,22 +51,22 @@ public static class LiveConversationBuilderExtensions
         return wrapper;
     });
 
-    public static LiveConversationClientBuilder UseFunctionInvocation(
-        this LiveConversationClientBuilder builder,
-        ILoggerFactory? loggerFactory = null,
-        Action<FunctionInvokingConversationClient>? configure = null)
-    {
-        _ = Throw.IfNull(builder);
+    //public static LiveConversationClientBuilder UseFunctionInvocation(
+    //    this LiveConversationClientBuilder builder,
+    //    ILoggerFactory? loggerFactory = null,
+    //    Action<FunctionInvokingConversationClient>? configure = null)
+    //{
+    //    _ = Throw.IfNull(builder);
 
-        return builder.Use((innerClient, services) =>
-        {
-            loggerFactory ??= services.GetService<ILoggerFactory>();
+    //    return builder.Use((innerClient, services) =>
+    //    {
+    //        loggerFactory ??= services.GetService<ILoggerFactory>();
 
-            var chatClient = new FunctionInvokingConversationClient(innerClient, loggerFactory, services);
-            configure?.Invoke(chatClient);
-            return chatClient;
-        });
-    }
+    //        var chatClient = new FunctionInvokingConversationClient(innerClient, loggerFactory, services);
+    //        configure?.Invoke(chatClient);
+    //        return chatClient;
+    //    });
+    //}
 
     public static LiveConversationClientBuilder ConfigureOptions(
         this LiveConversationClientBuilder builder,

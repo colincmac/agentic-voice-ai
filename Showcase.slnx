@@ -9,18 +9,24 @@
   </Folder>
 
   <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
     <File Path="Directory.Build.targets" />
     <File Path="Directory.Packages.props" />
     <File Path="global.json" />
     <File Path=".editorconfig" />
     <File Path="NuGet.config" />
     <File Path="playground.ipynb" />
+    <File Path="README.md" />
 
   </Folder>
   <Folder Name="/Solution Items/Agents/">
     <File Path="src/AgentFramework/Directory.Packages.props" />
   </Folder>
   <Folder Name="/Solution Items/Playground/" />
+  <Folder Name="/Solution Items/protos/">
+    <File Path="src/AgentFramework/Agents.AI.RealtimeVoice.Azure/Protos/agents.realtimevoice.v1.proto" />
+    <File Path="src/AgentFramework/Agents.AI.RealtimeVoice.Azure/Protos/biometrics.v1.proto" />
+  </Folder>
   <Folder Name="/Solution Items/test/">
     <File Path="test/Directory.Build.targets" />
     <File Path="test/Directory.Packages.props" />
@@ -48,6 +54,7 @@
     <Project Path="M365Agent/M365Agent.atkproj" Type="a9e3f50b-275e-4af7-adce-8be12d41e305">
       <Deploy />
     </Project>
+    <Project Path="src/Agents/Showcase.Agent.IntentAgent/Showcase.Agent.IntentAgent.csproj" />
     <Project Path="src/Agents/Showcase.Agent.VoiceAgent/Showcase.Agent.VoiceAgent.csproj" />
   </Folder>
 

@@ -30,6 +30,11 @@ public static partial class GenAI
     public static partial class OperationNameValues
     {
         public const string OrchestrateToolsName = "orchestrate_tools"; // Non-standard
+        public const string ChatName = "chat";
+        public const string EmbeddingsName = "embeddings";
+        public const string ExecuteToolName = "execute_tool";
+        public const string InvokeAgentName = "invoke_agent";
+        public const string GenerateContentName = "generate_content";
     }
     public static class Tool
     {
@@ -51,6 +56,11 @@ public static partial class GenAI
     {
         public const string InputTokens = "gen_ai.usage.input_tokens";
         public const string OutputTokens = "gen_ai.usage.output_tokens";
+        public const string CacheReadInputTokens = "gen_ai.usage.cache_read.input_tokens";
+        public const string InputAudioTokens = "gen_ai.usage.input_audio_tokens";
+        public const string InputTextTokens = "gen_ai.usage.input_text_tokens";
+        public const string OutputAudioTokens = "gen_ai.usage.output_audio_tokens";
+        public const string OutputTextTokens = "gen_ai.usage.output_text_tokens";
     }
 
     public static class Embeddings

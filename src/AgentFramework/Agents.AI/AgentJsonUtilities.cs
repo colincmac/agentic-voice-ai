@@ -1,7 +1,7 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Agents.AI.RealtimeVoice;
 using Extensions.AI;
 using Microsoft.Extensions.AI;
 using static Extensions.AI.ExtensionsAIJsonUtilities;
@@ -22,7 +22,7 @@ internal sealed class ConversationFunctionToolParametersSchema
     NumberHandling = JsonNumberHandling.AllowReadingFromString,
     WriteIndented = true)]
 [JsonSerializable(typeof(ConversationFunctionToolParametersSchema))]
-[JsonSerializable(typeof(TranscriptTrackingAgentThread.ConversationSessionThreadState))]
+//[JsonSerializable(typeof(TranscriptTrackingAgentThread.ConversationSessionThreadState))]
 internal sealed partial class AgentsJsonContext : JsonSerializerContext
 {
     public static JsonSerializerOptions DefaultOptions { get; } = CreateDefaultOptions();
@@ -32,7 +32,7 @@ internal sealed partial class AgentsJsonContext : JsonSerializerContext
 
         JsonSerializerOptions options = new()
         {
-            TypeInfoResolver = JsonTypeInfoResolver.Combine(AgentsJsonContext.DefaultOptions.TypeInfoResolver, ExtensionsAIJsonUtilities.DefaultOptions.TypeInfoResolver),
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(ExtensionsAIJsonUtilities.DefaultOptions.TypeInfoResolver),
 
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };

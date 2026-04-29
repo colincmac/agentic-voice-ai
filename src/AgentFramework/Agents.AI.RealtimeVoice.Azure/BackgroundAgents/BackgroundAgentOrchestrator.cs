@@ -26,12 +26,12 @@ public sealed class BackgroundAgentOrchestrator : IAsyncDisposable
     /// </summary>
     public async Task<string> RegisterAgentAsync(
         AIAgent agent,
-        AgentThread? thread = null,
+        AgentSession? thread = null,
         BackgroundAgentRole role = BackgroundAgentRole.Assistant,
         CancellationToken cancellationToken = default)
     {
         var agentId = Guid.NewGuid().ToString("N");
-        var context = new BackgroundAgentContext(agent, thread ?? agent.GetNewThread(), role);
+        var context = new BackgroundAgentContext(agent, thread ?? await agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false), role);
 
         if (_activeAgents.TryAdd(agentId, context))
         {
@@ -48,7 +48,7 @@ public sealed class BackgroundAgentOrchestrator : IAsyncDisposable
     /// <summary>
     /// Sends a message to a specific background agent and gets a response
     /// </summary>
-    public async Task<AgentRunResponse> SendToAgentAsync(
+    public async Task<AgentResponse> SendToAgentAsync(
         string agentId,
         IEnumerable<ChatMessage> messages,
         AgentRunOptions? options = null,
@@ -134,7 +134,7 @@ public sealed class BackgroundAgentOrchestrator : IAsyncDisposable
 
 public sealed class BackgroundAgentContext
 {
-    public BackgroundAgentContext(AIAgent agent, AgentThread thread, BackgroundAgentRole role)
+    public BackgroundAgentContext(AIAgent agent, AgentSession thread, BackgroundAgentRole role)
     {
         Agent = agent;
         Thread = thread;
@@ -143,12 +143,12 @@ public sealed class BackgroundAgentContext
     }
 
     public AIAgent Agent { get; }
-    public AgentThread Thread { get; }
+    public AgentSession Thread { get; }
     public BackgroundAgentRole Role { get; }
     public DateTimeOffset RegisteredAt { get; }
 }
 
-public record BackgroundAgentResponse(string AgentId, AgentRunResponse? Response, Exception? Error);
+public record BackgroundAgentResponse(string AgentId, AgentResponse? Response, Exception? Error);
 
 public enum BackgroundAgentRole
 {

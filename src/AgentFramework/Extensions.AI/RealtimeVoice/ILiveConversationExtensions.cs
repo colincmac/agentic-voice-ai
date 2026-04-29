@@ -16,7 +16,7 @@ public static class ILiveConversationExtensions
         => new(innerClient);
 
     public static async IAsyncEnumerable<T> GetUpdatesAsync<T>(this ILiveConversationSession session, LiveConversationResponseOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    where T : RealtimeUpdate
+    where T : RealtimeServerUpdate
     {
         await foreach (ChatResponseUpdate serverEvent in session.GetStreamingResponseAsync(options, cancellationToken).ConfigureAwait(false))
         {
@@ -28,7 +28,7 @@ public static class ILiveConversationExtensions
     }
 
     public static async Task<T> WaitForUpdateAsync<T>(this ILiveConversationSession session, LiveConversationResponseOptions? options = null, CancellationToken cancellationToken = default)
-    where T : RealtimeUpdate
+    where T : RealtimeServerUpdate
     {
         await foreach (T serverEvent in session.GetUpdatesAsync<T>(options, cancellationToken).ConfigureAwait(false))
         {

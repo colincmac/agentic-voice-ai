@@ -5,6 +5,7 @@
 using System.Buffers;
 using Agents.AI.Hosting;
 using Agents.AI.Playground.ConsoleApp;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice;
 using Azure;
 using Azure.AI.VoiceLive;
@@ -110,7 +111,7 @@ async Task StartAsync(CancellationToken ct)
     using var microphoneInput = MicrophoneAudioStream.Start();
 
     loggerFactory.CreateLogger("Playground").LogInformation("Starting voice live conversation...");
-    var thread = await agent.GetNewThreadAsync(ct);
+    var thread = await agent.CreateRealtimeSessionAsync(null, ct);
     IEnumerable<ChatMessage> messages = [];
     RealtimeAgentRunOptions runOptions = new RealtimeAgentRunOptions()
     {
@@ -122,7 +123,7 @@ async Task StartAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            await foreach (var update in agent.RunStreamingAsync(messages: messages, thread: thread, options: runOptions, cancellationToken: cts.Token))
+            await foreach (var update in agent.RunStreamingAsync(messages: messages, session: thread, options: runOptions, cancellationToken: cts.Token))
             {
                 if (update.Contents.Any(c => c is RealtimeVadContent vc && vc.VadEvent == VadEventType.InputSpeechStarted))
                 {
@@ -148,7 +149,7 @@ async Task StartAsync(CancellationToken ct)
                 await Task.Delay(10, ct).ConfigureAwait(false);
                 continue;
             }
-            await agent.SendAudioToRunAsync(new DataContent(buffer.AsMemory(0, bytesRead), "audio/pcm"), thread, cancellationToken: ct);
+            await agent.SendAudioAsync(thread, new DataContent(buffer.AsMemory(0, bytesRead), "audio/pcm"), cancellationToken: ct);
 
         }
 

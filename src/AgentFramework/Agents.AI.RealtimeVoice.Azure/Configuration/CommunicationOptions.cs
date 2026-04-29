@@ -1,3 +1,5 @@
+using Azure.Communication.CallAutomation;
+
 namespace Agents.AI.RealtimeVoice.Azure.Configuration;
 
 public class CommunicationOptions
@@ -16,14 +18,20 @@ public class AcsOptions
     public required string ConnectionString { get; set; }
     public required Uri CallBackUri { get; set; }
     public required Uri MediaStreamingUri { get; set; }
+    public AudioFormat audioFormat { get; set; } = AudioFormat.Pcm24KMono;
     public Uri AcsResourceEndpoint => new(ConnectionString.Split(';').First(s => s.StartsWith("endpoint=", StringComparison.OrdinalIgnoreCase)).Split('=')[1]);
     public string AcsApiVersion { get; set; } = "2025-06-30";
+    public Guid GlobalID { get; set; }
 };
 
 public class TeamsOptions
 {
     public required string ResourceTenantId { get; set; }
     public required string ResourceObjectId { get; set; }
+    public required string PhoneNumber { get; set; }
+    public string Identity { get; set; } = string.Empty;
+    public string BotSecret { get; set; } = string.Empty;
+
     //public required string ClientSecret { get; set; }
     //public required string BotId { get; set; }
     //public required string BotDisplayName { get; set; }

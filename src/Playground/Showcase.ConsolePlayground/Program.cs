@@ -13,7 +13,7 @@ using Azure.Monitor.OpenTelemetry.Exporter;
 using Extensions.AI.Contents;
 using Extensions.AI.RealtimeVoice;
 using Extensions.AI.RealtimeVoice.Configuration;
-using Extensions.AI.RealtimeVoice.OpenAI;
+using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -27,6 +27,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Showcase.ConsolePlayground;
+using Agents.AI.Realtime;
 
 Console.WriteLine("Hello, World!");
 
@@ -183,7 +184,7 @@ async Task StartBufferedAsync(CancellationToken cancellationToken)
     var client = new AzureOpenAIClient(endpoint: new Uri(aiConfig.Endpoint), new System.ClientModel.ApiKeyCredential(aiConfig.Key));
     var speakerOutputSink = new SpeakerOutputSink();
     var realtimeClient = client.GetRealtimeClient();
-    var voiceClient = new OpenAIRealtimeConversationClient(realtimeClient, aiConfig.RealtimeDeploymentName, loggerFactory: loggerFactory)
+    var voiceClient = new OpenAIRealtimeClient(realtimeClient, aiConfig.RealtimeDeploymentName)
         .AsBuilder()
         .UseOpenTelemetry(loggerFactory, SourceName)
         .UseFunctionInvocation(loggerFactory).Build(serviceProvider);
@@ -192,25 +193,12 @@ async Task StartBufferedAsync(CancellationToken cancellationToken)
     {
         Name = "VoiceAssistantAgent",
         Description = "A helpful voice assistant.",
-        Instructions = "You are a helpful voice assistant.",
 
-        ChatMessageStoreFactory = (_) => new Microsoft.Agents.AI.InMemoryChatMessageStore(),
-        SessionOptions = new LiveConversationSessionOptions()
+        SessionOptions = new RealtimeSessionOptions()
         {
             Tools = [AIFunctionFactory.Create(GetWeatherAsync)],
             ToolMode = ChatToolMode.Auto,
             Voice = "shimmer",
-            InputTranscription = new RealtimeTranscriptionOptions()
-            {
-                Language = "en-US",
-                Model = "whisper-1",
-            },
-            TurnDetection = new RealtimeTurnDetection()
-            {
-                EnableAutomaticResponse = false,
-                Type = RealtimeTurnDetectionType.ServerVad,
-            },
-            Modalities = null,
         }
 
     }, loggerFactory);
@@ -219,7 +207,7 @@ async Task StartBufferedAsync(CancellationToken cancellationToken)
     //.Build(serviceProvider);
 
     //var agentInputService = agent.GetService<RealtimeAIAgent>() ?? throw new InvalidOperationException("");
-    var agentThread = await agent.GetNewThreadAsync(cancellationToken);
+    var agentThread = await agent.CreateRealtimeSessionAsync(null, cancellationToken);
 
     var defaultLogger = loggerFactory.CreateLogger<Program>();
     var testParticipantLogger = loggerFactory.CreateLogger<TestCallParticipant>();

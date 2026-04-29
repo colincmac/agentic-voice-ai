@@ -1,27 +1,21 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text.Json;
-using Agents.AI.Extensions;
-using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.RealtimeVoice.Azure.Calling;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
-using Agents.AI.RealtimeVoice.Azure.Calling.Transports;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
-using Microsoft.Agents.AI;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 public static class CallingApi
 {
-    public const string CALLBACK_PATH = "/automation/callbacks";
     public const string HANDLE_INCOMING_PATH = "/automation/incoming";
+
+    public const string CALLBACK_PATH = "/automation/callbacks";
     public const string MEDIA_STREAMING_PATH_WSS = "/automation/media/wss";
 
     public static void MapCallAutomation(this IEndpointRouteBuilder endpoints, [StringSyntax("Route")] string path = "calling")
@@ -70,15 +64,18 @@ public static class CallingApi
                         EnableDtmfTones = true,
                         TransportUri = websocketUri,
                         StartMediaStreaming = true,
-                        AudioFormat = AudioFormat.Pcm24KMono
+                        AudioFormat = services.Options.Value.Acs.audioFormat
                     };
-
                     var options = new AnswerCallOptions(acsIncomingCallEventData.IncomingCallContext, callbackUri)
                     {
                         MediaStreamingOptions = mediaStreamingOptions,
                     };
 
                     AnswerCallResult answerCallResult = await services.CallAutomationClient.AnswerCallAsync(options, cancellationToken);
+
+                    //var callConnection = answerCallResult.CallConnection;
+                    //await callConnection.TransferCallToParticipantAsync(new TransferToParticipantOptions(new Azure.Communication.PhoneNumberIdentifier("+1234567890")), cancellationToken);
+
                     services.Logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
                     return Results.Ok();
                 }
@@ -95,6 +92,7 @@ public static class CallingApi
             foreach (var cloudEvent in cloudEvents)
             {
                 var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
+                services.Logger.LogDebug(JsonSerializer.Serialize(callAutomationEvent));
             }
 
             return Results.Ok();
@@ -118,9 +116,8 @@ public static class CallingApi
 
             WebSocket? webSocket = null;
             ContactCenterConversationSession? session = null;
-            HubSessionParticipantContext? acsChannel = null;
+            HubSessionParticipant? acsChannel = null;
             string? callerPhoneNumber = null;
-
             try
             {
                 // Accept the WebSocket connection
@@ -158,7 +155,7 @@ public static class CallingApi
     private static async Task KeepWebSocketAliveAsync(
         WebSocket webSocket,
         ContactCenterConversationSession session,
-        HubSessionParticipantContext acsChannel,
+        HubSessionParticipant acsChannel,
         ILogger logger,
         CancellationToken cancellationToken)
     {

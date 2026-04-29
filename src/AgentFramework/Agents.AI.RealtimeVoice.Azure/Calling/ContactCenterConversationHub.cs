@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
-using Agents.AI.RealtimeVoice.Azure.Calling.Models;
+using Agents.AI.RealtimeVoice.Azure.Models;
+using Agents.AI.RealtimeVoice.Azure.Monitoring;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using static Agents.AI.RealtimeVoice.Azure.Calling.ConversationSessionActivitySource;
+using static Agents.AI.RealtimeVoice.Azure.Monitoring.ConversationSessionActivitySource;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling;
 
@@ -19,20 +19,12 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling;
 /// </summary>
 public sealed class ContactCenterConversationHub : IHostedService
 {
-    private const string MeterName = "Agents.AI.RealtimeVoice.Azure.Calling";
-    private const string ActivitySourceName = "Agents.AI.RealtimeVoice.Azure.Calling";
 
     private readonly ConcurrentDictionary<string, ContactCenterConversationSession> _activeSessions = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<ContactCenterConversationHub> _logger;
     private readonly Timer _cleanupTimer;
-    // Telemetry
-    private readonly ActivitySource _activitySource;
-    private readonly Meter _meter;
-    private readonly Counter<int> _sessionCreatedCounter;
-    private readonly Counter<int> _sessionClosedCounter;
-    private readonly UpDownCounter<int> _activeSessionsGauge;
-    private readonly Histogram<double> _sessionDurationHistogram;
+    private readonly SessionTelemetry _telemetry;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IContactCenterConversationSessionActivator _sessionActivator;
     private readonly ILiveCallRegistry? _liveCallRegistry;
@@ -41,51 +33,32 @@ public sealed class ContactCenterConversationHub : IHostedService
     public ContactCenterConversationHub(
         IServiceScopeFactory scopeFactory,
         IContactCenterConversationSessionActivator sessionActivator,
+        SessionTelemetry telemetry,
         ILiveCallRegistry? liveCallRegistry = null,
         ILoggerFactory? loggerFactory = null)
     {
         _scopeFactory = scopeFactory;
         _sessionActivator = sessionActivator;
+        _telemetry = telemetry;
         _liveCallRegistry = liveCallRegistry;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<ContactCenterConversationHub>();
-
-        // Initialize telemetry
-        _activitySource = new ActivitySource(ActivitySourceName);
-        _meter = new Meter(MeterName);
-
-        _sessionCreatedCounter = _meter.CreateCounter<int>(
-            HubSessionsCreatedAttributeKey,
-            description: "Number of conversation sessions created");
-
-        _sessionClosedCounter = _meter.CreateCounter<int>(
-            HubSessionsClosedAttributeKey,
-            description: "Number of conversation sessions closed");
-
-        _activeSessionsGauge = _meter.CreateUpDownCounter<int>(
-            HubSessionsActiveAttributeKey,
-            description: "Number of currently active conversation sessions");
-
-        _sessionDurationHistogram = _meter.CreateHistogram<double>(
-            SessionDurationAttributeKey,
-            unit: "s",
-            description: "Duration of conversation sessions in seconds");
 
         // Cleanup timer for abandoned sessions
         _cleanupTimer = new Timer(CleanupAbandonedSessions, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
     }
 
-    
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        using var activity = StartActivity(HubOperations.StartHub);
+        using var activity = _telemetry.StartHubActivity(HubOperations.StartHub);
         _logger.LogInformation("ConversationHub started");
         return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        using var activity = StartActivity(HubOperations.StopHub);
+        using var activity = _telemetry.StartHubActivity(HubOperations.StopHub);
         _logger.LogInformation("ConversationHub stopping with {ActiveSessionCount} active sessions...", _activeSessions.Count);
 
         // Gracefully close all sessions
@@ -100,13 +73,10 @@ public sealed class ContactCenterConversationHub : IHostedService
     /// Each session has its own scope that lives for the session's lifetime.
     /// </summary>
     /// <param name="sessionId">Unique identifier for the session</param>
-    /// <param name="options">Optional session configuration</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The created or existing session</returns>
-    public ContactCenterConversationSession GetOrCreateSession(
-        string sessionId)
+    public ContactCenterConversationSession GetOrCreateSession(string sessionId)
     {
-        using var activity = StartActivity("ConversationHub.GetOrCreateSession");
+        using var activity = _telemetry.StartHubActivity(HubOperations.CreateSession);
         activity?.SetTag(SessionIdAttributeKey, sessionId);
 
         if (_activeSessions.TryGetValue(sessionId, out var existingSession))
@@ -127,8 +97,7 @@ public sealed class ContactCenterConversationHub : IHostedService
         RegisterSessionWithLiveCallRegistry(session);
 
         // Update metrics
-        _sessionCreatedCounter.Add(1, new KeyValuePair<string, object?>(SessionIdAttributeKey, sessionId));
-        _activeSessionsGauge.Add(1);
+        _telemetry.RecordSessionCreated(sessionId);
 
         activity?.SetTag(HubSessionIsNewAttributeKey, true);
         activity?.SetTag(HubSessionTotalActiveAttributeKey, _activeSessions.Count);
@@ -155,7 +124,7 @@ public sealed class ContactCenterConversationHub : IHostedService
     /// </summary>
     public async Task<bool> RemoveSessionAsync(string sessionId)
     {
-        using var activity = StartActivity(HubOperations.RemoveSession);
+        using var activity = _telemetry.StartHubActivity(HubOperations.RemoveSession);
         activity?.SetTag(SessionIdAttributeKey, sessionId);
 
         if (_activeSessions.TryRemove(sessionId, out var session))
@@ -168,9 +137,7 @@ public sealed class ContactCenterConversationHub : IHostedService
             _liveCallRegistry?.EndSession(sessionId, DateTimeOffset.UtcNow);
 
             // Update metrics
-            _sessionClosedCounter.Add(1, new KeyValuePair<string, object?>(SessionIdAttributeKey, sessionId));
-            _activeSessionsGauge.Add(-1);
-            _sessionDurationHistogram.Record(sessionDuration, new KeyValuePair<string, object?>(SessionIdAttributeKey, sessionId));
+            _telemetry.RecordSessionClosed(sessionId, sessionDuration);
 
             activity?.SetTag(HubSessionDurationAttributeKey, sessionDuration);
             activity?.SetTag(HubSessionTotalActiveAttributeKey, _activeSessions.Count);
@@ -196,7 +163,7 @@ public sealed class ContactCenterConversationHub : IHostedService
 
     private void CleanupAbandonedSessions(object? state)
     {
-        using var activity = StartActivity(HubOperations.CleanupAbandonedSessions);
+        using var activity = _telemetry.StartHubActivity(HubOperations.CleanupAbandonedSessions);
 
         var cutoffTime = DateTimeOffset.UtcNow.AddMinutes(-30);
         var abandonedSessions = _activeSessions
@@ -207,30 +174,18 @@ public sealed class ContactCenterConversationHub : IHostedService
         activity?.SetTag(HubSessionAbandonedAttributeKey, abandonedSessions.Count);
         activity?.SetTag(HubSessionCutoffTimeAttributeKey, cutoffTime);
 
-        foreach (var sessionId in abandonedSessions)
+        foreach (var sid in abandonedSessions)
         {
-            _ = RemoveSessionAsync(sessionId);
+            _ = RemoveSessionAsync(sid);
         }
 
-        if (abandonedSessions.Any())
+        if (abandonedSessions.Count > 0)
         {
             _logger.LogInformation(
                 "Cleaned up {Count} abandoned sessions (inactive since {CutoffTime:o})",
                 abandonedSessions.Count,
                 cutoffTime);
         }
-    }
-
-    private Activity? StartActivity(string shortOperationName)
-    {
-        if (!_activitySource.HasListeners())
-        {
-            return null;
-        }
-        string activityName = $"{HubActivityAttributeKey} {shortOperationName}";
-        var activity = _activitySource.StartActivity(activityName, ActivityKind.Server);
-
-        return activity;
     }
 
     private void RegisterSessionWithLiveCallRegistry(ContactCenterConversationSession session)
