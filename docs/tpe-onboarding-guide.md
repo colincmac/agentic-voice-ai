@@ -4,29 +4,51 @@ This guide walks through the end-to-end process of connecting Azure Communicatio
 
 ## Scripts
 
-Provisioning is split into two scripts separated by **tenant boundary** and **permission scope**:
+Provisioning is split into two scripts separated by **tenant boundary** and **permission scope**. Every phase is **idempotent** — re-running against an environment that already has the Entra App, Resource Account, phone number, Bot Service, ACS resource, or Event Grid subscription will reuse them.
 
 | Script | Tenant | Required Roles | Phases |
 |--------|--------|----------------|--------|
-| [`setup_tpe_teams.ps1`](../eng/scripts/setup_tpe_teams.ps1) | Teams (M365) | Global Admin **or** Application Admin + SfB Admin + User Admin | 1. Entra App → 2. Resource Account → 3. License + Phone |
-| [`setup_tpe_azure.ps1`](../eng/scripts/setup_tpe_azure.ps1) | Azure | Contributor on resource group | 1. Bot Service → 2. ACS TPE Authorization |
+| [`setup_tpe_teams.ps1`](../eng/scripts/setup_tpe_teams.ps1) | Teams (M365) | Global Admin **or** (Cloud Application Administrator + Teams Communications Administrator + User Administrator) | 1. Entra App + Service Principal + secret + admin consent → 2. Resource Account → 3. License + Phone |
+| [`setup_tpe_azure.ps1`](../eng/scripts/setup_tpe_azure.ps1) | Azure | Contributor on the ACS resource (and on the resource group for Bot creation) | 1. Bot Service → 2. ACS TPE Authorization → 3. Event Grid IncomingCall subscription |
+| [`cleanup_tpe.ps1`](../eng/scripts/cleanup_tpe.ps1) | Both | Same as above | Reverses the steps above (with confirmation) |
 
-The Teams script runs **first** and outputs a JSON file (`tpe-teams-output.json`) containing the Entra App Client ID and Resource Account Object ID. The Azure script consumes that file.
+The Teams script runs **first** and writes `tpe-teams-output.json` (Entra App Client ID, RA Object ID, etc.). The Azure script consumes it.
 
 For environments where the **same admin** manages both tenants, use the orchestrator [`setup_tpe.ps1`](../eng/scripts/setup_tpe.ps1) which calls both in sequence.
+
+### Brownfield / pre-existing resources
+
+The most common enterprise scenario is that the **ACS resource already exists** and the **Teams Resource Account with phone number already exists**. The scripts handle this:
+
+| Pre-existing | Behaviour |
+|--------------|-----------|
+| ACS resource | Auto-discovered via `az resource show` from `acsName` + `resourceGroupName`. Not created. |
+| Entra App | Looked up by `existingEntraAppClientId` (preferred) or by display name. Existing app's `RequiredResourceAccess` is patched only if `TeamsExtension.ManageCalls` is missing. |
+| Service Principal | Created only if missing for the app. |
+| Resource Account | Detected via `Get-CsOnlineApplicationInstance`. Re-bound to the configured ACS resource only when `AcsResourceId`/`ApplicationId` differs. |
+| Phone number | Detected via `Get-CsPhoneNumberAssignment`. Skipped if already assigned to the same RA; throws if assigned elsewhere. |
+| License | `Get-MgUserLicenseDetail` is consulted; assignment is skipped when the SKU is already present. |
+| Bot Service | `az bot show` short-circuits create. |
+| ACS TPE assignment | Pre-flight `GET` distinguishes 404 (create) from 401/403 (RBAC failure). PUT acts as upsert. |
+| Event Grid subscription | `az eventgrid event-subscription show` short-circuits or upgrades to `update` if endpoint differs. |
 
 ### Dependency Graph
 
 ```
 setup_tpe_teams.ps1 (Teams Admin)              setup_tpe_azure.ps1 (Azure Admin)
 ─────────────────────────────────               ─────────────────────────────────
-Phase 1: Entra App Registration ──────┬──────► Phase 1: Azure Bot Service
-    │                                 │              (needs Entra App Client ID)
+Phase 1: Entra App + SP + secret  ────┬──────► Phase 1: Azure Bot Service
+         + admin consent              │              (needs Entra App Client ID)
+    │                                 │
     ▼                                 │
 Phase 2: Teams Resource Account ──────┤
     │                                 │
-    ▼                                 └──────► Phase 2: ACS TPE Authorization
-Phase 3: License + Phone Number                      (needs RA Object ID)
+    ▼                                 ├──────► Phase 2: ACS TPE Authorization
+Phase 3: License + Phone Number       │              (needs RA Object ID)
+                                      │
+                                      └──────► Phase 3: Event Grid IncomingCall
+                                                     subscription on ACS
+                                                     (filtered to RA Object ID)
 ```
 
 ### Quick Start
@@ -50,7 +72,7 @@ TPE requires resources across **two separate tenants**:
 | Tenant | Purpose | Required Roles |
 |--------|---------|----------------|
 | **Azure Tenant** | Hosts Azure subscription with ACS resource, Bot Service, and application infrastructure | Contributor on the resource group |
-| **Teams Tenant** | Hosts Microsoft 365 / Teams Phone with resource accounts, phone numbers, and licensing | Global Admin **or** Skype for Business Administrator + User Administrator |
+| **Teams Tenant** | Hosts Microsoft 365 / Teams Phone with resource accounts, phone numbers, and licensing | Global Admin **or** (Cloud Application Administrator + Teams Communications Administrator + User Administrator) |
 
 > **Important:** The ACS resource data location must match the Teams tenant location to comply with data boundary regulations. Verify via [Get organization](https://learn.microsoft.com/en-us/graph/api/organization-get).
 
@@ -304,59 +326,86 @@ az rest `
 
 ## Verification Checklist
 
-After completing all phases, verify the setup:
+After completing all phases, verify the setup. Items 1–7 must all pass before testing.
 
-| # | Check | Command |
-|---|-------|---------|
-| 1 | Resource account exists and is linked to ACS | `Get-CsOnlineApplicationInstance -Identity $teamsResourceAccountUpn` |
-| 2 | Phone number is assigned | `Get-CsPhoneNumberAssignment -TelephoneNumber $teamsPhoneNumber` |
-| 3 | ACS TPE assignment exists | `az rest --method GET --url "https://{acsName}.communication.azure.com/access/teamsExtension/tenants/{teamsTenantId}/assignments/{raObjectId}?api-version=2025-06-30" --resource "https://communication.azure.com"` |
-| 4 | Bot Service is configured | `az bot show --name $azureBotServiceName --resource-group $azureResourceGroupName` |
+| # | Check | Command / Where |
+|---|-------|-----------------|
+| 1 | Resource Account exists and is linked to ACS | `Get-CsOnlineApplicationInstance -Identity $teamsResourceAccountUpn` — confirm `AcsResourceId` and `ApplicationId` match the configured values. |
+| 2 | Phone number is assigned to the RA | `Get-CsPhoneNumberAssignment -TelephoneNumber $teamsPhoneNumber` — confirm `AssignedPstnTargetId` is the RA. |
+| 3 | RA has the Teams Phone Resource Account license | `Get-MgUserLicenseDetail -UserId $teamsResourceAccountUpn` |
+| 4 | Entra App has admin consent for `TeamsExtension.ManageCalls` | Azure portal → Entra ID → App registrations → your app → API permissions → status column reads `Granted for <tenant>`. |
+| 5 | ACS TPE assignment exists | `az rest --method GET --url "https://{acsName}.communication.azure.com/access/teamsExtension/tenants/{teamsTenantId}/assignments/{raObjectId}?api-version=2025-06-30" --resource "https://communication.azure.com"` |
+| 6 | Bot Service exists with the correct AppId / TenantId | `az bot show --name $botServiceName --resource-group $rg --query '{appId:properties.msaAppId, tenantId:properties.msaAppTenantId}'` |
+| 7 | Event Grid subscription is `Enabled` and validation handshake completed | Azure portal → ACS resource → Events → confirm `tpe-incoming-call` subscription shows `Enabled` and the `Microsoft.Communication.IncomingCall` event type. The webhook target must have responded to the validation request. |
+| 8 | End-to-end test call | Place a PSTN call to the assigned phone number. Your callback handler should log an `IncomingCall` event whose `to.rawId` ends in the RA Object ID. |
+
+## Teardown
+
+The [`cleanup_tpe.ps1`](../eng/scripts/cleanup_tpe.ps1) script reverses the provisioning, in safe order, with `-Confirm` prompts. By default it preserves the Entra App and the Resource Account user object — opt in to delete them.
+
+```powershell
+# Tear down everything except the Entra App and the RA user object
+.\eng\scripts\cleanup_tpe.ps1 -ConfigFile .\eng\scripts\tpe-config.json
+
+# Tear down everything including the Entra App and RA user object
+.\eng\scripts\cleanup_tpe.ps1 -ConfigFile .\eng\scripts\tpe-config.json -RemoveResourceAccount -RemoveEntraApp
+```
+
+| Step | Removed by default | Notes |
+|------|--------------------|-------|
+| Event Grid subscription | yes | |
+| ACS TPE assignment | yes | |
+| Bot Service | yes | |
+| Phone number assignment | yes | Number remains in tenant inventory. |
+| RA license | yes | |
+| Resource Account | no | Use `-RemoveResourceAccount`. |
+| Entra App + Service Principal | no | Use `-RemoveEntraApp`. |
+| ACS resource | never | Manage outside this script. |
 
 ---
 
 ## Provisioning at Scale
 
-For enterprise customers managing many resource accounts, the Entra App and Bot Service are created **once**. The per-account steps (Teams Phases 2–3 + Azure Phase 2) are looped per resource account. This is naturally split across the two admin roles:
+For enterprise customers managing many resource accounts, the Entra App and Bot Service are created **once**. The per-account steps loop the existing scripts with a per-RA config override. Because both scripts are idempotent, re-runs are safe.
 
-**Teams Admin** — batch provision resource accounts:
+**Teams Admin** — drive the Teams script per RA:
+
 ```powershell
-$resourceAccounts = Import-Csv "resource-accounts.csv"
-# Expected columns: UPN, DisplayName, PhoneNumber, PhoneNumberType
+$rows = Import-Csv "resource-accounts.csv"   # columns: UPN, DisplayName, PhoneNumber, PhoneNumberType
+$baseConfig = Get-Content .\eng\scripts\tpe-config.json -Raw | ConvertFrom-Json
+$results = @()
 
-Connect-MicrosoftTeams -TenantId $teamsTenantId
-Connect-Graph -Scopes User.ReadWrite.All, Organization.Read.All
+foreach ($row in $rows) {
+    $perRa = $baseConfig.PSObject.Copy()
+    $perRa.teams.resourceAccountUpn         = $row.UPN
+    $perRa.teams.resourceAccountDisplayName = $row.DisplayName
+    $perRa.teams.phoneNumber                = $row.PhoneNumber
+    $perRa.teams.phoneNumberType            = $row.PhoneNumberType
 
-foreach ($ra in $resourceAccounts) {
-    # Teams Phase 2: Create & link resource account
-    $account = New-CsOnlineApplicationInstance `
-        -UserPrincipalName $ra.UPN `
-        -ApplicationId $entraAppClientId `
-        -DisplayName $ra.DisplayName
+    $tmp = New-TemporaryFile
+    $perRa | ConvertTo-Json -Depth 10 | Set-Content $tmp
 
-    Set-CsOnlineApplicationInstance -Identity $ra.UPN `
-        -ApplicationId $entraAppClientId `
-        -AcsResourceId $azureCommunicationServiceGlobalId
+    $output = Join-Path $env:TEMP "tpe-teams-output-$($row.UPN -replace '[^\w]','_').json"
+    .\eng\scripts\setup_tpe_teams.ps1 -ConfigFile $tmp -OutputFile $output `
+        -ExistingEntraAppClientId $baseConfig.teams.existingEntraAppClientId
 
-    Sync-CsOnlineApplicationInstance -ObjectId $account.ObjectId -ApplicationId $entraAppClientId
-
-    # Teams Phase 3: License & phone number (with retry for propagation)
-    # ... (wait for propagation, set usage location, assign license, assign phone)
+    $results += Get-Content $output -Raw | ConvertFrom-Json
 }
-# Export ObjectIds for the Azure admin
-$resourceAccounts | Select-Object UPN, ObjectId | Export-Csv "ra-objectids.csv"
+
+$results | Select-Object teamsResourceAccountUpn, teamsResourceAccountObjectId, phoneNumber |
+    Export-Csv "ra-objectids.csv" -NoTypeInformation
 ```
 
-**Azure Admin** — batch authorize ACS for each resource account:
+**Azure Admin** — loop the Azure script per RA Object ID:
+
 ```powershell
 $accounts = Import-Csv "ra-objectids.csv"
-
 foreach ($ra in $accounts) {
-    .\eng\scripts\azure_acs_tpe_auth.ps1 `
-        -AzureCommunicationServicesName $azureCommunicationServicesName `
-        -TeamsTenantId $teamsTenantId `
-        -TeamsResourceAccountObjectId $ra.ObjectId `
-        -PrincipalType "teamsResourceAccount"
+    .\eng\scripts\setup_tpe_azure.ps1 `
+        -ConfigFile .\eng\scripts\tpe-config.json `
+        -TeamsResourceAccountObjectId $ra.teamsResourceAccountObjectId `
+        -SkipBotCreation `   # Bot is shared across all RAs
+        -Phases Phase2,Phase3
 }
 ```
 
@@ -388,11 +437,21 @@ The following items are **not fully documented** in the official Microsoft Learn
 
 3. **Propagation delays** — After `New-CsOnlineApplicationInstance`, the resource account takes 15–60 seconds to appear in Entra ID. License assignment may also require retries. The public docs don't mention these delays.
 
-4. **License assignment automation** — The public docs reference the M365 Admin Center UI. For automation, use `Set-MgUserLicense` with the RA SKU ID `440eaaa8-b3e0-484b-a8be-62870b9ba70a`, preceded by `Update-MgUser -UsageLocation`.
+4. **License assignment automation** — The public docs reference the M365 Admin Center UI. For automation, use `Set-MgUserLicense` with the RA SKU ID `440eaaa8-b3e0-484b-a8be-62870b9ba70a`, preceded by `Update-MgUser -UsageLocation`. Calling Plan numbers additionally require a Calling Plan / Communications Credits SKU on the RA — supply via `teams.additionalLicenseSkuIds` in the config.
 
 5. **ACS endpoint region suffix** — The TPE assignment API endpoint varies by region (e.g., `unitedstates.communication.azure.com` vs `communication.azure.com`). The `azure_acs_tpe_auth.ps1` script uses the base `communication.azure.com` which routes correctly.
 
-6. **Sync is mandatory** — `Sync-CsOnlineApplicationInstance` must be called after linking the RA to ACS. Without this, call routing won't work even if the assignment API succeeds.
+6. **Sync is mandatory** — `Sync-CsOnlineApplicationInstance` must be called after linking the RA to ACS. Without this, call routing won't work even if the assignment API succeeds. The script always calls it after a successful bind, and it is safe to re-run after later license changes.
+
+7. **Admin consent is required** — Declaring `RequiredResourceAccess` only writes the manifest. Until an admin clicks _Grant admin consent_ (or the script calls `New-EntraOauth2PermissionGrant -ConsentType AllPrincipals`), the assignment API returns opaque auth errors. The Teams troubleshooting article calls this out as the #1 failure mode.
+
+8. **Service Principal must exist for the Entra App** — `New-EntraApplication` does not create the SP. Without an SP, you cannot grant admin consent. The script calls `New-EntraServicePrincipal` after registering the app.
+
+9. **Event Grid subscription is required, not optional** — Without a `Microsoft.Communication.IncomingCall` subscription on the ACS resource, calls reach ACS but never reach your callback. Phase 3 of the Azure script provisions this with an advanced filter on `data.to.rawId` so a single ACS resource can serve multiple Resource Accounts cleanly.
+
+10. **RBAC on the ACS resource** — The TPE assignment API calls require the caller to hold `Microsoft.Communication/communicationServices/teamsExtension/*` (granted by `Contributor`) on the ACS resource. The script issues a pre-flight `GET` and surfaces 401/403 with a remediation message instead of letting `az rest` print a stack trace.
+
+11. **Triple sign-in prompt** — `Connect-Entra`, `Connect-MicrosoftTeams`, and `Connect-Graph` all sign in independently. Expect three browser pop-ups in succession when running the Teams script for the first time.
 
 ---
 
