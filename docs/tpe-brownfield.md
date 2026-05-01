@@ -4,7 +4,15 @@ This is the **brownfield** path. Your ACS instance and your Teams resource accou
 
 For full background on the architecture, scripts, and gaps in the public docs, see [tpe-onboarding-guide.md](tpe-onboarding-guide.md).
 
-## Prerequisites — collect these IDs before you start
+## Prerequisites
+
+### Powershell and AZ CLI requirements
+
+```powershell
+
+```
+
+### Collect these IDs before you start
 
 | Variable | Where to find it |
 |----------|------------------|
