@@ -59,9 +59,9 @@ param(
     [Parameter(ParameterSetName = 'Params')] [string] $TeamsUsageLocation = 'US',
 
     [string] $ExistingEntraAppClientId,
-    [bool]   $CreateClientSecret = $true,
+    [bool]   $CreateClientSecret = $false,
     [int]    $ClientSecretLifetimeMonths = 12,
-    [bool]   $GrantAdminConsent = $true,
+    [bool]   $GrantAdminConsent = $false,
     [string] $KeyVaultName,
     [string] $ClientSecretName = 'tpe-entra-app-secret',
     [string[]] $AdditionalLicenseSkuIds = @(),

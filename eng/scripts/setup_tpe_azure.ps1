@@ -265,7 +265,7 @@ if (ShouldRunPhase 'Phase1') {
                 'bot','create',
                 '--resource-group', $AzureResourceGroupName,
                 '--name', $AzureBotServiceName,
-                '--app-type','MultiTenant',
+                '--app-type','SingleTenant',
                 '--appid', $EntraAppClientId,
                 '--tenant-id', $TeamsTenantId,
                 '--sku','S1',
