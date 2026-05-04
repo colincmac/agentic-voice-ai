@@ -73,9 +73,6 @@ if ($ConfigFile) {
         if ($config.azure.eventGrid.endpointUrl)                           { $EventGridEndpointUrl = $config.azure.eventGrid.endpointUrl }
         if ($null -ne $config.azure.eventGrid.filterToResourceAccountOnly) { $EventGridFilterToResourceAccount = [bool]$config.azure.eventGrid.filterToResourceAccountOnly }
     }
-    if ($config.azure.rbac -and $null -ne $config.azure.rbac.assignAcsContributorToCurrentUser) {
-        $AssignAcsContributorToCurrentUser = [bool]$config.azure.rbac.assignAcsContributorToCurrentUser
-    }
 }
 
 if ($TeamsOutputFile) {
@@ -198,22 +195,6 @@ if ($AcsCommunicationServicesName -and $AzureResourceGroupName) {
     }
     else {
         Write-Warning "Could not locate ACS resource '$AcsCommunicationServicesName' in RG '$AzureResourceGroupName'. Phase 3 will be skipped if not found."
-    }
-}
-
-# Optional: assign caller Contributor on the ACS resource.
-if ($AssignAcsContributorToCurrentUser -and $acsResourceId -and -not $WhatIf) {
-    $signedInId = (Invoke-Az -Args @('ad','signed-in-user','show','--query','id','-o','tsv','--only-show-errors') -AllowFailure).Output
-    if ($signedInId) {
-        $signedInId = ($signedInId -join '').Trim()
-        Write-Host "Assigning 'Contributor' to current user on ACS resource..." -ForegroundColor Cyan
-        Invoke-Az -Args @(
-            'role','assignment','create',
-            '--assignee', $signedInId,
-            '--role','Contributor',
-            '--scope', $acsResourceId,
-            '--only-show-errors'
-        ) -AllowFailure | Out-Null
     }
 }
 

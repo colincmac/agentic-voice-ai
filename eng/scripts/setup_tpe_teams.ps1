@@ -403,7 +403,8 @@ if (ShouldRunPhase 'Phase2') {
         Write-Host "Syncing application instance to Agent Provisioning Service..." -ForegroundColor Cyan
         Sync-CsOnlineApplicationInstance `
             -ObjectId $teamsResourceAccount.ObjectId `
-            -ApplicationId $entraAppClientId
+            -ApplicationId $entraAppClientId `
+            -AcsResourceId $AcsCommunicationServiceGlobalId
         Write-Host "Sync complete." -ForegroundColor Green
     }
 }
@@ -505,6 +506,21 @@ Acquire it via Teams Admin Center → Voice → Phone numbers, then re-run Phase
         }
         else {
             Write-Host "Assigning phone number $TeamsPhoneNumber ($PhoneNumberType)..." -ForegroundColor Cyan
+            $licenseAssigned = $false
+            for ($retry = 1; $retry -le 10 -and -not $licenseAssigned; $retry++) {
+                try {
+                    $licenseAssigned = $TeamsPhoneRASkuId -in (Get-MgUserLicenseDetail -UserId $raUpn | Select-Object -ExpandProperty SkuId)
+                }
+                catch {
+                    Write-Host "  Attempt $retry/10 — license not yet visible. Waiting 15s..." -ForegroundColor Yellow
+                    Start-Sleep 15
+                }
+            }
+            if (-not $licenseAssigned)
+            {
+                throw "The Teams Phone Resource Account license does not appear to be assigned to $raUpn after multiple retries. Please verify that the license has been applied in Microsoft 365 Admin Center and is visible via Get-MgUserLicenseDetail before re-running this script."
+            }
+
             Set-CsPhoneNumberAssignment `
                 -Identity $raUpn `
                 -PhoneNumber $TeamsPhoneNumber `
