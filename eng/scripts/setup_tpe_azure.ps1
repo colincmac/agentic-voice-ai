@@ -73,9 +73,6 @@ if ($ConfigFile) {
         if ($config.azure.eventGrid.endpointUrl)                           { $EventGridEndpointUrl = $config.azure.eventGrid.endpointUrl }
         if ($null -ne $config.azure.eventGrid.filterToResourceAccountOnly) { $EventGridFilterToResourceAccount = [bool]$config.azure.eventGrid.filterToResourceAccountOnly }
     }
-    if ($config.azure.rbac -and $null -ne $config.azure.rbac.assignAcsContributorToCurrentUser) {
-        $AssignAcsContributorToCurrentUser = [bool]$config.azure.rbac.assignAcsContributorToCurrentUser
-    }
 }
 
 if ($TeamsOutputFile) {
@@ -201,22 +198,6 @@ if ($AcsCommunicationServicesName -and $AzureResourceGroupName) {
     }
 }
 
-# Optional: assign caller Contributor on the ACS resource.
-if ($AssignAcsContributorToCurrentUser -and $acsResourceId -and -not $WhatIf) {
-    $signedInId = (Invoke-Az -Args @('ad','signed-in-user','show','--query','id','-o','tsv','--only-show-errors') -AllowFailure).Output
-    if ($signedInId) {
-        $signedInId = ($signedInId -join '').Trim()
-        Write-Host "Assigning 'Contributor' to current user on ACS resource..." -ForegroundColor Cyan
-        Invoke-Az -Args @(
-            'role','assignment','create',
-            '--assignee', $signedInId,
-            '--role','Contributor',
-            '--scope', $acsResourceId,
-            '--only-show-errors'
-        ) -AllowFailure | Out-Null
-    }
-}
-
 #region Phase 1 — Bot Service (idempotent)
 if (ShouldRunPhase 'Phase1') {
     Write-Phase "Phase 1/3" "Azure Bot Service"
@@ -280,6 +261,22 @@ if (ShouldRunPhase 'Phase1') {
             else {
                 Invoke-Az -Args $botArgs | Out-Null
                 Write-Host "Bot Service created." -ForegroundColor Green
+
+                $msTeamsChannelArgs = @(
+                    'bot','msteams', 'create',
+                    '--resource-group', $AzureResourceGroupName,
+                    '--name', $AzureBotServiceName,
+                    '--enable-calling','--calling-web-hook', $BotMessagingEndpoint,
+                    '--subscription', $AzureSubscriptionId,
+                    '--only-show-errors'
+                )
+                if ($WhatIf) {
+                    Write-Host "[WhatIf] az $($msTeamsChannelArgs -join ' ')" -ForegroundColor DarkGray
+                }
+                else {
+                    Invoke-Az -Args $msTeamsChannelArgs | Out-Null
+                    Write-Host "Bot Service Teams channel registration created." -ForegroundColor Green
+                }
             }
         }
     }

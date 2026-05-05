@@ -1,5 +1,5 @@
 {
-  "$schema": "Local sample for Teams Phone Extensibility (TPE) onboarding scripts.",
+  "environment": "<dev|uat|prod>",
   "azure": {
     "tenantId": "<YOUR_AZURE_TENANT_ID>",
     "subscriptionId": "<YOUR_AZURE_SUBSCRIPTION_ID>",
