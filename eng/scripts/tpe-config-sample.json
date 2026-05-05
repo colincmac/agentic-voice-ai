@@ -1,4 +1,5 @@
 {
+  "environment": "<dev|uat|prod>",
   "azure": {
     "tenantId": "<YOUR_AZURE_TENANT_ID>",
     "subscriptionId": "<YOUR_AZURE_SUBSCRIPTION_ID>",

@@ -246,7 +246,7 @@ if (ShouldRunPhase 'Phase1') {
                 'bot','create',
                 '--resource-group', $AzureResourceGroupName,
                 '--name', $AzureBotServiceName,
-                '--app-type','MultiTenant',
+                '--app-type','SingleTenant',
                 '--appid', $EntraAppClientId,
                 '--tenant-id', $TeamsTenantId,
                 '--sku','S1',
@@ -261,6 +261,22 @@ if (ShouldRunPhase 'Phase1') {
             else {
                 Invoke-Az -Args $botArgs | Out-Null
                 Write-Host "Bot Service created." -ForegroundColor Green
+
+                $msTeamsChannelArgs = @(
+                    'bot','msteams', 'create',
+                    '--resource-group', $AzureResourceGroupName,
+                    '--name', $AzureBotServiceName,
+                    '--enable-calling','--calling-web-hook', $BotMessagingEndpoint,
+                    '--subscription', $AzureSubscriptionId,
+                    '--only-show-errors'
+                )
+                if ($WhatIf) {
+                    Write-Host "[WhatIf] az $($msTeamsChannelArgs -join ' ')" -ForegroundColor DarkGray
+                }
+                else {
+                    Invoke-Az -Args $msTeamsChannelArgs | Out-Null
+                    Write-Host "Bot Service Teams channel registration created." -ForegroundColor Green
+                }
             }
         }
     }
