@@ -133,7 +133,7 @@ public class InternalMessagingTests
         var transport = new MockChannelTransport("test-channel");
         var receivedMessages = new List<MessageUpdate>();
 
-        transport.SetOnMessageReceived((channelId, message, ct) =>
+        transport.SetOnMessageReceivedCallback((channelId, message, ct) =>
         {
             receivedMessages.Add(message);
             return Task.CompletedTask;

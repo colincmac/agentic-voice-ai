@@ -109,7 +109,7 @@ public class ParticipantRoutingTests
         string? receivedChannelId = null;
         MessageUpdate? receivedMessage = null;
 
-        transport.SetOnMessageReceived((channelId, message, ct) =>
+        transport.SetOnMessageReceivedCallback((channelId, message, ct) =>
         {
             receivedChannelId = channelId;
             receivedMessage = message;

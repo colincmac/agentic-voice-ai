@@ -1,0 +1,248 @@
+using System.Buffers;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading.Channels;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Azure.Communication.CallAutomation;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
+
+/// <summary>
+/// Real wire for an ACS-bridged PSTN caller. Owns the bidirectional audio
+/// WebSocket and surfaces inbound audio + DTMF as channels.
+/// Replaces the wire-half of <see cref="Transports.AcsWebsocketTransport"/>.
+/// </summary>
+public sealed class AcsCallerEdge : ICallEdge
+{
+    private readonly WebSocket _webSocket;
+    private readonly CallConnectionProperties _call;
+    private readonly ILogger<AcsCallerEdge> _logger;
+    private readonly CancellationTokenSource _cts;
+
+    private readonly Channel<AudioFrame> _inboundAudio = Channel.CreateBounded<AudioFrame>(
+        new BoundedChannelOptions(500)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+    private readonly Channel<DtmfTone> _inboundDtmf = Channel.CreateUnbounded<DtmfTone>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+    private readonly Channel<SessionSignal> _inboundSignals = Channel.CreateUnbounded<SessionSignal>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+    private readonly Channel<byte[]> _outbound = Channel.CreateBounded<byte[]>(
+        new BoundedChannelOptions(500)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+    private Task? _backgroundLoop;
+    private int _disconnectFired;
+
+    public AcsCallerEdge(
+        WebSocket webSocket,
+        CallConnectionProperties callConnection,
+        CancellationToken httpContextCancellation,
+        ILogger<AcsCallerEdge>? logger = null)
+    {
+        _webSocket = webSocket;
+        _call = callConnection;
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(httpContextCancellation);
+        _logger = logger ?? NullLogger<AcsCallerEdge>.Instance;
+
+        Metadata = new CallEdgeMetadata
+        {
+            DisplayName = _call.SourceDisplayName ?? _call.Source.RawId,
+            RawIdentifier = _call.Source.RawId,
+            CorrelationId = _call.CorrelationId,
+            ServerCallId = _call.ServerCallId
+        };
+    }
+
+    public string EdgeId => _call.CallConnectionId;
+
+    public CallEdgeKind Kind => CallEdgeKind.Caller;
+
+    public CallEdgeMetadata Metadata { get; }
+
+    public bool IsConnected => _backgroundLoop is { IsCompleted: false };
+
+    public ChannelReader<AudioFrame> InboundAudio => _inboundAudio.Reader;
+
+    public ChannelReader<DtmfTone> InboundDtmf => _inboundDtmf.Reader;
+
+    public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
+
+    public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
+
+    public Task ConnectAsync(CancellationToken cancellationToken = default)
+    {
+        if (_backgroundLoop is not null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        _backgroundLoop = Task.WhenAll(
+            ReceiveLoopAsync(linked.Token),
+            SendLoopAsync(linked.Token));
+        return Task.CompletedTask;
+    }
+
+    public ValueTask SendAudioAsync(AudioFrame frame, CancellationToken cancellationToken = default)
+        => _outbound.Writer.WriteAsync(frame.Pcm.ToArray(), cancellationToken);
+
+    public async ValueTask StopAudioAsync(CancellationToken cancellationToken = default)
+    {
+        if (_webSocket.State != WebSocketState.Open)
+        {
+            return;
+        }
+
+        var stop = OutStreamingData.GetStopAudioForOutbound();
+        await _webSocket.SendAsync(
+            new ArraySegment<byte>(Encoding.UTF8.GetBytes(stop)),
+            WebSocketMessageType.Text,
+            endOfMessage: true,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _cts.CancelAsync().ConfigureAwait(false);
+
+        if (_webSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+        {
+            try
+            {
+                await _webSocket.CloseAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    "Edge disposed",
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch { /* swallow on shutdown */ }
+        }
+
+        _webSocket.Dispose();
+        _cts.Dispose();
+
+        await RaiseDisconnectedAsync(EdgeDisconnectedReason.SessionEnded).ConfigureAwait(false);
+    }
+
+    private async Task SendLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var bytes in _outbound.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                if (_webSocket.State != WebSocketState.Open)
+                {
+                    break;
+                }
+
+                var outbound = OutStreamingData.GetAudioDataForOutbound(bytes);
+                await _webSocket.SendAsync(
+                    new ArraySegment<byte>(Encoding.UTF8.GetBytes(outbound)),
+                    WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (WebSocketException ex)
+        {
+            _logger.LogWarning(ex, "ACS edge {EdgeId} send loop terminated", EdgeId);
+        }
+    }
+
+    private async Task ReceiveLoopAsync(CancellationToken ct)
+    {
+        var bufferPool = ArrayPool<byte>.Shared;
+        var reason = EdgeDisconnectedReason.NetworkError;
+
+        try
+        {
+            while (!ct.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
+            {
+                var buffer = bufferPool.Rent(64 * 1024);
+                try
+                {
+                    var result = await _webSocket.ReceiveAsync(buffer, ct).ConfigureAwait(false);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        reason = EdgeDisconnectedReason.CallerHangup;
+                        break;
+                    }
+
+                    var payload = buffer.AsMemory(0, result.Count).ToArray();
+                    var parsed = TryParse(payload);
+                    switch (parsed)
+                    {
+                        case AudioData audio when !audio.IsSilent:
+                            await _inboundAudio.Writer.WriteAsync(
+                                new AudioFrame(audio.Data, audio.Timestamp, EdgeId),
+                                ct).ConfigureAwait(false);
+                            break;
+
+                        case DtmfData dtmf when !string.IsNullOrEmpty(dtmf.Data):
+                            var digit = dtmf.Data[0];
+                            await _inboundDtmf.Writer.WriteAsync(
+                                new DtmfTone(digit, DateTimeOffset.UtcNow),
+                                ct).ConfigureAwait(false);
+                            break;
+                    }
+                }
+                finally
+                {
+                    bufferPool.Return(buffer, clearArray: true);
+                }
+            }
+        }
+        catch (OperationCanceledException) { reason = EdgeDisconnectedReason.SessionEnded; }
+        catch (WebSocketException ex)
+        {
+            _logger.LogWarning(ex, "ACS edge {EdgeId} receive loop terminated", EdgeId);
+            reason = EdgeDisconnectedReason.NetworkError;
+        }
+        finally
+        {
+            _inboundAudio.Writer.TryComplete();
+            _inboundDtmf.Writer.TryComplete();
+            _inboundSignals.Writer.TryComplete();
+            await RaiseDisconnectedAsync(reason).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask RaiseDisconnectedAsync(EdgeDisconnectedReason reason)
+    {
+        if (Interlocked.Exchange(ref _disconnectFired, 1) != 0)
+        {
+            return;
+        }
+
+        var handlers = Disconnected;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList().Cast<Func<EdgeDisconnectedReason, ValueTask>>())
+        {
+            try { await handler(reason).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Edge disconnected handler threw"); }
+        }
+    }
+
+    private static StreamingData? TryParse(byte[] payload)
+    {
+        var text = Encoding.UTF8.GetString(payload).TrimEnd('\0');
+        return string.IsNullOrWhiteSpace(text) ? null : StreamingData.Parse(text);
+    }
+}
