@@ -152,4 +152,4 @@ The same VoIP-vs-SIP transport rule applies on `AddParticipant` — same-tenant 
 - [ADR-0005](../adr/0005-escalation-blind-vs-consultative-transfer.md) — the policy decision (blind by default).
 - [`call-flow.md`](call-flow.md) — where in the overall flow the transfer fits.
 - [`sequence-diagrams.md`](sequence-diagrams.md) — wire-level picture of the blind-transfer happy path.
-- Microsoft Learn: [Pass contextual data between calls](https://learn.microsoft.com/azure/communication-services/concepts/voice-video-calling/custom-calling-context) — authoritative limits on VoIP/SIP custom headers and UUI.
+- Microsoft Learn: [Pass contextual data between calls](https://learn.microsoft.com/en-us/azure/communication-services/how-tos/call-automation/custom-context) — authoritative limits on VoIP/SIP custom headers and UUI.
