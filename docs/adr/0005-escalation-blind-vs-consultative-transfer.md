@@ -7,7 +7,7 @@
 
 When the AI agent decides to escalate a call (IVR couldn't resolve the intent, the caller asked for a human, fraud signal triggered, etc.) it hands the call off to a downstream destination — typically a Dynamics 365 Contact Center workstream queue (which is itself ACS-based), but possibly a Teams agent or a partner queue exposed as a SIP URI.
 
-ACS Call Automation exposes two fundamentally different transfer models, both documented end-to-end with sequence diagrams in [`call-flow.md` §5b and Appendix C](../architecture/call-flow.md):
+ACS Call Automation exposes two fundamentally different transfer models, both documented end-to-end with sequence diagrams in [`architecture/transfer-patterns.md`](../architecture/transfer-patterns.md):
 
 1. **Blind transfer** — `CallConnection.TransferCallToParticipant(target, customCallingContext)`. ACS issues the equivalent of a SIP REFER under the hood; on `CallTransferAccepted` the agent app **drops out of the call** and is no longer in the media or control path. Failure is signalled by `CallTransferFailed`.
 2. **Consultative (attended) transfer** — `AddParticipant(agent)` to bring the destination into the existing call, optionally `HoldParticipant(caller)` for a private brief, then `RemoveParticipant(self)` once the agent is ready. The IVR (or a supervisor bot) **stays in the call** during the briefing window and only leaves explicitly. Three-party media is required during the consultation phase.
@@ -40,7 +40,7 @@ The trade-off table is captured in the appendix:
 - Failure handling is **non-optional and observable**. `CallTransferFailed` rates are a key SRE signal — a spike usually means a downstream queue is misconfigured, closed, or rejecting the custom headers.
 - Consultative flows require:
   - Carrying additional state in Redis ([ADR-0004](0004-call-state-in-redis-by-callconnectionid.md)) for the consultation phase (`participants`, `consultationActive`, `pendingAgent`).
-  - Hold-music handling (`PlayToAll(holdMusic, loop=true)` against the caller while the brief happens) — see [`call-flow.md` Appendix C](../architecture/call-flow.md).
+  - Hold-music handling (`PlayToAll(holdMusic, loop=true)` against the caller while the brief happens) — see [`architecture/transfer-patterns.md`](../architecture/transfer-patterns.md).
   - Explicit handling of the agent-abandons-mid-consult failure mode (re-unhold caller, re-prompt, loop or fall back to blind).
 - Blind transfer drops the agent from the media path the moment `CallTransferAccepted` fires. Any post-transfer telemetry the app needs (call duration on the destination side, agent disposition) must come from the destination system, not from ACS.
 - Both models share the same `customCallingContext` propagation, so promoting a flow from blind to consultative does not change what context the destination ultimately sees.

@@ -11,7 +11,7 @@ Once a call has landed inside Azure Communication Services (see [ADR-0001](0001-
 2. **An in-app SIP stack / SBC integration** — terminate SIP and RTP inside the app (or beside it on an SBC), implement INVITE/REFER/BYE, run a media engine (PJSIP, FreeSWITCH, Asterisk, or a managed equivalent), and bridge to AI components yourself.
 3. **Teams Calling APIs (Graph)** — drive the call through the Microsoft Graph cloud-communications endpoints. Workable when the agent identity is a Teams app, but the surface is narrower for IVR-style `Play`/`Recognize` and is not the supported path once TPE has delegated the call to ACS.
 
-The reference architecture, sequence diagrams, timeouts, and idempotency contract in [`call-flow.md`](../architecture/call-flow.md) all assume the app speaks **HTTPS + CloudEvents** to ACS — never SIP.
+The reference architecture, sequence diagrams, timeouts, and idempotency contract in [`call-flow.md`](../architecture/call-flow.md) (with detailed wire diagrams in [`sequence-diagrams.md`](../architecture/sequence-diagrams.md) and timing tables in [`runbooks/timing-and-retries.md`](../runbooks/timing-and-retries.md)) all assume the app speaks **HTTPS + CloudEvents** to ACS — never SIP.
 
 ## Decision
 
