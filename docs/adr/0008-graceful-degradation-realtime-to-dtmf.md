@@ -79,7 +79,7 @@ A circuit breaker / health signal evaluates these continuously and updates the *
 - [ADR-0005](0005-escalation-blind-vs-consultative-transfer.md)'s blind-transfer escalation works in every tier; only Tier 4 forces an immediate transfer instead of an opt-in one.
 - A regional realtime AI outage no longer takes the platform down — it caps the tier ceiling and the call experience changes shape but still resolves intents.
 - Cost characteristics shift with tier. Reporting needs cost-per-call broken down by tier so a sustained drop to Tier 2/3 surfaces as both a quality signal and a cost signal.
-- The synthetic call probers from [`call-flow.md` "Production hardening checklist"](../architecture/call-flow.md) need at least one synthetic per tier so a regression in (say) Tier 3 is caught even when Tier 1 is healthy and serving most traffic.
+- The synthetic call probers from [`runbooks/timing-and-retries.md` "Production hardening checklist"](../runbooks/timing-and-retries.md) need at least one synthetic per tier so a regression in (say) Tier 3 is caught even when Tier 1 is healthy and serving most traffic.
 
 ## Alternatives considered
 

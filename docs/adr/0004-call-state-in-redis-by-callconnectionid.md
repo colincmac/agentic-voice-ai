@@ -5,12 +5,12 @@
 
 ## Context
 
-ACS Call Automation callbacks (mid-call CloudEvents) and Event Grid `IncomingCall` events are delivered to internet-reachable HTTPS endpoints with **at-least-once** semantics — retries with exponential backoff and a default 24-hour TTL ([`call-flow.md` Appendix D](../architecture/call-flow.md)). The agent app runs as multiple stateless replicas behind a load balancer (per [ADR-0002](0002-acs-call-automation-as-control-plane.md), the app is just an HTTP service); any pod can receive any callback for any active call.
+ACS Call Automation callbacks (mid-call CloudEvents) and Event Grid `IncomingCall` events are delivered to internet-reachable HTTPS endpoints with **at-least-once** semantics — retries with exponential backoff and a default 24-hour TTL ([`runbooks/timing-and-retries.md`](../runbooks/timing-and-retries.md)). The agent app runs as multiple stateless replicas behind a load balancer (per [ADR-0002](0002-acs-call-automation-as-control-plane.md), the app is just an HTTP service); any pod can receive any callback for any active call.
 
 For each in-flight call the app needs to remember:
 
 - The current menu/dialog node (so a `RecognizeCompleted` knows which transition to apply).
-- Per-node retry counts (for re-prompting policy — see [`call-flow.md` Appendix D §4](../architecture/call-flow.md)).
+- Per-node retry counts (for re-prompting policy — see [`runbooks/timing-and-retries.md`](../runbooks/timing-and-retries.md)).
 - Collected slot values (intent, account number, language, etc.) to pass downstream on `TransferCallToParticipant` as `customCallingContext`.
 - The active degradation **tier** (per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md)) so a mid-call fallback can switch dialog modes without dropping the caller.
 - Correlation identifiers (`correlationId`, `serverCallId`, `callConnectionId`) for telemetry.
