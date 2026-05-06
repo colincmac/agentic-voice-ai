@@ -127,7 +127,7 @@ State for the IVR tree typically lives in a distributed cache (Redis) keyed by `
 
 ## 5b. Escalation Path — Transfer to Dynamics CCaaS
 
-Dynamics 365 **Contact Center / Customer Service voice** is itself built on ACS, so the transfer target is reachable as an ACS/Teams identity or, more commonly, as a PSTN number / SIP URI exposed by the CCaaS workstream.
+Dynamics 365 **Contact Center / Customer Service voice** is itself built on ACS, so the transfer target is reachable as an ACS/Teams identity or, more commonly, as a PSTN number exposed by the CCaaS workstream.
 
 ```
 [IVR App] ──TransferCallToParticipant(target)──► [ACS Call Automation]
@@ -139,11 +139,45 @@ Dynamics 365 **Contact Center / Customer Service voice** is itself built on ACS,
 - The `target` `CommunicationIdentifier` is one of:
   - `PhoneNumberIdentifier` (E.164) — a DID owned by the Dynamics CCaaS workstream / queue
   - `MicrosoftTeamsUserIdentifier` — if escalating to a Teams agent
-  - SIP URI via `MicrosoftTeamsAppIdentifier` / Teams interop, depending on how the CCaaS tenant exposes the queue
-- You can attach **custom calling context** (SIP headers / X-MS-Custom-* user-to-user info) on the transfer so the CCaaS workstream receives the IVR-collected data (intent, account number, language, etc.) and can route to the right queue / pop the right agent script.
+  - `MicrosoftTeamsAppIdentifier` / `CommunicationUserIdentifier` for ACS-native or Teams-interop endpoints exposed by the CCaaS tenant
 - After ACS issues `CallTransferAccepted`, your app's call connection ends (you are no longer in the media path); the CCaaS workstream takes over and runs its own Call Automation / workflow against the same call.
 
-> Note: this is a **REFER-style blind transfer** — your IVR drops out of the call once ACS confirms the transfer. If you need to stay in the call (consultative transfer, supervised handoff), use `AddParticipant` instead and remove yourself later.
+### Transport choice: VoIP transfer vs SIP transfer
+
+Which kind of transfer this actually is on the wire — and therefore **which header bucket carries your IVR context** — depends on where the destination DID lives, **not** on whether the target identifier looks like a phone number.
+
+| Scenario | On-the-wire transfer | Header bucket to use | Limits |
+|---|---|---|---|
+| **Same tenant** — Dynamics CCaaS workstream DID, Teams Phone number, or ACS endpoint hosted in the same Microsoft 365 tenant as the IVR's RA | **VoIP transfer** over the Microsoft calling backbone (no SIP signaling leaves the Microsoft fabric) | **`CustomCallingContext.VoipHeaders`** (no required prefix) | Up to **1,000** headers; key ≤ 64 chars; value ≤ **1,024** chars |
+| **Cross-tenant** — Teams Phone number / CCaaS workstream that lives in a *different* tenant | **SIP transfer** (call must egress one tenant's calling plane and re-ingress on the other; Microsoft routes it as SIP between the tenants) | **`CustomCallingContext.SipHeaders`** + **`SipUuiHeader`** | Up to **5** custom headers with `X-*` or `X-MS-Custom-*` prefix; value ≤ 256 chars; one UUI header (≤ 256 chars) |
+| **Off-net via Direct Routing** — transfer to a PSTN number that egresses through your SBC | **SIP transfer** out the SBC | **SIP headers + UUI** (the SBC must be configured to forward `X-MS-Custom-*` / UUI) | Same SIP limits as above |
+
+For the canonical **same-tenant Dynamics CCaaS** path, this means:
+
+- **Populate `voipHeaders`**, not `sipHeaders` — VoIP headers are what actually propagate on this hop, and they give you ~4× the value length and effectively unbounded count vs. the SIP bucket.
+- **Don't bother setting the UUI header** for the same-tenant case; UUI only flows when the leg is SIP. Setting it does no harm, but the workstream won't see it on a VoIP transfer.
+- The CCaaS workstream reads the same context on the other side via the `IncomingCall` event's `customContext.voipHeaders` (vs. `customContext.sipHeaders` for the cross-tenant case). Configure your Dynamics workstream context variables to match the bucket you're actually using.
+
+```csharp
+var transferOptions = new TransferToParticipantOptions(target)
+{
+    OperationContext = "escalate-to-ccaas"
+};
+
+// Same-tenant CCaaS workstream → VoIP transfer → use VoIP headers.
+transferOptions.CustomCallingContext.AddVoip("intent",          intent);
+transferOptions.CustomCallingContext.AddVoip("collectedDigits", digits);
+transferOptions.CustomCallingContext.AddVoip("lang",            lang);
+transferOptions.CustomCallingContext.AddVoip("correlationId",   correlationId);
+
+// Cross-tenant / SBC target → SIP transfer → use SIP headers + UUI instead:
+// transferOptions.CustomCallingContext.AddSipUui(uuiPayload);
+// transferOptions.CustomCallingContext.AddSipX("X-MS-Custom-Intent", intent);
+
+await callConnection.TransferCallToParticipantAsync(transferOptions);
+```
+
+> Note: your IVR drops out of the call once ACS confirms the transfer (`CallTransferAccepted`) regardless of which transport is used. The transport (VoIP vs SIP) only changes which header bucket the CCaaS side will see in its `IncomingCall` event. If you need to stay in the call (consultative transfer, supervised handoff), use `AddParticipant` instead and remove yourself later — the same VoIP-vs-SIP rule applies to its `CustomCallingContext`.
 
 ---
 
@@ -182,7 +216,7 @@ MS PSTN Connectivity ──► Teams Phone System ──► Resource Account
 | **`operationContext`** | Set on every Play/Recognize so the callback tells you *which* menu node fired the event. |
 | **Callback URI auth** | Use a per-call signing secret in the path or HMAC validation; the URI is internet-reachable. |
 | **Cognitive Services link** | Required if you use `TextSource` (TTS) or want to swap to speech recognition later. |
-| **Custom calling context on transfer** | The cleanest way to pass IVR context (intent, collected digits, language) into Dynamics CCaaS so the agent gets a screen-pop with state. |
+| **Custom calling context on transfer** | The cleanest way to pass IVR context (intent, collected digits, language) into Dynamics CCaaS so the agent gets a screen-pop with state. Use `VoipHeaders` for same-tenant transfers (Microsoft backbone, no SIP signaling) and `SipHeaders` + UUI only for cross-tenant / SBC paths. The receiving side must read from the matching bucket on its `IncomingCall` event. |
 | **Failure modes** | Handle `RecognizeFailed` (no input → re-prompt, max retries → operator), `CallTransferFailed` (queue closed → fallback Play + HangUp or voicemail), and `CallDisconnected` mid-flow (caller hangup → cleanup). |
 | **Telemetry** | Correlate your app logs with ACS using `correlationId` / `serverCallId` from the IncomingCall payload — invaluable when diagnosing media or transfer issues with support. |
 | **Licensing/path** | The DID is consumed on the **Teams** side; the **media + automation** runs in ACS. Both bills apply. |
@@ -221,7 +255,7 @@ Think of TPE as making the ACS resource look, to Teams Phone System, like just a
 - **No SBC / SIP stack required in your app.** You only need: an HTTPS webhook for `IncomingCall`, an HTTPS webhook for mid-call CloudEvents, and the Call Automation SDK.
 - **`incomingCallContext` is short-lived and single-use-ish.** Answer promptly; don't queue it for minutes.
 - **Correlate with Teams via `correlationId` / `serverCallId`.** When opening a support case that spans Teams Phone and ACS, these are the IDs that let both sides find the same call.
-- **Caller ID semantics.** `from` will reflect the PSTN caller; `to` is the Teams-assigned DID. If you later transfer to Dynamics CCaaS, you can preserve/override calling context via custom headers on `TransferCallToParticipant`.
+- **Caller ID semantics.** `from` will reflect the PSTN caller; `to` is the Teams-assigned DID. If you later transfer to Dynamics CCaaS, you can preserve/override calling context via `CustomCallingContext` on `TransferCallToParticipant` — populate `VoipHeaders` for same-tenant targets (the common Dynamics CCaaS case) and `SipHeaders` + UUI only when the transfer actually traverses SIP (cross-tenant or off-net via SBC).
 - **DTMF reliability.** Because Teams↔ACS interop normalizes DTMF, you generally get clean RFC 2833 events surfaced as `RecognizeCompleted` regardless of how the carrier delivered them. You don't need to worry about in-band tones.
 - **Failover.** If your app doesn't answer/redirect/reject within ACS's window, the call fails on the ACS side; Teams does not "fall back" to an Auto Attendant unless you explicitly `RedirectCall` to one.
 
@@ -237,7 +271,7 @@ Think of TPE as making the ACS resource look, to Teams Phone System, like just a
 - Yellow band (3) — IncomingCall arrives via Event Grid; your app answers via Call Automation. From here on, your app's signaling is HTTPS + CloudEvents, never SIP.
 - Purple band (4) — the DTMF tree loop. Each menu node is a Play → Recognize cycle; operationContext carries the node ID through ACS so callbacks tell you exactly which menu fired the event. State lives in Redis keyed by callConnectionId, so any AKS pod can handle the next callback.
 - Red band (5a) — clean self-service termination via HangUp.
-- Teal band (5b) — blind transfer to Dynamics CCaaS via TransferCallToParticipant. Because Dynamics Contact Center is itself ACS-based, this is effectively an ACS-to-ACS transfer with custom calling context (UUI / X-MS headers) carrying the IVR-collected data for screen-pop. The IVR drops out once CallTransferAccepted fires; the failure branch is shown explicitly so you don't lose the caller if the workstream rejects.
+- Teal band (5b) — blind transfer to Dynamics CCaaS via TransferCallToParticipant. When the workstream's DID is in the **same tenant** as the IVR's RA (the common case), this is a **VoIP transfer** on the Microsoft calling backbone — no SIP signaling leaves the fabric and IVR-collected context rides as **VoIP headers** in `CustomCallingContext.VoipHeaders` (1,000 headers, value ≤ 1,024 chars). Only when the target lives in a **different tenant** or behind your SBC (Direct Routing) is it a true **SIP transfer**, in which case context must go via `SipHeaders` + the SIP **UUI** header (≤ 5 headers with `X-*` / `X-MS-Custom-*` prefix, value ≤ 256 chars). The IVR drops out once CallTransferAccepted fires regardless of transport; the failure branch is shown explicitly so you don't lose the caller if the workstream rejects.
 
 ```mermaid
 sequenceDiagram
@@ -336,9 +370,9 @@ sequenceDiagram
         ACS->>Caller: Audio
         ACS->>IVR: PlayCompleted
 
-        IVR->>ACS: TransferCallToParticipant(<br>target = PhoneNumber/SIP of CCaaS workstream,<br>customCallingContext = {intent, collectedDigits, lang, correlationId})
+        IVR->>ACS: TransferCallToParticipant(<br>target = PhoneNumber of CCaaS workstream,<br>customCallingContext.VoipHeaders = {intent, collectedDigits, lang, correlationId}<br>(use SipHeaders + UUI only for cross-tenant / SBC targets))
 
-        ACS->>CCaaS: Route call leg (ACS↔ACS internally,<br>passes custom headers / UUI)
+        ACS->>CCaaS: VoIP transfer over MS calling backbone (same tenant)<br>VoIP headers ride along — no SIP signaling on this hop<br>(cross-tenant target → SIP transfer with SIP headers + UUI instead)
         CCaaS-->>ACS: Accept
 
         alt Transfer accepted
@@ -465,7 +499,7 @@ sequenceDiagram
     %% ───────────── Add agent as participant ─────────────
     rect rgb(255, 250, 230)
     Note over IVR,Agent: 2. Dial agent into the same call
-    IVR->>ACS: AddParticipant(<br/>  callConnectionId = C1,<br/>  participant = Agent (PhoneNumber/CommunicationUser),<br/>  sourceCallerId = serviceDID,<br/>  invitationTimeoutInSeconds = 30,<br/>  customCallingContext = {intent, digits, lang},<br/>  operationContext = "agent-invite")
+    IVR->>ACS: AddParticipant(<br>  callConnectionId = C1,<br>  participant = Agent (PhoneNumber/CommunicationUser),<br>  sourceCallerId = serviceDID,<br>  invitationTimeoutInSeconds = 30,<br>  customCallingContext.VoipHeaders = {intent, digits, lang}<br>  (use SipHeaders + UUI only if the agent endpoint is cross-tenant / behind an SBC),<br>  operationContext = "agent-invite")
     ACS-->>IVR: 202 Accepted (invitationId)
     ACS->>Agent: Outbound INVITE / ACS push
     Agent->>ACS: Answer
@@ -534,7 +568,7 @@ sequenceDiagram
 | Aspect | Blind (`TransferCallToParticipant`) | Consultative (`AddParticipant` + `RemoveParticipant`) |
 |---|---|---|
 | IVR stays in call during handoff | No — drops immediately on `CallTransferAccepted` | Yes — until `RemoveParticipant` |
-| Can brief the agent | No (rely on UUI / screen-pop only) | Yes (live audio briefing) |
+| Can brief the agent | No (rely on `CustomCallingContext` / screen-pop only — VoIP or SIP headers depending on tenancy) | Yes (live audio briefing, plus the same `CustomCallingContext` payload on `AddParticipant`) |
 | Caller experience on agent reject | Lost unless you handle `CallTransferFailed` | Caller never disconnected; just stays on hold |
 | Cost / complexity | Lower — fewer events, simpler state | Higher — must manage 3-party media + per-leg events |
 | Best for | High-volume, well-known queues | VIP, complex escalations, supervisor takeover |
