@@ -1,72 +1,83 @@
 using System.Threading.Channels;
-using Microsoft.Agents.AI;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 
 // SKETCH — sub-contract used by AgentEnsembleStrategy.
 //
 // Captures the "primary speaker + parallel delegates" shape explicitly:
-//   - exactly one PrimaryAgent at any moment is the voice the caller hears
-//   - DelegateAgents run in parallel doing tool calls / lookups / risk checks
-//   - delegates push AgentInsight back to the primary's working context
-//   - PromoteAsync hands off the speaker role (specialist takeover, supervisor barge-in)
+//   - SpeakerCandidates  — agents that own an IRealtimeVoiceBackend and CAN be the
+//                          voice the caller hears. Exactly one is the active primary.
+//   - Delegates          — text-only background workers (researcher, sentiment analyst,
+//                          guardrail, scribe). They do not produce caller-facing audio;
+//                          they consume conversation context and push AgentInsight back.
+//   - PromoteAsync       — swap which speaker candidate is the active primary
+//                          (specialist takeover, supervisor handoff to AI, etc.).
+//   - PrimaryChanged     — fires after a swap so AgentEnsembleStrategy can re-pump
+//                          the new primary's backend without missing a beat.
 //
-// This shape is private to AgentEnsembleStrategy. ICallSession does not see the
-// individual agents — it sees a single IConversationStrategy and the AgentSpeakingChanged
-// events on the StrategyEvent stream.
+// This shape is consumed by AgentEnsembleStrategy. ICallSession does not see the
+// individual agents — it sees a single IConversationStrategy and an
+// AgentSpeakingChanged event on the StrategyEvent stream.
 
 /// <summary>
 /// Orchestration primitive for an AI brain composed of multiple cooperating agents.
 /// </summary>
 public interface IAgentEnsemble : IAsyncDisposable
 {
-    /// <summary>The agent currently speaking to the caller.</summary>
+    /// <summary>The candidate currently speaking to the caller.</summary>
     IConversationalAgent PrimaryAgent { get; }
 
-    /// <summary>Background agents producing insights, performing tool work, watching context.</summary>
-    IReadOnlyList<IDelegateAgent> DelegateAgents { get; }
+    /// <summary>All agents capable of being the active speaker (backed by a realtime backend).</summary>
+    IReadOnlyList<IConversationalAgent> SpeakerCandidates { get; }
+
+    /// <summary>Background agents that never speak to the caller directly.</summary>
+    IReadOnlyList<IDelegateAgent> Delegates { get; }
 
     /// <summary>
-    /// Hand off the active-speaker role. The previous primary stops generating audio
-    /// and is added to the delegate pool (or removed entirely if <paramref name="removePrevious"/>).
+    /// Hand off the active-speaker role to a different speaker candidate.
     /// </summary>
-    ValueTask PromoteAsync(string delegateAgentId, bool removePrevious = false, CancellationToken cancellationToken = default);
+    ValueTask PromoteAsync(string speakerCandidateId, CancellationToken cancellationToken = default);
 
-    /// <summary>Insights produced by delegate agents; consumed by the primary's prompt context.</summary>
+    /// <summary>Insights produced by delegate agents; consumed by the strategy and surfaced as StrategyEvents.</summary>
     ChannelReader<AgentInsight> Insights { get; }
 
-    /// <summary>Add a delegate at runtime (e.g., escalation specialist joins to monitor).</summary>
+    /// <summary>Add a delegate at runtime (e.g., escalation specialist starts monitoring).</summary>
     ValueTask AddDelegateAsync(IDelegateAgent agent, CancellationToken cancellationToken = default);
 
     ValueTask RemoveDelegateAsync(string agentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Raised after <see cref="PromoteAsync"/> changes the primary. The strategy listens
+    /// to this and switches its inbound-audio + outbound-update pumps to the new backend.
+    /// </summary>
+    event Func<IConversationalAgent, ValueTask>? PrimaryChanged;
 }
 
 /// <summary>
-/// An agent that can be the active speaker on a call: produces audio (or text + TTS)
-/// and consumes caller utterances.
+/// An agent that can be the active speaker on a call: owns an
+/// <see cref="IRealtimeVoiceBackend"/> that produces audio + transcripts.
 /// </summary>
 public interface IConversationalAgent
 {
     string AgentId { get; }
     string DisplayName { get; }
-    AIAgent Agent { get; }
-    AgentSession Session { get; }
+    IRealtimeVoiceBackend Backend { get; }
 }
 
 /// <summary>
 /// A background agent that does not speak directly to the caller. Receives the
-/// rolling transcript + caller signals, emits <see cref="AgentInsight"/>s.
+/// rolling transcript + caller signals via <see cref="OnContextAsync"/>, pushes
+/// results to the supplied <see cref="ChannelWriter{T}"/> of <see cref="AgentInsight"/>.
 /// </summary>
 public interface IDelegateAgent
 {
     string AgentId { get; }
     string DisplayName { get; }
     DelegateAgentRole Role { get; }
-    AIAgent Agent { get; }
 
     /// <summary>
-    /// Called by the ensemble whenever new context is available.
-    /// Implementations decide whether to act, push results to <c>insights</c>.
+    /// Called by the ensemble whenever new context is available. Implementations
+    /// decide whether to act and push results to <paramref name="insights"/>.
     /// </summary>
     ValueTask OnContextAsync(EnsembleContext context, ChannelWriter<AgentInsight> insights, CancellationToken cancellationToken = default);
 }
