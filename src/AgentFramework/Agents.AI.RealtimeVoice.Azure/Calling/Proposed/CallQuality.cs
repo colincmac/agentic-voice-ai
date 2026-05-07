@@ -124,6 +124,12 @@ public interface ICallQualityReporter
 
     void ResolveAlert(string callId, string alertId);
 
+    /// <summary>Read the current snapshot for a call. Returns null if the call is unknown.</summary>
+    CallQualitySnapshot? TryGetSnapshot(string callId);
+
+    /// <summary>Snapshot of every active call's current quality view.</summary>
+    IReadOnlyCollection<CallQualitySnapshot> GetActiveSnapshots();
+
     /// <summary>Live snapshots, one channel per dashboard subscriber.</summary>
     ChannelReader<CallQualitySnapshot> Subscribe(string? callIdFilter = null);
 }

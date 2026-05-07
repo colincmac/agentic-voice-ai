@@ -84,6 +84,15 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
         UpdateSnapshotAlerts(callId);
     }
 
+    public CallQualitySnapshot? TryGetSnapshot(string callId)
+    {
+        _snapshots.TryGetValue(callId, out var snap);
+        return snap;
+    }
+
+    public IReadOnlyCollection<CallQualitySnapshot> GetActiveSnapshots()
+        => _snapshots.Values.ToArray();
+
     public ChannelReader<CallQualitySnapshot> Subscribe(string? callIdFilter = null)
     {
         var channel = Channel.CreateUnbounded<CallQualitySnapshot>(

@@ -1,11 +1,16 @@
+using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
+using Agents.AI.Extensions.SessionManagement;
+using Agents.AI.Extensions.ToolApproval;
+using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 
@@ -62,8 +67,34 @@ public sealed class CallSessionContainerBuilder
     /// <see cref="AuthorizingRealtimeAIAgent"/> at session-create time and wraps
     /// it in <see cref="AuthorizingAgentRealtimeBackend"/>.
     /// </summary>
-    public CallSessionContainerBuilder AddRealtimeVoiceStrategy()
+    /// <param name="realtimeAgentServiceKey">
+    /// Optional keyed-service key for the underlying <see cref="RealtimeAIAgent"/>.
+    /// When set, resolves the agent registered under that key (e.g. <c>"TriageAgent"</c>).
+    /// When null, resolves the unkeyed <see cref="RealtimeAIAgent"/>.
+    /// </param>
+    public CallSessionContainerBuilder AddRealtimeVoiceStrategy(string? realtimeAgentServiceKey = null)
     {
+        // The auth/session-scoped registrations the legacy AddConversationHub used to
+        // provide. Idempotent so repeated calls are safe.
+        Services.TryAddScoped<IAgentSessionRegistry, AgentSessionRegistry>();
+        Services.TryAddSingleton<IToolApprovalStore, InMemoryToolApprovalStore>();
+        Services.TryAddScoped<IToolApprovalHandlerProvider, ToolApprovalHandlerProvider>();
+
+        Services.TryAddScoped(sp =>
+        {
+            var agent = !string.IsNullOrEmpty(realtimeAgentServiceKey)
+                ? sp.GetRequiredKeyedService<RealtimeAIAgent>(realtimeAgentServiceKey)
+                : sp.GetRequiredService<RealtimeAIAgent>();
+            var registry = sp.GetRequiredService<IAgentSessionRegistry>();
+            var toolCollections = sp.GetServices<IAIToolCollection>();
+            return new AuthorizingRealtimeAIAgent(
+                agent,
+                registry,
+                delegateFunc: null,
+                toolCollections,
+                sp);
+        });
+
         Services.AddTransient<IRealtimeVoiceBackend>(sp =>
         {
             var agent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
@@ -71,6 +102,21 @@ public sealed class CallSessionContainerBuilder
             return new AuthorizingAgentRealtimeBackend(agent, runOptions: null, loggerFactory);
         });
         Services.AddSingleton<IConversationStrategyFactory, Implementation.RealtimeVoiceStrategyFactory>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers the singleton <see cref="CallAutomationClient"/> using the
+    /// connection string from <see cref="CommunicationOptions"/>. Required for the
+    /// ACS-bridged caller path.
+    /// </summary>
+    public CallSessionContainerBuilder AddAcsCallAutomation()
+    {
+        Services.TryAddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<CommunicationOptions>>();
+            return new CallAutomationClient(options.Value.Acs.ConnectionString);
+        });
         return this;
     }
 

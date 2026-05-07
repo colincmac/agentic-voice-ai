@@ -284,8 +284,16 @@ builder.Services.Configure<CommunicationOptions>(builder.Configuration.GetSectio
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
     ConversationWorkflowFactory.CreateCallerIntentWorkflow(sessionId: "default"));
 
+// The realtime agent that the new realtime backend wraps. Reads its config from
+// Agents:TriageAgent and uses the "voicelive" conversation client registered above.
+builder.AddRealtimeAIAgent(
+    name: AgentConfig.TriageAgent,
+    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
+    liveConversationClientKey: "voicelive");
+
 builder.AddCallSessionContainer()
-    .AddRealtimeVoiceStrategy()
+    .AddAcsCallAutomation()
+    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
     .AddDashboardProjectionObserver();
 
 // TEAMS
