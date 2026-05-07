@@ -226,18 +226,19 @@ internal sealed class FakeCallerEdge : ICallEdge
     private bool _connected;
     private int _disconnectFired;
 
-    public FakeCallerEdge(string edgeId)
+    public FakeCallerEdge(string edgeId, CallEdgeKind kind = CallEdgeKind.Caller, string? displayName = null)
     {
         EdgeId = edgeId;
+        Kind = kind;
         Metadata = new CallEdgeMetadata
         {
-            DisplayName = "fake-caller",
+            DisplayName = displayName ?? $"fake-{kind.ToString().ToLowerInvariant()}",
             RawIdentifier = edgeId
         };
     }
 
     public string EdgeId { get; }
-    public CallEdgeKind Kind => CallEdgeKind.Caller;
+    public CallEdgeKind Kind { get; }
     public CallEdgeMetadata Metadata { get; }
     public bool IsConnected => _connected;
 
@@ -263,6 +264,9 @@ internal sealed class FakeCallerEdge : ICallEdge
 
     public ValueTask PushDtmfAsync(char digit)
         => _inboundDtmf.Writer.WriteAsync(new DtmfTone(digit, DateTimeOffset.UtcNow));
+
+    public ValueTask PushAudioAsync(ReadOnlyMemory<byte> pcm)
+        => _inboundAudio.Writer.WriteAsync(new AudioFrame(pcm, DateTimeOffset.UtcNow, EdgeId));
 
     public async Task HangupAsync()
     {

@@ -114,8 +114,11 @@ public sealed record SupervisorPresence(
 /// </summary>
 public interface ICallQualityReporter
 {
-    /// <summary>Patch the live snapshot. Mutator runs against the current state.</summary>
-    void Update(string callId, Action<CallQualitySnapshotBuilder> mutate);
+    /// <summary>
+    /// Patch the live snapshot. The mutator receives the current snapshot and
+    /// returns a new snapshot — typically <c>current with { Field = ... }</c>.
+    /// </summary>
+    void Update(string callId, Func<CallQualitySnapshot, CallQualitySnapshot> mutate);
 
     void RaiseAlert(string callId, QualityAlert alert);
 
@@ -126,8 +129,8 @@ public interface ICallQualityReporter
 }
 
 /// <summary>
-/// Mutable builder handed to <see cref="ICallQualityReporter.Update"/> so observers
-/// only need to assign the fields they care about.
+/// Mutable builder kept for backward-compatible spot updates. Prefer the
+/// <c>current with { ... }</c> form passed to <see cref="ICallQualityReporter.Update"/>.
 /// </summary>
 public sealed class CallQualitySnapshotBuilder
 {

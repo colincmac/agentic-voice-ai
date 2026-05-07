@@ -49,39 +49,39 @@ public sealed class DashboardProjectionObserver : ICallObserver
                 switch (ev)
                 {
                     case StrategyEvent.AgentUtterance utterance:
-                        observation.QualityReporter.Update(observation.CallId, b =>
+                        observation.QualityReporter.Update(observation.CallId, current => current with
                         {
-                            b.LatestAgentUtterance = utterance.Text;
-                            b.ActiveSpeakerAgentId = utterance.AgentId;
+                            LatestAgentUtterance = utterance.Text,
+                            ActiveSpeakerAgentId = utterance.AgentId
                         });
                         break;
 
                     case StrategyEvent.Transcript { IsFinal: true } transcript:
-                        observation.QualityReporter.Update(observation.CallId, b =>
+                        observation.QualityReporter.Update(observation.CallId, current => current with
                         {
-                            b.LatestCallerUtterance = transcript.Text;
+                            LatestCallerUtterance = transcript.Text
                         });
                         break;
 
                     case StrategyEvent.AgentSpeakingChanged speaker:
-                        observation.QualityReporter.Update(observation.CallId, b =>
+                        observation.QualityReporter.Update(observation.CallId, current => current with
                         {
-                            b.ActiveSpeakerAgentId = speaker.AgentId;
-                            b.ActiveSpeakerDisplayName = speaker.AgentDisplayName;
+                            ActiveSpeakerAgentId = speaker.AgentId,
+                            ActiveSpeakerDisplayName = speaker.AgentDisplayName
                         });
                         break;
 
                     case StrategyEvent.WorkflowStepEntered step:
-                        observation.QualityReporter.Update(observation.CallId, b =>
+                        observation.QualityReporter.Update(observation.CallId, current => current with
                         {
-                            b.CurrentWorkflowStep = step.StepId;
+                            CurrentWorkflowStep = step.StepId
                         });
                         break;
 
                     case StrategyEvent.TierDegraded degraded:
-                        observation.QualityReporter.Update(observation.CallId, b =>
+                        observation.QualityReporter.Update(observation.CallId, current => current with
                         {
-                            b.ActiveTier = degraded.To;
+                            ActiveTier = degraded.To
                         });
                         observation.QualityReporter.RaiseAlert(observation.CallId, new QualityAlert(
                             AlertId: $"tier-{degraded.At.ToUnixTimeMilliseconds()}",
