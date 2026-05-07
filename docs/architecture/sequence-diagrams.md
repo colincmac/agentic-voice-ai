@@ -20,6 +20,7 @@ sequenceDiagram
     participant IVR as IVR App (AKS)<br>Call Automation SDK
     participant Cache as State Store<br>(Redis)
     participant CogSvc as Cognitive Services<br>(TTS, optional)
+    participant Middleware as Middleware<br>(Dataverse, Cosmos)
     participant CCaaS as Dynamics 365<br>Contact Center (ACS-based)
 
     %% ───────────── 1. Inbound PSTN call ─────────────
@@ -106,6 +107,8 @@ sequenceDiagram
         ACS->>Caller: Audio
         ACS->>IVR: PlayCompleted
 
+        IVR->>Middleware: Store call state by contextId<br>{intent, collectedDigits, lang, correlationId}
+
         IVR->>ACS: TransferCallToParticipant(<br>target = PhoneNumber of CCaaS workstream,<br>customCallingContext.VoipHeaders = {intent, collectedDigits, lang, correlationId}<br>(use SipHeaders + UUI only for cross-tenant / SBC targets))
 
         ACS->>CCaaS: VoIP transfer over MS calling backbone (same tenant)<br>VoIP headers ride along — no SIP signaling on this hop<br>(cross-tenant target → SIP transfer with SIP headers + UUI instead)
@@ -116,6 +119,9 @@ sequenceDiagram
             Note over IVR,ACS: IVR drops out of media + control <br>CCaaS now owns the call
             ACS->>IVR: CallDisconnected (IVR leg)
             IVR->>Cache: Mark session escalated, emit telemetry
+
+            CCaaS->>Middleware: Fetch call context from contextId
+            Middleware-->>CCaaS: Hydrate call context
 
             CCaaS->>CCaaS: Workstream routing → queue → agent<br>(screen-pop using customCallingContext)
             CCaaS->>Caller: Agent media (via ACS)
