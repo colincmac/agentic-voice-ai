@@ -141,6 +141,7 @@ Dynamics 365 **Contact Center / Customer Service voice** is itself built on ACS,
   - `MicrosoftTeamsUserIdentifier` — if escalating to a Teams agent
   - `MicrosoftTeamsAppIdentifier` / `CommunicationUserIdentifier` for ACS-native or Teams-interop endpoints exposed by the CCaaS tenant
 - After ACS issues `CallTransferAccepted`, your app's call connection ends (you are no longer in the media path); the CCaaS workstream takes over and runs its own Call Automation / workflow against the same call.
+- Middleware (architecture TBD) manages hydrating the CCaaS Dataverse instance. The CCaaS workstream hydrates call context based on the call context identifier passed through the custom call context headers.
 
 > The on-the-wire transport (VoIP vs SIP) and which `CustomCallingContext` bucket carries your IVR context depend on where the destination DID lives — same-tenant transfers ride the Microsoft calling backbone as **VoIP** (use `VoipHeaders`); cross-tenant or SBC-routed transfers are real **SIP** transfers (use `SipHeaders` + UUI). Same-tenant is the common case for in-tenant Dynamics CCaaS. Detailed rules, header limits, and the C# call site are in [`transfer-patterns.md`](transfer-patterns.md). When the IVR needs to *stay on the call* (VIP / supervisor takeover) the same transport rule applies to `AddParticipant` — see the consultative-transfer section in the same document.
 
