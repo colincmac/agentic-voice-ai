@@ -20,7 +20,7 @@ sequenceDiagram
     participant IVR as IVR App (AKS)<br>Call Automation SDK
     participant Cache as State Store<br>(Redis)
     participant CogSvc as Cognitive Services<br>(TTS, optional)
-    participant Middleware as Middleware<br>(Dataverse, Cosmos)
+    participant Middleware as Middleware<br>(Dataverse - TBD)
     participant CCaaS as Dynamics 365<br>Contact Center (ACS-based)
 
     %% ───────────── 1. Inbound PSTN call ─────────────
