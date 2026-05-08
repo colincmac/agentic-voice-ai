@@ -105,6 +105,8 @@
     <PackageVersion Include="Microsoft.Azure.AppConfiguration.AspNetCore" Version="8.6.0-preview" />
     <PackageVersion Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.0" />
     <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="$(AspNetCoreVersion)" />
+    <PackageVersion Include="Microsoft.CognitiveServices.Speech" Version="1.49.1" />
+    
     <PackageVersion Include="Microsoft.Extensions.AI" Version="$(MicrosoftExtensionsVersionAI)" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="$(MicrosoftExtensionsVersionAI)" />
     <PackageVersion Include="Microsoft.Extensions.AI.AzureAIInference" Version="10.0.0-preview.1.25559.3" />
@@ -130,15 +132,19 @@
     <PackageVersion Include="Microsoft.FeatureManagement.AspNetCore" Version="4.3.0" />
 
     <!-- Authentication and Authorization -->
+
+    <!-- NOTE: Kiota dependency is only needed until this is fixed https://github.com/AzureAD/microsoft-identity-web/issues/3809-->
+    <PackageVersion Include="Microsoft.Kiota.Abstractions" Version="2.0.0" />
+
     <PackageVersion Include="Microsoft.Graph" Version="5.51.0" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.83.1" />
-    <PackageVersion Include="Microsoft.Identity.Web" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Identity.Web.AgentIdentities" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Identity.Web.DownstreamApi" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Identity.Web.GraphServiceClient" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Identity.Web.TokenCache" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.IdentityModel.Abstractions" Version="8.14.0" />
+    <PackageVersion Include="Microsoft.Identity.Web" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.Identity.Web.AgentIdentities" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.Identity.Web.DownstreamApi" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.Identity.Web.GraphServiceClient" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.Identity.Web.TokenCache" Version="4.9.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Abstractions" Version="8.15.0" />
 
     <PackageVersion Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageVersion Include="ModelContextProtocol" Version="1.0.0" />
@@ -160,8 +166,8 @@
     <PackageVersion Include="System.Memory.Data" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Net.ServerSentEvents" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="9.0.15" />
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="9.0.15" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="$(AspNetCoreVersion)" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 </Project>

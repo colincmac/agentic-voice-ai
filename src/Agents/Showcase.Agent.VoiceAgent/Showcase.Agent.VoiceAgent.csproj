@@ -31,6 +31,8 @@
     <PackageReference Include="Microsoft.Agents.AI.A2A" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" />
+
   </ItemGroup>
   <!-- A2A dependency -->
   <ItemGroup>

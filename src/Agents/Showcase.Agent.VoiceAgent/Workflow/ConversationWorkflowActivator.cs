@@ -12,6 +12,45 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 /// </summary>
 public static class ConversationWorkflowFactory
 {
+
+    public static RealtimeIvrWorkflowDefinition CreateDtmfWorkflow(string sessionId) => new()
+    {
+        Name = "test-ivr",
+        BasePrompt = new RealtimePrompt(),
+        Steps =
+        [
+            new RealtimeIvrWorkflowStep
+            {
+                Id = "greeting",
+                ConversationState = new ConversationState
+                {
+                    Id = "greeting",
+                    Description = "Welcome to Contoso",
+                    Goal = "Route the caller",
+                    Instructions = ["Greet the caller and offer menu"],
+                    Transitions =
+                    [
+                        new StateTransition { NextStep = "billing", Condition = "selected billing" }
+                    ]
+                },
+                DtmfMenuOptions = new Dictionary<char, string>
+                {
+                    ['1'] = "support",
+                    ['2'] = "billing"
+                }
+            },
+            new RealtimeIvrWorkflowStep
+            {
+                Id = "billing",
+                ConversationState = new ConversationState
+                {
+                    Id = "billing",
+                    Description = "Billing department",
+                    Instructions = ["Help with billing"]
+                }
+            }
+        ]
+    };
     /// <summary>
     /// Creates the default caller intent and biometric workflow definition.
     /// </summary>
