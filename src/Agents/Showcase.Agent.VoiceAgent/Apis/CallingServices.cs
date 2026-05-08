@@ -1,21 +1,29 @@
-using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Communication.CallAutomation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+
 namespace Showcase.Agent.VoiceAgent.Apis;
 
-//public class CallingServices([FromServices] CallAutomationClient callAutomationClient, [FromKeyedServices(AgentConfig.TriageAgent)] RealtimeAIAgent Agent, IOptions <CommunicationOptions> options, ILogger<CallingServices> logger)
-//{
-//    public CallAutomationClient CallAutomationClient { get; } = callAutomationClient;
-//    public IOptions<CommunicationOptions> Options { get; } = options;
-//    public ILogger<CallingServices> Logger { get; } = logger;
-//    public RealtimeAIAgent Agent { get; } = Agent;
-//}
-public class CallingServices([FromServices] ContactCenterConversationHub conversationHub, [FromServices] CallAutomationClient callAutomationClient, IOptions<CommunicationOptions> options, ILogger<CallingServices> logger)
+/// <summary>
+/// Services injected into <see cref="CallingApi"/> endpoint handlers via [AsParameters].
+/// Pulls from the new <see cref="ICallSessionFactory"/> + <see cref="ICallSessionRegistry"/>
+/// shape rather than the legacy <c>ContactCenterConversationHub</c>.
+/// </summary>
+public sealed class CallingServices(
+    [FromServices] ICallSessionFactory sessionFactory,
+    [FromServices] ICallSessionRegistry sessionRegistry,
+    [FromServices] CallAutomationClient callAutomationClient,
+    [FromServices] RealtimeIvrWorkflowDefinition workflow,
+    [FromServices] IOptions<CommunicationOptions> options,
+    [FromServices] ILogger<CallingServices> logger)
 {
+    public ICallSessionFactory SessionFactory { get; } = sessionFactory;
+    public ICallSessionRegistry SessionRegistry { get; } = sessionRegistry;
     public CallAutomationClient CallAutomationClient { get; } = callAutomationClient;
+    public RealtimeIvrWorkflowDefinition Workflow { get; } = workflow;
     public IOptions<CommunicationOptions> Options { get; } = options;
     public ILogger<CallingServices> Logger { get; } = logger;
-    public ContactCenterConversationHub ConversationHub { get; } = conversationHub;
 }

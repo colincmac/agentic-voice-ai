@@ -13,7 +13,9 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 /// <list type="bullet">
 ///   <item>connecting the caller edge,</item>
 ///   <item>starting the conversation strategy,</item>
-///   <item>pumping <c>strategy.OutboundAudio → edge.SendAudioAsync</c>,</item>
+///   <item>fanning caller audio to the strategy and (when attached) supervisor,</item>
+///   <item>fanning strategy audio to the caller and (when attached) supervisor,</item>
+///   <item>bridging supervisor audio to the caller during BargeIn,</item>
 ///   <item>fanning <c>strategy.Events</c> out to observers,</item>
 ///   <item>tearing everything down on caller hangup or end.</item>
 /// </list>
@@ -29,14 +31,29 @@ public sealed class CallSession : ICallSession
     private readonly List<Channel<StrategyEvent>> _observerFanout = [];
     private readonly Lock _stateLock = new();
 
+    // Caller inbound audio is teed at the session level so the supervisor can
+    // listen in (Monitor) without affecting the strategy's view.
+    private readonly Channel<AudioFrame> _strategyInbound = Channel.CreateBounded<AudioFrame>(
+        new BoundedChannelOptions(500)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
     private IConversationStrategy _strategy;
-#pragma warning disable CS0649 // assigned by AttachSupervisorAsync (not yet implemented in this slice)
+
+    // Supervisor wiring. All four are mutated under _stateLock.
     private ICallEdge? _supervisorEdge;
     private SupervisorMode? _supervisorMode;
-#pragma warning restore CS0649
-    private Task? _audioPump;
+    private CancellationTokenSource? _supervisorCts;
+    private Task? _supervisorPumps;
+
+    private Task? _outboundPump;
+    private Task? _inboundFanoutPump;
     private Task? _eventPump;
     private CallSessionState _state = CallSessionState.Created;
+    private CallSessionState _stateBeforeSuspend = CallSessionState.Active;
     private int _disposed;
 
     public CallSession(
@@ -70,9 +87,15 @@ public sealed class CallSession : ICallSession
 
     public IConversationStrategy Strategy => _strategy;
 
-    public ICallEdge? SupervisorEdge => _supervisorEdge;
+    public ICallEdge? SupervisorEdge
+    {
+        get { lock (_stateLock) { return _supervisorEdge; } }
+    }
 
-    public SupervisorMode? SupervisorMode => _supervisorMode;
+    public SupervisorMode? SupervisorMode
+    {
+        get { lock (_stateLock) { return _supervisorMode; } }
+    }
 
     public IReadOnlyList<ICallObserver> Observers => _observers;
 
@@ -117,23 +140,148 @@ public sealed class CallSession : ICallSession
             }, cancellationToken).ConfigureAwait(false);
         }
 
-        _audioPump = Task.Run(PumpAudioAsync, CancellationToken.None);
+        _inboundFanoutPump = Task.Run(PumpCallerInboundAsync, CancellationToken.None);
+        _outboundPump = Task.Run(PumpStrategyOutboundAsync, CancellationToken.None);
         _eventPump = Task.Run(PumpEventsAsync, CancellationToken.None);
 
         await TransitionAsync(CallSessionState.Active).ConfigureAwait(false);
     }
 
-    public Task<bool> AttachSupervisorAsync(ICallEdge supervisorEdge, SupervisorMode mode, CancellationToken cancellationToken = default)
+    public async Task<bool> AttachSupervisorAsync(
+        ICallEdge supervisorEdge,
+        SupervisorMode mode,
+        CancellationToken cancellationToken = default)
     {
-        // Out of scope for the DTMF slice. Stub returns false to make the gap explicit.
-        _logger.LogInformation("Supervisor attach requested for call {CallId}; not yet implemented", CallId);
-        return Task.FromResult(false);
+        if (_state is CallSessionState.Ended or CallSessionState.Ending or CallSessionState.Faulted)
+        {
+            return false;
+        }
+
+        ICallEdge? existing;
+        lock (_stateLock) { existing = _supervisorEdge; }
+        if (existing is not null)
+        {
+            _logger.LogWarning("Supervisor already attached to call {CallId}; detach first", CallId);
+            return false;
+        }
+
+        await supervisorEdge.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        supervisorEdge.Disconnected += OnSupervisorDisconnectedAsync;
+
+        var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        var pump = Task.Run(() => PumpSupervisorInboundAsync(supervisorEdge, pumpCts.Token), CancellationToken.None);
+
+        lock (_stateLock)
+        {
+            _supervisorEdge = supervisorEdge;
+            _supervisorMode = mode;
+            _supervisorCts = pumpCts;
+            _supervisorPumps = pump;
+        }
+
+        _quality.Update(CallId, current => current with
+        {
+            Supervisor = new SupervisorPresence(
+                SupervisorId: supervisorEdge.EdgeId,
+                DisplayName: supervisorEdge.Metadata.DisplayName,
+                Mode: mode,
+                AttachedAt: DateTimeOffset.UtcNow)
+        });
+        _quality.RaiseAlert(CallId, new QualityAlert(
+            AlertId: $"supervisor-{supervisorEdge.EdgeId}",
+            Kind: QualityAlertKind.SupervisorWhisper,
+            Severity: QualityAlertSeverity.Info,
+            Message: $"Supervisor attached in {mode} mode",
+            RaisedAt: DateTimeOffset.UtcNow));
+
+        await ApplyModeAsync(mode, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Supervisor {SupervisorId} attached to call {CallId} in {Mode} mode",
+            supervisorEdge.EdgeId, CallId, mode);
+        return true;
     }
 
-    public Task<bool> ChangeSupervisorModeAsync(SupervisorMode mode, CancellationToken cancellationToken = default)
-        => Task.FromResult(false);
+    public async Task<bool> ChangeSupervisorModeAsync(SupervisorMode mode, CancellationToken cancellationToken = default)
+    {
+        SupervisorMode? current;
+        lock (_stateLock)
+        {
+            if (_supervisorEdge is null)
+            {
+                return false;
+            }
+            current = _supervisorMode;
+            _supervisorMode = mode;
+        }
 
-    public Task DetachSupervisorAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        if (current == mode)
+        {
+            return true;
+        }
+
+        _quality.Update(CallId, current => current.Supervisor is null
+            ? current
+            : current with { Supervisor = current.Supervisor with { Mode = mode } });
+
+        await ApplyModeAsync(mode, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Supervisor mode for call {CallId} changed: {From} → {To}", CallId, current, mode);
+        return true;
+    }
+
+    public async Task DetachSupervisorAsync(CancellationToken cancellationToken = default)
+    {
+        ICallEdge? supervisor;
+        SupervisorMode? lastMode;
+        CancellationTokenSource? pumpCts;
+        Task? pumps;
+        lock (_stateLock)
+        {
+            supervisor = _supervisorEdge;
+            lastMode = _supervisorMode;
+            pumpCts = _supervisorCts;
+            pumps = _supervisorPumps;
+            _supervisorEdge = null;
+            _supervisorMode = null;
+            _supervisorCts = null;
+            _supervisorPumps = null;
+        }
+
+        if (supervisor is null)
+        {
+            return;
+        }
+
+        supervisor.Disconnected -= OnSupervisorDisconnectedAsync;
+
+        if (pumpCts is not null)
+        {
+            try { await pumpCts.CancelAsync().ConfigureAwait(false); } catch { /* tolerated */ }
+            pumpCts.Dispose();
+        }
+        if (pumps is not null)
+        {
+            try { await pumps.ConfigureAwait(false); } catch { /* shutdown */ }
+        }
+
+        // If we were in BargeIn, lift the suspend now that the supervisor is gone.
+        // Skip the resume / state revert when the call is already winding down — the
+        // strategy is about to be stopped anyway and Ending → Active would be wrong.
+        var endingNow = _state is CallSessionState.Ending or CallSessionState.Ended;
+        if (lastMode is Proposed.SupervisorMode.BargeIn && !endingNow)
+        {
+            try { await _strategy.ResumeAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Strategy resume on detach failed"); }
+
+            await TransitionAsync(_stateBeforeSuspend).ConfigureAwait(false);
+        }
+
+        _quality.Update(CallId, current => current with { Supervisor = null });
+        _quality.ResolveAlert(CallId, $"supervisor-{supervisor.EdgeId}");
+
+        try { await supervisor.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Supervisor edge dispose failed"); }
+
+        _logger.LogInformation("Supervisor detached from call {CallId}", CallId);
+    }
 
     public async Task<bool> ReplaceStrategyAsync(IConversationStrategy newStrategy, CancellationToken cancellationToken = default)
     {
@@ -167,12 +315,19 @@ public sealed class CallSession : ICallSession
 
         await TransitionAsync(CallSessionState.Ending).ConfigureAwait(false);
 
+        await DetachSupervisorAsync(cancellationToken).ConfigureAwait(false);
+
         await _strategy.StopAsync(cancellationToken).ConfigureAwait(false);
         await _cts.CancelAsync().ConfigureAwait(false);
+        _strategyInbound.Writer.TryComplete();
 
-        if (_audioPump is not null)
+        if (_inboundFanoutPump is not null)
         {
-            try { await _audioPump.ConfigureAwait(false); } catch { /* shutdown */ }
+            try { await _inboundFanoutPump.ConfigureAwait(false); } catch { /* shutdown */ }
+        }
+        if (_outboundPump is not null)
+        {
+            try { await _outboundPump.ConfigureAwait(false); } catch { /* shutdown */ }
         }
         if (_eventPump is not null)
         {
@@ -218,29 +373,154 @@ public sealed class CallSession : ICallSession
     private StrategyStartContext BuildStartContext() => new()
     {
         CallId = CallId,
-        InboundAudio = CallerEdge.InboundAudio,
+        InboundAudio = _strategyInbound.Reader,
         InboundDtmf = CallerEdge.InboundDtmf,
         Services = _scope.ServiceProvider,
         RestoreFrom = null
     };
 
-    private async Task PumpAudioAsync()
+    /// <summary>
+    /// Reads caller audio off the edge and fans it to the strategy. When a
+    /// supervisor is attached in Monitor or Whisper mode, the supervisor also
+    /// hears the caller. In BargeIn mode the strategy stops receiving caller
+    /// audio (the supervisor is talking instead).
+    /// </summary>
+    private async Task PumpCallerInboundAsync()
+    {
+        try
+        {
+            await foreach (var frame in CallerEdge.InboundAudio.ReadAllAsync(_cts.Token).ConfigureAwait(false))
+            {
+                ICallEdge? supervisor;
+                SupervisorMode? mode;
+                lock (_stateLock)
+                {
+                    supervisor = _supervisorEdge;
+                    mode = _supervisorMode;
+                }
+
+                if (mode is not Proposed.SupervisorMode.BargeIn)
+                {
+                    await _strategyInbound.Writer.WriteAsync(frame, _cts.Token).ConfigureAwait(false);
+                }
+
+                if (supervisor is not null && mode is Proposed.SupervisorMode.Monitor or Proposed.SupervisorMode.Whisper)
+                {
+                    try { await supervisor.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Supervisor caller-tap send failed"); }
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (Exception ex) { _logger.LogWarning(ex, "Caller inbound pump terminated for call {CallId}", CallId); }
+        finally
+        {
+            _strategyInbound.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Reads strategy audio output and sends it to the caller. When a supervisor
+    /// is attached in Monitor mode, the supervisor also hears the agent. In BargeIn
+    /// mode the strategy is suspended and no agent audio reaches the caller.
+    /// </summary>
+    private async Task PumpStrategyOutboundAsync()
     {
         try
         {
             await foreach (var frame in _strategy.OutboundAudio.ReadAllAsync(_cts.Token).ConfigureAwait(false))
             {
-                if (!CallerEdge.IsConnected)
+                ICallEdge? supervisor;
+                SupervisorMode? mode;
+                lock (_stateLock)
                 {
-                    break;
+                    supervisor = _supervisorEdge;
+                    mode = _supervisorMode;
                 }
-                await CallerEdge.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false);
+
+                // BargeIn keeps strategy audio off the caller's wire even if the
+                // strategy hasn't drained yet from its suspend signal.
+                if (mode is not Proposed.SupervisorMode.BargeIn && CallerEdge.IsConnected)
+                {
+                    await CallerEdge.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false);
+                }
+
+                if (supervisor is not null && mode is Proposed.SupervisorMode.Monitor)
+                {
+                    try { await supervisor.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Supervisor agent-tap send failed"); }
+                }
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
-        catch (Exception ex)
+        catch (Exception ex) { _logger.LogWarning(ex, "Outbound pump terminated for call {CallId}", CallId); }
+    }
+
+    /// <summary>
+    /// Reads supervisor inbound audio. In BargeIn it bridges to the caller. In
+    /// Whisper it forwards to the strategy via <see cref="IWhisperableStrategy"/>
+    /// when supported. In Monitor (the default tap-only mode) it is dropped.
+    /// </summary>
+    private async Task PumpSupervisorInboundAsync(ICallEdge supervisor, CancellationToken ct)
+    {
+        try
         {
-            _logger.LogWarning(ex, "Audio pump terminated for call {CallId}", CallId);
+            await foreach (var frame in supervisor.InboundAudio.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                SupervisorMode? mode;
+                lock (_stateLock) { mode = _supervisorMode; }
+
+                switch (mode)
+                {
+                    case Proposed.SupervisorMode.BargeIn when CallerEdge.IsConnected:
+                        try { await CallerEdge.SendAudioAsync(frame, ct).ConfigureAwait(false); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Supervisor BargeIn send failed"); }
+                        break;
+
+                    case Proposed.SupervisorMode.Whisper when _strategy is IWhisperableStrategy whisperable:
+                        try
+                        {
+                            await whisperable.InjectWhisperAsync(new SupervisorWhisper
+                            {
+                                SupervisorId = supervisor.EdgeId,
+                                Audio = frame.Pcm,
+                                At = frame.Timestamp
+                            }, ct).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Whisper inject failed"); }
+                        break;
+
+                    // Monitor / Whisper-without-support: drop.
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* swap or shutdown */ }
+        catch (Exception ex) { _logger.LogWarning(ex, "Supervisor inbound pump terminated"); }
+    }
+
+    /// <summary>
+    /// Apply a mode transition: BargeIn suspends the strategy and saves the prior
+    /// state for resume; any other mode resumes the strategy if we were suspended.
+    /// </summary>
+    private async Task ApplyModeAsync(SupervisorMode mode, CancellationToken ct)
+    {
+        if (mode is Proposed.SupervisorMode.BargeIn)
+        {
+            if (_state is not CallSessionState.Suspended)
+            {
+                _stateBeforeSuspend = _state;
+            }
+            try { await _strategy.SuspendAsync(ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Strategy suspend failed"); }
+
+            await TransitionAsync(CallSessionState.Suspended).ConfigureAwait(false);
+        }
+        else if (_state is CallSessionState.Suspended)
+        {
+            try { await _strategy.ResumeAsync(ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Strategy resume failed"); }
+
+            await TransitionAsync(_stateBeforeSuspend).ConfigureAwait(false);
         }
     }
 
@@ -277,6 +557,13 @@ public sealed class CallSession : ICallSession
         catch (Exception ex) { _logger.LogWarning(ex, "End-on-disconnect failed for call {CallId}", CallId); }
     }
 
+    private async ValueTask OnSupervisorDisconnectedAsync(EdgeDisconnectedReason reason)
+    {
+        _logger.LogInformation("Supervisor edge disconnected ({Reason}) on call {CallId}", reason, CallId);
+        try { await DetachSupervisorAsync().ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Detach-on-disconnect failed for call {CallId}", CallId); }
+    }
+
     private async ValueTask TransitionAsync(CallSessionState target)
     {
         bool changed;
@@ -291,7 +578,7 @@ public sealed class CallSession : ICallSession
             return;
         }
 
-        _quality.Update(CallId, b => b.State = target);
+        _quality.Update(CallId, current => current with { State = target });
 
         if (StateChanged is null)
         {

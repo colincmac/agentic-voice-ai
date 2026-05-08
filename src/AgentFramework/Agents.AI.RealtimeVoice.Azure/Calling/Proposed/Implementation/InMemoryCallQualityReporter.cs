@@ -40,7 +40,7 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
         _alerts.TryRemove(callId, out _);
     }
 
-    public void Update(string callId, Action<CallQualitySnapshotBuilder> mutate)
+    public void Update(string callId, Func<CallQualitySnapshot, CallQualitySnapshot> mutate)
     {
         if (!_snapshots.TryGetValue(callId, out var current))
         {
@@ -48,26 +48,7 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
             return;
         }
 
-        var builder = new CallQualitySnapshotBuilder();
-        mutate(builder);
-
-        var next = current with
-        {
-            UpdatedAt = DateTimeOffset.UtcNow,
-            State = builder.State ?? current.State,
-            ActiveTier = builder.ActiveTier ?? current.ActiveTier,
-            Sentiment = builder.Sentiment ?? current.Sentiment,
-            SignalAgreement = builder.SignalAgreement ?? current.SignalAgreement,
-            EscalationRisk = builder.EscalationRisk ?? current.EscalationRisk,
-            ConversationHealth = builder.ConversationHealth ?? current.ConversationHealth,
-            LatestAgentUtterance = builder.LatestAgentUtterance ?? current.LatestAgentUtterance,
-            LatestCallerUtterance = builder.LatestCallerUtterance ?? current.LatestCallerUtterance,
-            ActiveSpeakerAgentId = builder.ActiveSpeakerAgentId ?? current.ActiveSpeakerAgentId,
-            ActiveSpeakerDisplayName = builder.ActiveSpeakerDisplayName ?? current.ActiveSpeakerDisplayName,
-            CurrentWorkflowStep = builder.CurrentWorkflowStep ?? current.CurrentWorkflowStep,
-            DelegateTasks = builder.DelegateTasks ?? current.DelegateTasks,
-            Supervisor = builder.Supervisor ?? current.Supervisor
-        };
+        var next = mutate(current) with { UpdatedAt = DateTimeOffset.UtcNow };
 
         _snapshots[callId] = next;
         Broadcast(next);
@@ -102,6 +83,15 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
 
         UpdateSnapshotAlerts(callId);
     }
+
+    public CallQualitySnapshot? TryGetSnapshot(string callId)
+    {
+        _snapshots.TryGetValue(callId, out var snap);
+        return snap;
+    }
+
+    public IReadOnlyCollection<CallQualitySnapshot> GetActiveSnapshots()
+        => _snapshots.Values.ToArray();
 
     public ChannelReader<CallQualitySnapshot> Subscribe(string? callIdFilter = null)
     {

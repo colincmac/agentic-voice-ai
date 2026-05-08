@@ -1,11 +1,13 @@
 using A2A.AspNetCore;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
+using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Hosting;
 using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure;
 using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
 using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
@@ -22,6 +24,7 @@ using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Teams;
+using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -273,6 +276,25 @@ builder.AddKeyedConversationClient("voicelive")
 // //.AddWorkflowIntegration(
 // //    orchestratorAgentFactory: sp => sp.GetRequiredKeyedService<AIAgent>("IvrOrchestrator"),
 // //    workflowFactory: ConversationWorkflowFactory.CreateCallerIntentWorkflow);
+
+// New Calling/Proposed shape: registers ICallSessionFactory + ICallSessionRegistry +
+// ICallQualityReporter, and wires the realtime voice strategy on top of the existing
+// AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
+builder.Services.Configure<CommunicationOptions>(builder.Configuration.GetSection(CommunicationOptions.SectionName));
+builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
+    ConversationWorkflowFactory.CreateCallerIntentWorkflow(sessionId: "default"));
+
+// The realtime agent that the new realtime backend wraps. Reads its config from
+// Agents:TriageAgent and uses the "voicelive" conversation client registered above.
+builder.AddRealtimeAIAgent(
+    name: AgentConfig.TriageAgent,
+    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
+    liveConversationClientKey: "voicelive");
+
+builder.AddCallSessionContainer()
+    .AddAcsCallAutomation()
+    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddDashboardProjectionObserver();
 
 // TEAMS
 builder.AddAgentApplicationOptions();

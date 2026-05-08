@@ -1,20 +1,26 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text.Json;
-using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
+using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.AI;
 
 namespace Showcase.Agent.VoiceAgent.Apis;
 
+/// <summary>
+/// ACS Call Automation endpoints, ported onto the new <see cref="ICallSession"/> shape.
+/// The IncomingCall webhook just answers the call; the media WebSocket handler builds
+/// an <see cref="AcsCallerEdge"/>, asks the <see cref="ICallSessionFactory"/> for a session,
+/// starts it, and waits for the edge's Disconnected event to terminate the call.
+/// </summary>
 public static class CallingApi
 {
     public const string HANDLE_INCOMING_PATH = "/automation/incoming";
-
     public const string CALLBACK_PATH = "/automation/callbacks";
     public const string MEDIA_STREAMING_PATH_WSS = "/automation/media/wss";
 
@@ -25,40 +31,41 @@ public static class CallingApi
         routeGroup.MapPost(HANDLE_INCOMING_PATH, async (
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
-            CancellationToken cancellationToken
-            ) =>
+            CancellationToken cancellationToken) =>
         {
             foreach (var evt in incomingEvents)
             {
-                // Handle system events
-                if (evt.TryGetSystemEventData(out var eventData))
+                if (!evt.TryGetSystemEventData(out var eventData))
                 {
-                    // Handle the subscription validation event.
-                    if (eventData is SubscriptionValidationEventData subscriptionValidationEventData)
-                    {
-                        var responseData = new SubscriptionValidationResponse
-                        {
-                            ValidationResponse = subscriptionValidationEventData.ValidationCode
-                        };
-                        return Results.Ok(responseData);
-                    }
+                    continue;
                 }
 
-                if (eventData is AcsIncomingCallEventData acsIncomingCallEventData)
+                if (eventData is SubscriptionValidationEventData subscriptionValidation)
                 {
-                    services.Logger.LogDebug("AcsIncomingCallEventData received: {EventData}", JsonSerializer.Serialize(acsIncomingCallEventData));
-                    var callbackUri = new Uri(services.Options.Value.Acs.CallBackUri, relativeUri: $"{path}{CALLBACK_PATH}/{acsIncomingCallEventData.ServerCallId}");
-                    services.Logger.LogDebug("Callback Url: {callbackUri}", callbackUri);
+                    return Results.Ok(new SubscriptionValidationResponse
+                    {
+                        ValidationResponse = subscriptionValidation.ValidationCode
+                    });
+                }
 
-                    var websocketUri = new Uri(services.Options.Value.Acs.MediaStreamingUri, relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}/{acsIncomingCallEventData.ServerCallId}");
-                    services.Logger.LogDebug("WebSocket Url: {websocketUri}", websocketUri);
+                if (eventData is AcsIncomingCallEventData incoming)
+                {
+                    services.Logger.LogInformation(
+                        "Incoming call from {From} to {To} (server call {ServerCallId})",
+                        incoming.FromCommunicationIdentifier?.RawId,
+                        incoming.ToCommunicationIdentifier?.RawId,
+                        incoming.ServerCallId);
 
-                    // Create or get session for this call
-                    var sessionId = $"call_{acsIncomingCallEventData.ServerCallId}";
-                    var session = services.ConversationHub.GetOrCreateSession(
-                        sessionId);
+                    var callbackUri = new Uri(
+                        services.Options.Value.Acs.CallBackUri,
+                        relativeUri: $"{path}{CALLBACK_PATH}/{incoming.ServerCallId}");
+                    var websocketUri = new Uri(
+                        services.Options.Value.Acs.MediaStreamingUri,
+                        relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}/{incoming.ServerCallId}");
 
-                    var mediaStreamingOptions = new MediaStreamingOptions(audioChannelType: MediaStreamingAudioChannel.Mixed, streamingTransport: StreamingTransport.Websocket)
+                    var mediaStreamingOptions = new MediaStreamingOptions(
+                        audioChannelType: MediaStreamingAudioChannel.Mixed,
+                        streamingTransport: StreamingTransport.Websocket)
                     {
                         EnableBidirectional = true,
                         EnableDtmfTones = true,
@@ -66,35 +73,36 @@ public static class CallingApi
                         StartMediaStreaming = true,
                         AudioFormat = services.Options.Value.Acs.audioFormat
                     };
-                    var options = new AnswerCallOptions(acsIncomingCallEventData.IncomingCallContext, callbackUri)
+
+                    var answerOptions = new AnswerCallOptions(incoming.IncomingCallContext, callbackUri)
                     {
-                        MediaStreamingOptions = mediaStreamingOptions,
+                        MediaStreamingOptions = mediaStreamingOptions
                     };
 
-                    AnswerCallResult answerCallResult = await services.CallAutomationClient.AnswerCallAsync(options, cancellationToken);
+                    var answerResult = (await services.CallAutomationClient
+                        .AnswerCallAsync(answerOptions, cancellationToken)).Value;
 
-                    //var callConnection = answerCallResult.CallConnection;
-                    //await callConnection.TransferCallToParticipantAsync(new TransferToParticipantOptions(new Azure.Communication.PhoneNumberIdentifier("+1234567890")), cancellationToken);
-
-                    services.Logger.LogInformation($"Answered call for connection id: {answerCallResult.CallConnection.CallConnectionId}");
-                    return Results.Ok();
+                    services.Logger.LogInformation(
+                        "Answered call. CallConnectionId: {CallConnectionId}",
+                        answerResult.CallConnection.CallConnectionId);
                 }
             }
+
             return Results.Ok();
         }).WithName("Call Automation - HandleIncomingCall");
 
         routeGroup.MapPost("/automation/callbacks/{serverCallId}", (
             [AsParameters] CallingServices services,
             [FromBody] CloudEvent[] cloudEvents,
-            [FromRoute] string serverCallId
-            ) =>
+            [FromRoute] string serverCallId) =>
         {
             foreach (var cloudEvent in cloudEvents)
             {
                 var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
-                services.Logger.LogDebug(JsonSerializer.Serialize(callAutomationEvent));
+                services.Logger.LogDebug("Call event {Type}: {Json}",
+                    callAutomationEvent.GetType().Name,
+                    JsonSerializer.Serialize(cloudEvent));
             }
-
             return Results.Ok();
         }).WithName("Call Automation - HandleCallEvents");
 
@@ -102,45 +110,56 @@ public static class CallingApi
             HttpContext httpContext,
             [AsParameters] CallingServices services,
             [FromRoute] string serverCallId,
-            [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId
-            ) =>
+            [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId) =>
         {
             if (!httpContext.WebSockets.IsWebSocketRequest)
             {
                 httpContext.Response.StatusCode = 400;
                 return;
             }
-            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
 
+            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
             var logger = loggerFactory.CreateLogger("CallAutomation.WebSocket");
 
             WebSocket? webSocket = null;
-            ContactCenterConversationSession? session = null;
-            HubSessionParticipant? acsChannel = null;
-            string? callerPhoneNumber = null;
             try
             {
-                // Accept the WebSocket connection
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
-                logger.LogInformation("WebSocket connection established for ServerCallId: {ServerCallId}", serverCallId);
+                logger.LogInformation(
+                    "Media WebSocket established for ServerCallId={ServerCallId}, CallConnectionId={CallConnectionId}",
+                    serverCallId, callConnectionId);
 
-                // Get or create the conversation session
-                var sessionId = $"call_{serverCallId}";
-                session = services.ConversationHub.GetOrCreateSession(sessionId);
+                var callConnection = services.CallAutomationClient.GetCallConnection(callConnectionId);
+                var callProperties = (await callConnection.GetCallConnectionPropertiesAsync(httpContext.RequestAborted)).Value;
 
-                // Get call information
-                acsChannel = await session.AddAcsWebsocketConnectionAsync(webSocket, callConnectionId, httpContext.RequestAborted);
+                var edge = new AcsCallerEdge(
+                    webSocket,
+                    callProperties,
+                    httpContext.RequestAborted,
+                    loggerFactory.CreateLogger<AcsCallerEdge>());
 
-                 // Check if we need to create or reuse an AI agent
-                 var agentParticipantId = $"agent_for_{callerPhoneNumber}";
-                await session.AddRealtimeAIAgentAsync(agentParticipantId);
+                var callId = $"call_{callConnectionId}";
 
-                // Keep the WebSocket connection alive until it's closed
-                await KeepWebSocketAliveAsync(webSocket, session, acsChannel, logger, httpContext.RequestAborted);
+                // Synchronously construct the session and strategy before any media flows.
+                var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
+                {
+                    CallId = callId,
+                    CallerEdge = edge,
+                    Workflow = services.Workflow,
+                    PreferredTier = AgentTier.RealtimeVoice
+                }, httpContext.RequestAborted);
+
+                await session.StartAsync(httpContext.RequestAborted);
+
+                logger.LogInformation("Call session {CallId} started", callId);
+
+                // The session ends itself when the caller edge disconnects (caller hangup,
+                // network failure, etc.). Park here until that happens.
+                await WaitForCallEndAsync(session, httpContext.RequestAborted);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in WebSocket handler for ServerCallId: {ServerCallId}", serverCallId);
+                logger.LogError(ex, "Media WebSocket failed for ServerCallId={ServerCallId}", serverCallId);
 
                 if (webSocket?.State == WebSocketState.Open)
                 {
@@ -152,79 +171,40 @@ public static class CallingApi
             }
         }).WithName("Call Automation - Media WebSocket");
     }
-    private static async Task KeepWebSocketAliveAsync(
-        WebSocket webSocket,
-        ContactCenterConversationSession session,
-        HubSessionParticipant acsChannel,
-        ILogger logger,
-        CancellationToken cancellationToken)
+
+    /// <summary>
+    /// Parks the request until the session reaches a terminal state. The session ends
+    /// itself on caller hangup, so this only completes when the call is over.
+    /// </summary>
+    private static async Task WaitForCallEndAsync(ICallSession session, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource();
-        var channelId = acsChannel.ChannelId;
-        var lastHealthCheck = DateTimeOffset.UtcNow;
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Monitor WebSocket state with health checks
-        _ = Task.Run(async () =>
+        ValueTask Handler(CallSessionState state)
         {
-            try
-            {
-                while (!cancellationToken.IsCancellationRequested &&
-                       webSocket.State == WebSocketState.Open)
-                {
-                    await Task.Delay(1000, cancellationToken);
-
-                    // Log health check every 30 seconds
-                    var now = DateTimeOffset.UtcNow;
-                    if ((now - lastHealthCheck).TotalSeconds >= 30)
-                    {
-                        logger.LogDebug(
-                            "WebSocket health check for channel {ChannelId}: State={State}, SessionActive={SessionActive}",
-                            channelId,
-                            webSocket.State,
-                            session.IsActive);
-                        lastHealthCheck = now;
-                    }
-                }
-
-                logger.LogInformation(
-                    "WebSocket monitoring loop ended for channel {ChannelId}. State: {State}, Cancelled: {Cancelled}",
-                    channelId,
-                    webSocket.State,
-                    cancellationToken.IsCancellationRequested);
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected on cancellation
-                logger.LogDebug("WebSocket monitoring cancelled for channel {ChannelId}", channelId);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error in WebSocket monitoring loop for channel {ChannelId}", channelId);
-            }
-            finally
+            if (state is CallSessionState.Ended or CallSessionState.Faulted)
             {
                 tcs.TrySetResult();
             }
-        }, cancellationToken);
+            return ValueTask.CompletedTask;
+        }
 
+        session.StateChanged += Handler;
         try
         {
-            // Wait for WebSocket to close
-            await tcs.Task;
+            using var registration = cancellationToken.Register(static state => ((TaskCompletionSource)state!).TrySetCanceled(), tcs);
 
+            // Catch the case where the session ended between StartAsync returning and us subscribing.
+            if (session.State is CallSessionState.Ended or CallSessionState.Faulted)
+            {
+                return;
+            }
+
+            await tcs.Task.ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Expected on cancellation
-            logger.LogDebug("WebSocket wait cancelled for channel {ChannelId}", channelId);
-            // Wait for WebSocket to close or cancellation
+            session.StateChanged -= Handler;
         }
-
-        logger.LogInformation(
-            "WebSocket closed for channel {ChannelId}. State: {State}, CloseStatus: {CloseStatus}, CloseDescription: {CloseDescription}",
-            channelId,
-            webSocket.State,
-            webSocket.CloseStatus,
-            webSocket.CloseStatusDescription);
     }
 }
