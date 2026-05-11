@@ -13,10 +13,14 @@ using Microsoft.AspNetCore.Mvc;
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 /// <summary>
-/// ACS Call Automation endpoints, ported onto the new <see cref="ICallSession"/> shape.
-/// The IncomingCall webhook just answers the call; the media WebSocket handler builds
-/// an <see cref="AcsCallerEdge"/>, asks the <see cref="ICallSessionFactory"/> for a session,
-/// starts it, and waits for the edge's Disconnected event to terminate the call.
+/// ACS Call Automation endpoints. Supports two answer modes:
+/// <list type="bullet">
+///   <item><b>streaming</b> (default) — answers with bidirectional media WebSocket;
+///         WS handler builds <see cref="AcsCallerEdge"/> and starts the session.</item>
+///   <item><b>verb</b> (?mode=verb) — answers with no media WS; IncomingCall handler
+///         builds <see cref="AcsCallAutomationEdge"/> and starts the session immediately.
+///         Subsequent caller actions arrive on the callback webhook below.</item>
+/// </list>
 /// </summary>
 public static class CallingApi
 {
@@ -29,10 +33,13 @@ public static class CallingApi
         var routeGroup = endpoints.MapGroup(path).AllowAnonymous();
 
         routeGroup.MapPost(HANDLE_INCOMING_PATH, async (
+            HttpContext httpContext,
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
             CancellationToken cancellationToken) =>
         {
+            var verbMode = string.Equals(httpContext.Request.Query["mode"], "verb", StringComparison.OrdinalIgnoreCase);
+
             foreach (var evt in incomingEvents)
             {
                 if (!evt.TryGetSystemEventData(out var eventData))
@@ -51,47 +58,57 @@ public static class CallingApi
                 if (eventData is AcsIncomingCallEventData incoming)
                 {
                     services.Logger.LogInformation(
-                        "Incoming call from {From} to {To} (server call {ServerCallId})",
+                        "Incoming call from {From} to {To} (server call {ServerCallId}); mode={Mode}",
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
-                        incoming.ServerCallId);
+                        incoming.ServerCallId,
+                        verbMode ? "verb" : "streaming");
 
                     var callbackUri = new Uri(
                         services.Options.Value.Acs.CallBackUri,
                         relativeUri: $"{path}{CALLBACK_PATH}/{incoming.ServerCallId}");
-                    var websocketUri = new Uri(
-                        services.Options.Value.Acs.MediaStreamingUri,
-                        relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}/{incoming.ServerCallId}");
 
-                    var mediaStreamingOptions = new MediaStreamingOptions(
-                        audioChannelType: MediaStreamingAudioChannel.Mixed,
-                        streamingTransport: StreamingTransport.Websocket)
-                    {
-                        EnableBidirectional = true,
-                        EnableDtmfTones = true,
-                        TransportUri = websocketUri,
-                        StartMediaStreaming = true,
-                        AudioFormat = services.Options.Value.Acs.audioFormat
-                    };
+                    var answerOptions = new AnswerCallOptions(incoming.IncomingCallContext, callbackUri);
 
-                    var answerOptions = new AnswerCallOptions(incoming.IncomingCallContext, callbackUri)
+                    if (!verbMode)
                     {
-                        MediaStreamingOptions = mediaStreamingOptions
-                    };
+                        var websocketUri = new Uri(
+                            services.Options.Value.Acs.MediaStreamingUri,
+                            relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}/{incoming.ServerCallId}");
+
+                        answerOptions.MediaStreamingOptions = new MediaStreamingOptions(
+                            audioChannelType: MediaStreamingAudioChannel.Mixed,
+                            streamingTransport: StreamingTransport.Websocket)
+                        {
+                            EnableBidirectional = true,
+                            EnableDtmfTones = true,
+                            TransportUri = websocketUri,
+                            StartMediaStreaming = true,
+                            AudioFormat = services.Options.Value.Acs.audioFormat
+                        };
+                    }
 
                     var answerResult = (await services.CallAutomationClient
                         .AnswerCallAsync(answerOptions, cancellationToken)).Value;
 
+                    var callConnection = answerResult.CallConnection;
                     services.Logger.LogInformation(
                         "Answered call. CallConnectionId: {CallConnectionId}",
-                        answerResult.CallConnection.CallConnectionId);
+                        callConnection.CallConnectionId);
+
+                    if (verbMode)
+                    {
+                        // Verb-mode session is born here — no WS handshake will follow.
+                        await StartVerbSessionAsync(services, callConnection, incoming, cancellationToken);
+                    }
+                    // Streaming mode waits for the media WSS handler below to build the edge.
                 }
             }
 
             return Results.Ok();
         }).WithName("Call Automation - HandleIncomingCall");
 
-        routeGroup.MapPost("/automation/callbacks/{serverCallId}", (
+        routeGroup.MapPost("/automation/callbacks/{serverCallId}", async (
             [AsParameters] CallingServices services,
             [FromBody] CloudEvent[] cloudEvents,
             [FromRoute] string serverCallId) =>
@@ -99,9 +116,16 @@ public static class CallingApi
             foreach (var cloudEvent in cloudEvents)
             {
                 var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
-                services.Logger.LogDebug("Call event {Type}: {Json}",
-                    callAutomationEvent.GetType().Name,
-                    JsonSerializer.Serialize(cloudEvent));
+                services.Logger.LogDebug("Call event {Type} for {ServerCallId}",
+                    callAutomationEvent.GetType().Name, serverCallId);
+
+                // Find the session and dispatch to the verb edge if the call uses one.
+                var callId = $"call_{callAutomationEvent.CallConnectionId}";
+                var session = services.SessionRegistry.TryGet(callId);
+                if (session?.CallerEdge is AcsCallAutomationEdge verbEdge)
+                {
+                    DispatchToVerbEdge(verbEdge, callAutomationEvent);
+                }
             }
             return Results.Ok();
         }).WithName("Call Automation - HandleCallEvents");
@@ -140,7 +164,6 @@ public static class CallingApi
 
                 var callId = $"call_{callConnectionId}";
 
-                // Synchronously construct the session and strategy before any media flows.
                 var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
                 {
                     CallId = callId,
@@ -150,17 +173,13 @@ public static class CallingApi
                 }, httpContext.RequestAborted);
 
                 await session.StartAsync(httpContext.RequestAborted);
+                logger.LogInformation("Streaming call session {CallId} started", callId);
 
-                logger.LogInformation("Call session {CallId} started", callId);
-
-                // The session ends itself when the caller edge disconnects (caller hangup,
-                // network failure, etc.). Park here until that happens.
                 await WaitForCallEndAsync(session, httpContext.RequestAborted);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Media WebSocket failed for ServerCallId={ServerCallId}", serverCallId);
-
                 if (webSocket?.State == WebSocketState.Open)
                 {
                     await webSocket.CloseAsync(
@@ -173,8 +192,75 @@ public static class CallingApi
     }
 
     /// <summary>
-    /// Parks the request until the session reaches a terminal state. The session ends
-    /// itself on caller hangup, so this only completes when the call is over.
+    /// Verb-mode call-start path. Answer has already happened; we wrap the
+    /// <see cref="CallConnection"/> in <see cref="AcsCallAutomationEdge"/>, hand it
+    /// to the session factory, and start the session. The session lives until the
+    /// callback webhook posts <c>CallDisconnected</c>.
+    /// </summary>
+    private static async Task StartVerbSessionAsync(
+        CallingServices services,
+        CallConnection callConnection,
+        AcsIncomingCallEventData incoming,
+        CancellationToken cancellationToken)
+    {
+        // Recognize verbs target the calling participant.
+        var fromIdentifier = Azure.Communication.CommunicationIdentifier.FromRawId(
+            incoming.FromCommunicationIdentifier!.RawId);
+
+        var media = new CallMediaClient(callConnection, fromIdentifier);
+        var metadata = new CallEdgeMetadata
+        {
+            DisplayName = incoming.FromCommunicationIdentifier!.RawId,
+            RawIdentifier = incoming.FromCommunicationIdentifier!.RawId,
+            CorrelationId = incoming.CorrelationId,
+            ServerCallId = incoming.ServerCallId,
+        };
+
+        var edge = new AcsCallAutomationEdge(
+            callConnection.CallConnectionId,
+            media,
+            metadata,
+            services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>());
+
+        var callId = $"call_{callConnection.CallConnectionId}";
+
+        var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
+        {
+            CallId = callId,
+            CallerEdge = edge,
+            Workflow = services.Workflow,
+            PreferredTier = AgentTier.DtmfOnly,
+        }, cancellationToken);
+
+        await session.StartAsync(cancellationToken);
+        services.Logger.LogInformation("Verb-mode call session {CallId} started", callId);
+    }
+
+    private static void DispatchToVerbEdge(AcsCallAutomationEdge edge, CallAutomationEventBase evt)
+    {
+        switch (evt)
+        {
+            case RecognizeCompleted rc:
+                edge.OnRecognizeCompleted(rc);
+                break;
+            case RecognizeFailed rf:
+                edge.OnRecognizeFailed(rf);
+                break;
+            case PlayCompleted pc:
+                edge.OnPlayCompleted(pc);
+                break;
+            case PlayFailed pf:
+                edge.OnPlayFailed(pf);
+                break;
+            case CallDisconnected:
+                edge.OnCallDisconnected();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Parks the request until the session reaches a terminal state. Used by the
+    /// streaming WSS handler — verb mode doesn't need this since no request is parked.
     /// </summary>
     private static async Task WaitForCallEndAsync(ICallSession session, CancellationToken cancellationToken)
     {
@@ -194,7 +280,6 @@ public static class CallingApi
         {
             using var registration = cancellationToken.Register(static state => ((TaskCompletionSource)state!).TrySetCanceled(), tcs);
 
-            // Catch the case where the session ended between StartAsync returning and us subscribing.
             if (session.State is CallSessionState.Ended or CallSessionState.Faulted)
             {
                 return;

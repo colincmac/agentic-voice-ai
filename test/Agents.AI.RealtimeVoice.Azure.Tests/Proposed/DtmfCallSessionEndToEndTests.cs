@@ -223,13 +223,17 @@ internal sealed class FakeCallerEdge : ICallEdge
     private readonly Channel<AudioFrame> _inboundAudio = Channel.CreateUnbounded<AudioFrame>();
     private readonly Channel<DtmfTone> _inboundDtmf = Channel.CreateUnbounded<DtmfTone>();
     private readonly Channel<SessionSignal> _inboundSignals = Channel.CreateUnbounded<SessionSignal>();
+    private readonly Channel<OutboundDirective> _sentDirectives = Channel.CreateUnbounded<OutboundDirective>();
+    private readonly Channel<AudioFrame> _sentAudio = Channel.CreateUnbounded<AudioFrame>();
     private bool _connected;
     private int _disconnectFired;
 
-    public FakeCallerEdge(string edgeId, CallEdgeKind kind = CallEdgeKind.Caller, string? displayName = null)
+    public FakeCallerEdge(string edgeId, CallEdgeKind kind = CallEdgeKind.Caller, string? displayName = null,
+        EdgeCapabilities capabilities = EdgeCapabilities.Streaming)
     {
         EdgeId = edgeId;
         Kind = kind;
+        Capabilities = capabilities;
         Metadata = new CallEdgeMetadata
         {
             DisplayName = displayName ?? $"fake-{kind.ToString().ToLowerInvariant()}",
@@ -241,12 +245,17 @@ internal sealed class FakeCallerEdge : ICallEdge
     public CallEdgeKind Kind { get; }
     public CallEdgeMetadata Metadata { get; }
     public bool IsConnected => _connected;
+    public EdgeCapabilities Capabilities { get; }
 
     public ChannelReader<AudioFrame> InboundAudio => _inboundAudio.Reader;
     public ChannelReader<DtmfTone> InboundDtmf => _inboundDtmf.Reader;
     public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
 
-    public Channel<AudioFrame> Sent { get; } = Channel.CreateUnbounded<AudioFrame>();
+    /// <summary>Every directive the session asked us to dispatch, in order.</summary>
+    public Channel<OutboundDirective> SentDirectives => _sentDirectives;
+
+    /// <summary>Convenience view: only the audio frames the session dispatched (Audio directives).</summary>
+    public Channel<AudioFrame> Sent => _sentAudio;
 
     public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
 
@@ -256,11 +265,14 @@ internal sealed class FakeCallerEdge : ICallEdge
         return Task.CompletedTask;
     }
 
-    public ValueTask SendAudioAsync(AudioFrame frame, CancellationToken cancellationToken = default)
-        => Sent.Writer.WriteAsync(frame, cancellationToken);
-
-    public ValueTask StopAudioAsync(CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
+    public async ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default)
+    {
+        await _sentDirectives.Writer.WriteAsync(directive, cancellationToken).ConfigureAwait(false);
+        if (directive is OutboundDirective.Audio audio)
+        {
+            await _sentAudio.Writer.WriteAsync(audio.Frame, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     public ValueTask PushDtmfAsync(char digit)
         => _inboundDtmf.Writer.WriteAsync(new DtmfTone(digit, DateTimeOffset.UtcNow));
@@ -298,7 +310,8 @@ internal sealed class FakeCallerEdge : ICallEdge
         _inboundAudio.Writer.TryComplete();
         _inboundDtmf.Writer.TryComplete();
         _inboundSignals.Writer.TryComplete();
-        Sent.Writer.TryComplete();
+        _sentDirectives.Writer.TryComplete();
+        _sentAudio.Writer.TryComplete();
         return ValueTask.CompletedTask;
     }
 }

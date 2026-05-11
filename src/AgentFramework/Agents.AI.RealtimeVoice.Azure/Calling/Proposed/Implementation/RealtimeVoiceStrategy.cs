@@ -17,7 +17,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly ILogger _logger;
 
-    private readonly Channel<AudioFrame> _outboundAudio = Channel.CreateBounded<AudioFrame>(
+    private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
         new BoundedChannelOptions(500)
         {
             SingleReader = true,
@@ -57,7 +57,9 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     public IvrWorkflowState WorkflowState { get; }
 
-    public ChannelReader<AudioFrame> OutboundAudio => _outboundAudio.Reader;
+    public EdgeCapabilities EmittedDirectives => EdgeCapabilities.Audio | EdgeCapabilities.StopPlayback;
+
+    public ChannelReader<OutboundDirective> Outbound => _outbound.Reader;
 
     public ChannelReader<StrategyEvent> Events => _events.Reader;
 
@@ -98,7 +100,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             try { await _agentLoop.ConfigureAwait(false); } catch { /* shutdown */ }
         }
 
-        _outboundAudio.Writer.TryComplete();
+        _outbound.Writer.TryComplete();
         _events.Writer.TryComplete();
     }
 
@@ -150,8 +152,9 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                 switch (update)
                 {
                     case RealtimeBackendUpdate.Audio audio when !_suspended:
-                        await _outboundAudio.Writer.WriteAsync(
-                            new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _backend.AgentId),
+                        await _outbound.Writer.WriteAsync(
+                            new OutboundDirective.Audio(
+                                new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _backend.AgentId)),
                             ct).ConfigureAwait(false);
                         break;
 

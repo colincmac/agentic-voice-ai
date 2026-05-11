@@ -131,6 +131,19 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
+    /// Registers the verb-based DTMF strategy. Pairs with
+    /// <see cref="AcsCallAutomationEdge"/> and emits SpeakText + CollectDtmf
+    /// directives instead of locally synthesized PCM. Requires no
+    /// <see cref="Agents.AI.Extensions.LiveVoice.Media.Audio.ISpeechSynthesizer"/>
+    /// since the platform handles TTS via attached Cognitive Services.
+    /// </summary>
+    public CallSessionContainerBuilder AddDtmfVerbStrategy()
+    {
+        Services.AddSingleton<IConversationStrategyFactory, Implementation.DtmfVerbStrategyFactory>();
+        return this;
+    }
+
+    /// <summary>
     /// Registers the default <see cref="DashboardProjectionObserver"/> so dashboard
     /// snapshots are populated from <see cref="StrategyEvent"/>s.
     /// </summary>

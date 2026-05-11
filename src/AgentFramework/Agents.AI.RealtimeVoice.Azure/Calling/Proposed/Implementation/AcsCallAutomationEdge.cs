@@ -1,0 +1,211 @@
+using System.Threading.Channels;
+using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Azure.Communication.CallAutomation;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
+
+/// <summary>
+/// Verb-based ACS caller edge. Owns no media WebSocket — it dispatches Play /
+/// Recognize / Cancel verbs against ACS Call Automation and receives results
+/// out-of-band on the application's callback webhook (see <c>CallingApi</c>).
+/// <para>
+/// Pair with strategies that emit <see cref="OutboundDirective.SpeakText"/>,
+/// <see cref="OutboundDirective.PlayFile"/>, and <see cref="OutboundDirective.CollectDtmf"/>.
+/// Audio directives are dropped — there's no streaming channel to write them to.
+/// </para>
+/// </summary>
+public sealed class AcsCallAutomationEdge : ICallEdge
+{
+    private readonly ICallMediaClient _media;
+    private readonly ILogger<AcsCallAutomationEdge> _logger;
+    private readonly CancellationTokenSource _cts = new();
+
+    // Caller-side audio is never produced by this edge — verb-based calls have no
+    // streaming inbound channel. The reader stays empty for the lifetime of the edge.
+    private readonly Channel<AudioFrame> _inboundAudio = Channel.CreateUnbounded<AudioFrame>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+    private readonly Channel<DtmfTone> _inboundDtmf = Channel.CreateUnbounded<DtmfTone>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+    private readonly Channel<SessionSignal> _inboundSignals = Channel.CreateUnbounded<SessionSignal>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+    private bool _connected;
+    private int _disconnectFired;
+
+    public AcsCallAutomationEdge(
+        string callConnectionId,
+        ICallMediaClient media,
+        CallEdgeMetadata metadata,
+        ILogger<AcsCallAutomationEdge>? logger = null)
+    {
+        EdgeId = callConnectionId;
+        _media = media;
+        Metadata = metadata;
+        _logger = logger ?? NullLogger<AcsCallAutomationEdge>.Instance;
+    }
+
+    public string EdgeId { get; }
+
+    public CallEdgeKind Kind => CallEdgeKind.Caller;
+
+    public CallEdgeMetadata Metadata { get; }
+
+    public bool IsConnected => _connected;
+
+    public ChannelReader<AudioFrame> InboundAudio => _inboundAudio.Reader;
+
+    public ChannelReader<DtmfTone> InboundDtmf => _inboundDtmf.Reader;
+
+    public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
+
+    public EdgeCapabilities Capabilities => EdgeCapabilities.Verb;
+
+    public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
+
+    public Task ConnectAsync(CancellationToken cancellationToken = default)
+    {
+        _connected = true;
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            switch (directive)
+            {
+                case OutboundDirective.SpeakText speak:
+                    await _media.PlayTextAsync(speak.Text, speak.VoiceName, speak.OperationContext, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case OutboundDirective.PlayFile play:
+                    await _media.PlayFileAsync(play.FileUri, play.OperationContext, cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case OutboundDirective.StopPlayback:
+                    await _media.CancelAllAsync(cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case OutboundDirective.CollectDtmf recognize:
+                    await _media.RecognizeDtmfAsync(
+                        recognize.MaxTones,
+                        recognize.StopTone,
+                        recognize.InterToneTimeout,
+                        recognize.InitialSilenceTimeout,
+                        recognize.OperationContext,
+                        cancellationToken).ConfigureAwait(false);
+                    break;
+
+                default:
+                    _logger.LogWarning(
+                        "Verb ACS edge {EdgeId} cannot dispatch {DirectiveKind}; pair this strategy with an AcsCallerEdge instead",
+                        EdgeId, directive.GetType().Name);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Verb ACS edge {EdgeId} failed to dispatch {DirectiveKind}", EdgeId, directive.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Hook the application webhook calls when ACS posts a <see cref="RecognizeCompleted"/>
+    /// CloudEvent for this call. Writes the recognized DTMF digits to <see cref="InboundDtmf"/>.
+    /// </summary>
+    public void OnRecognizeCompleted(RecognizeCompleted evt)
+    {
+        var result = evt.RecognizeResult;
+        if (result is DtmfResult dtmf && dtmf.Tones is { Count: > 0 } tones)
+        {
+            var at = DateTimeOffset.UtcNow;
+            foreach (var tone in tones)
+            {
+                if (TryMapTone(tone, out var digit))
+                {
+                    _inboundDtmf.Writer.TryWrite(new DtmfTone(digit, at));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hook the application webhook calls when ACS posts a <see cref="RecognizeFailed"/>.
+    /// Surfaced as a <see cref="SessionSignalKind.Custom"/> signal so strategies can react
+    /// (re-prompt, increment retry counter, escalate).
+    /// </summary>
+    public void OnRecognizeFailed(RecognizeFailed evt)
+    {
+        _inboundSignals.Writer.TryWrite(new SessionSignal
+        {
+            Kind = SessionSignalKind.Custom,
+            Value = $"recognize-failed:{evt.ReasonCode}"
+        });
+    }
+
+    /// <summary>Hook for ACS PlayCompleted callbacks. Drops the event today; reserved for future correlation.</summary>
+    public void OnPlayCompleted(PlayCompleted evt) => _logger.LogDebug("Play completed for {EdgeId} ({Context})", EdgeId, evt.OperationContext);
+
+    /// <summary>Hook for ACS PlayFailed callbacks. Logged as a warning; no signal raised by default.</summary>
+    public void OnPlayFailed(PlayFailed evt) => _logger.LogWarning("Play failed for {EdgeId}: {Reason}", EdgeId, evt.ReasonCode);
+
+    /// <summary>Hook for ACS CallDisconnected callbacks. Fires <see cref="Disconnected"/>.</summary>
+    public void OnCallDisconnected(EdgeDisconnectedReason reason = EdgeDisconnectedReason.CallerHangup)
+        => _ = RaiseDisconnectedAsync(reason);
+
+    public async ValueTask DisposeAsync()
+    {
+        _connected = false;
+        await _cts.CancelAsync().ConfigureAwait(false);
+        _inboundAudio.Writer.TryComplete();
+        _inboundDtmf.Writer.TryComplete();
+        _inboundSignals.Writer.TryComplete();
+        _cts.Dispose();
+        await RaiseDisconnectedAsync(EdgeDisconnectedReason.SessionEnded).ConfigureAwait(false);
+    }
+
+    private async ValueTask RaiseDisconnectedAsync(EdgeDisconnectedReason reason)
+    {
+        if (Interlocked.Exchange(ref _disconnectFired, 1) != 0)
+        {
+            return;
+        }
+
+        var handlers = Disconnected;
+        if (handlers is null)
+        {
+            return;
+        }
+        foreach (var handler in handlers.GetInvocationList().Cast<Func<EdgeDisconnectedReason, ValueTask>>())
+        {
+            try { await handler(reason).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Disconnected handler threw"); }
+        }
+    }
+
+    private static bool TryMapTone(global::Azure.Communication.CallAutomation.DtmfTone acsTone, out char digit)
+    {
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Zero)     { digit = '0'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.One)      { digit = '1'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Two)      { digit = '2'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Three)    { digit = '3'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Four)     { digit = '4'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Five)     { digit = '5'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Six)      { digit = '6'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Seven)    { digit = '7'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Eight)    { digit = '8'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Nine)     { digit = '9'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Pound)    { digit = '#'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Asterisk) { digit = '*'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.A)        { digit = 'A'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.B)        { digit = 'B'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.C)        { digit = 'C'; return true; }
+        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.D)        { digit = 'D'; return true; }
+        digit = '\0';
+        return false;
+    }
+}

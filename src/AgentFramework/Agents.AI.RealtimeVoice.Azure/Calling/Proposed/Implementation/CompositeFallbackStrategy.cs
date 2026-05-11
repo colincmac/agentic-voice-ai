@@ -24,7 +24,7 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly ILogger _logger;
 
-    private readonly Channel<AudioFrame> _outboundAudio = Channel.CreateBounded<AudioFrame>(
+    private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
         new BoundedChannelOptions(500)
         {
             SingleReader = true,
@@ -65,7 +65,9 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
     public IvrWorkflowState WorkflowState => _active?.WorkflowState ?? _placeholderState;
     private readonly IvrWorkflowState _placeholderState = new();
 
-    public ChannelReader<AudioFrame> OutboundAudio => _outboundAudio.Reader;
+    public ChannelReader<OutboundDirective> Outbound => _outbound.Reader;
+
+    public EdgeCapabilities EmittedDirectives => _active?.EmittedDirectives ?? EdgeCapabilities.None;
 
     public ChannelReader<StrategyEvent> Events => _events.Reader;
 
@@ -99,7 +101,7 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
             try { await pumps.ConfigureAwait(false); } catch { /* shutdown */ }
         }
 
-        _outboundAudio.Writer.TryComplete();
+        _outbound.Writer.TryComplete();
         _events.Writer.TryComplete();
     }
 
@@ -129,7 +131,7 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
             await _events.Writer.WriteAsync(
                 new StrategyEvent.Faulted("No fallback available", null, DateTimeOffset.UtcNow),
                 CancellationToken.None).ConfigureAwait(false);
-            _outboundAudio.Writer.TryComplete();
+            _outbound.Writer.TryComplete();
             _events.Writer.TryComplete();
             return;
         }
@@ -194,9 +196,9 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
     {
         try
         {
-            await foreach (var frame in inner.OutboundAudio.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var directive in inner.Outbound.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                await _outboundAudio.Writer.WriteAsync(frame, ct).ConfigureAwait(false);
+                await _outbound.Writer.WriteAsync(directive, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* swap or shutdown */ }

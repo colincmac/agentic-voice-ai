@@ -404,9 +404,10 @@ public sealed class CallSession : ICallSession
                     await _strategyInbound.Writer.WriteAsync(frame, _cts.Token).ConfigureAwait(false);
                 }
 
-                if (supervisor is not null && mode is Proposed.SupervisorMode.Monitor or Proposed.SupervisorMode.Whisper)
+                if (supervisor is not null && mode is Proposed.SupervisorMode.Monitor or Proposed.SupervisorMode.Whisper
+                    && supervisor.Capabilities.HasFlag(EdgeCapabilities.Audio))
                 {
-                    try { await supervisor.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false); }
+                    try { await supervisor.DispatchAsync(new OutboundDirective.Audio(frame), _cts.Token).ConfigureAwait(false); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Supervisor caller-tap send failed"); }
                 }
             }
@@ -420,15 +421,16 @@ public sealed class CallSession : ICallSession
     }
 
     /// <summary>
-    /// Reads strategy audio output and sends it to the caller. When a supervisor
-    /// is attached in Monitor mode, the supervisor also hears the agent. In BargeIn
-    /// mode the strategy is suspended and no agent audio reaches the caller.
+    /// Reads strategy outbound directives and dispatches them to the caller. In
+    /// Monitor mode the supervisor receives a tap of any Audio directive (other
+    /// directive kinds aren't audible — supervisors are streaming edges). In BargeIn
+    /// the strategy is suspended and no directive reaches the caller.
     /// </summary>
     private async Task PumpStrategyOutboundAsync()
     {
         try
         {
-            await foreach (var frame in _strategy.OutboundAudio.ReadAllAsync(_cts.Token).ConfigureAwait(false))
+            await foreach (var directive in _strategy.Outbound.ReadAllAsync(_cts.Token).ConfigureAwait(false))
             {
                 ICallEdge? supervisor;
                 SupervisorMode? mode;
@@ -438,16 +440,37 @@ public sealed class CallSession : ICallSession
                     mode = _supervisorMode;
                 }
 
-                // BargeIn keeps strategy audio off the caller's wire even if the
+                // BargeIn keeps strategy output off the caller's wire even if the
                 // strategy hasn't drained yet from its suspend signal.
                 if (mode is not Proposed.SupervisorMode.BargeIn && CallerEdge.IsConnected)
                 {
-                    await CallerEdge.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false);
+                    if (CallerEdge.Capabilities.HasFlag(DirectiveCapability(directive)))
+                    {
+                        await CallerEdge.DispatchAsync(directive, _cts.Token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Caller edge for call {CallId} cannot dispatch {DirectiveKind}; capabilities are {Capabilities}",
+                            CallId, directive.GetType().Name, CallerEdge.Capabilities);
+                        // Surface the mismatch so observers / dashboards can flag it.
+                        var mismatch = new StrategyEvent.DispatchUnsupported(
+                            directive.GetType().Name,
+                            CallerEdge.Capabilities,
+                            DateTimeOffset.UtcNow);
+                        foreach (var bridge in _observerFanout)
+                        {
+                            bridge.Writer.TryWrite(mismatch);
+                        }
+                    }
                 }
 
-                if (supervisor is not null && mode is Proposed.SupervisorMode.Monitor)
+                if (supervisor is not null
+                    && mode is Proposed.SupervisorMode.Monitor
+                    && directive is OutboundDirective.Audio agentAudio
+                    && supervisor.Capabilities.HasFlag(EdgeCapabilities.Audio))
                 {
-                    try { await supervisor.SendAudioAsync(frame, _cts.Token).ConfigureAwait(false); }
+                    try { await supervisor.DispatchAsync(agentAudio, _cts.Token).ConfigureAwait(false); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Supervisor agent-tap send failed"); }
                 }
             }
@@ -455,6 +478,16 @@ public sealed class CallSession : ICallSession
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex) { _logger.LogWarning(ex, "Outbound pump terminated for call {CallId}", CallId); }
     }
+
+    private static EdgeCapabilities DirectiveCapability(OutboundDirective directive) => directive switch
+    {
+        OutboundDirective.Audio => EdgeCapabilities.Audio,
+        OutboundDirective.SpeakText => EdgeCapabilities.SpeakText,
+        OutboundDirective.PlayFile => EdgeCapabilities.PlayFile,
+        OutboundDirective.StopPlayback => EdgeCapabilities.StopPlayback,
+        OutboundDirective.CollectDtmf => EdgeCapabilities.CollectDtmf,
+        _ => EdgeCapabilities.None
+    };
 
     /// <summary>
     /// Reads supervisor inbound audio. In BargeIn it bridges to the caller. In
@@ -472,8 +505,9 @@ public sealed class CallSession : ICallSession
 
                 switch (mode)
                 {
-                    case Proposed.SupervisorMode.BargeIn when CallerEdge.IsConnected:
-                        try { await CallerEdge.SendAudioAsync(frame, ct).ConfigureAwait(false); }
+                    case Proposed.SupervisorMode.BargeIn when CallerEdge.IsConnected
+                                                              && CallerEdge.Capabilities.HasFlag(EdgeCapabilities.Audio):
+                        try { await CallerEdge.DispatchAsync(new OutboundDirective.Audio(frame), ct).ConfigureAwait(false); }
                         catch (Exception ex) { _logger.LogDebug(ex, "Supervisor BargeIn send failed"); }
                         break;
 

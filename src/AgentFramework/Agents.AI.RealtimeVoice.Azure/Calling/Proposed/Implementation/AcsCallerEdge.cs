@@ -10,9 +10,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
 /// <summary>
-/// Real wire for an ACS-bridged PSTN caller. Owns the bidirectional audio
-/// WebSocket and surfaces inbound audio + DTMF as channels.
-/// Replaces the wire-half of <see cref="Transports.AcsWebsocketTransport"/>.
+/// Streaming variant of the ACS caller edge. Owns the bidirectional media
+/// WebSocket and speaks PCM. Pairs with strategies that emit
+/// <see cref="OutboundDirective.Audio"/> directly (Realtime, Ensemble, the WS
+/// flavour of DTMF). Pair verb-based strategies with
+/// <see cref="AcsCallAutomationEdge"/> instead.
 /// </summary>
 public sealed class AcsCallerEdge : ICallEdge
 {
@@ -80,6 +82,8 @@ public sealed class AcsCallerEdge : ICallEdge
 
     public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
 
+    public EdgeCapabilities Capabilities => EdgeCapabilities.Streaming;
+
     public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -96,22 +100,32 @@ public sealed class AcsCallerEdge : ICallEdge
         return Task.CompletedTask;
     }
 
-    public ValueTask SendAudioAsync(AudioFrame frame, CancellationToken cancellationToken = default)
-        => _outbound.Writer.WriteAsync(frame.Pcm.ToArray(), cancellationToken);
-
-    public async ValueTask StopAudioAsync(CancellationToken cancellationToken = default)
+    public async ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default)
     {
-        if (_webSocket.State != WebSocketState.Open)
+        switch (directive)
         {
-            return;
-        }
+            case OutboundDirective.Audio audio:
+                await _outbound.Writer.WriteAsync(audio.Frame.Pcm.ToArray(), cancellationToken).ConfigureAwait(false);
+                break;
 
-        var stop = OutStreamingData.GetStopAudioForOutbound();
-        await _webSocket.SendAsync(
-            new ArraySegment<byte>(Encoding.UTF8.GetBytes(stop)),
-            WebSocketMessageType.Text,
-            endOfMessage: true,
-            cancellationToken).ConfigureAwait(false);
+            case OutboundDirective.StopPlayback:
+                if (_webSocket.State == WebSocketState.Open)
+                {
+                    var stop = OutStreamingData.GetStopAudioForOutbound();
+                    await _webSocket.SendAsync(
+                        new ArraySegment<byte>(Encoding.UTF8.GetBytes(stop)),
+                        WebSocketMessageType.Text,
+                        endOfMessage: true,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                break;
+
+            default:
+                _logger.LogWarning(
+                    "Streaming ACS edge {EdgeId} cannot dispatch {DirectiveKind}; pair this strategy with an AcsCallAutomationEdge instead",
+                    EdgeId, directive.GetType().Name);
+                break;
+        }
     }
 
     public async ValueTask DisposeAsync()

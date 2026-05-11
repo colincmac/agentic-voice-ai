@@ -18,6 +18,7 @@ public sealed class CallingServices(
     [FromServices] CallAutomationClient callAutomationClient,
     [FromServices] RealtimeIvrWorkflowDefinition workflow,
     [FromServices] IOptions<CommunicationOptions> options,
+    [FromServices] ILoggerFactory loggerFactory,
     [FromServices] ILogger<CallingServices> logger)
 {
     public ICallSessionFactory SessionFactory { get; } = sessionFactory;
@@ -25,5 +26,6 @@ public sealed class CallingServices(
     public CallAutomationClient CallAutomationClient { get; } = callAutomationClient;
     public RealtimeIvrWorkflowDefinition Workflow { get; } = workflow;
     public IOptions<CommunicationOptions> Options { get; } = options;
+    public ILoggerFactory LoggerFactory { get; } = loggerFactory;
     public ILogger<CallingServices> Logger { get; } = logger;
 }

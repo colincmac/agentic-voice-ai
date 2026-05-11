@@ -31,10 +31,14 @@ public interface IConversationStrategy : IAsyncDisposable
     /// <summary>Workflow state — shared across tier swaps for graceful degradation.</summary>
     IvrWorkflowState WorkflowState { get; }
 
+    /// <summary>The set of <see cref="OutboundDirective"/> kinds this strategy emits.</summary>
+    EdgeCapabilities EmittedDirectives { get; }
+
     /// <summary>
-    /// Audio frames to send to the caller. Session pumps this into the caller edge.
+    /// Outbound directives the session pumps to the caller edge: audio frames
+    /// (streaming edges), or speak/play/recognize verbs (verb-based edges).
     /// </summary>
-    ChannelReader<AudioFrame> OutboundAudio { get; }
+    ChannelReader<OutboundDirective> Outbound { get; }
 
     /// <summary>
     /// Structured events emitted by the strategy: transcripts, agent insights,
@@ -102,4 +106,11 @@ public abstract record StrategyEvent(DateTimeOffset At)
     public sealed record EscalationRequested(string Reason, DateTimeOffset At) : StrategyEvent(At);
     public sealed record TierDegraded(AgentTier From, AgentTier To, string Reason, DateTimeOffset At) : StrategyEvent(At);
     public sealed record Faulted(string Message, Exception? Exception, DateTimeOffset At) : StrategyEvent(At);
+
+    /// <summary>
+    /// Emitted by the session when the active edge dropped a directive whose kind
+    /// is not in its <see cref="EdgeCapabilities"/>. Indicates a strategy/edge
+    /// mismatch — typically a strategy paired with the wrong tier of edge.
+    /// </summary>
+    public sealed record DispatchUnsupported(string DirectiveKind, EdgeCapabilities EdgeCapabilities, DateTimeOffset At) : StrategyEvent(At);
 }

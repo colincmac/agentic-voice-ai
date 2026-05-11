@@ -310,7 +310,7 @@ internal sealed class ControllableStrategyFactory : IConversationStrategyFactory
 internal sealed class ControllableStrategy : IConversationStrategy, IWhisperableStrategy
 {
     public Channel<AudioFrame> Inbound { get; } = Channel.CreateUnbounded<AudioFrame>();
-    private readonly Channel<AudioFrame> _outbound = Channel.CreateUnbounded<AudioFrame>();
+    private readonly Channel<OutboundDirective> _outbound = Channel.CreateUnbounded<OutboundDirective>();
     private readonly Channel<StrategyEvent> _events = Channel.CreateUnbounded<StrategyEvent>();
 
     public List<SupervisorWhisper> Whispers { get; } = [];
@@ -326,7 +326,9 @@ internal sealed class ControllableStrategy : IConversationStrategy, IWhisperable
 
     public IvrWorkflowState WorkflowState { get; } = new() { Status = IvrWorkflowStatus.Running };
 
-    public ChannelReader<AudioFrame> OutboundAudio => _outbound.Reader;
+    public EdgeCapabilities EmittedDirectives => EdgeCapabilities.Audio | EdgeCapabilities.StopPlayback;
+
+    public ChannelReader<OutboundDirective> Outbound => _outbound.Reader;
 
     public ChannelReader<StrategyEvent> Events => _events.Reader;
 
@@ -389,5 +391,6 @@ internal sealed class ControllableStrategy : IConversationStrategy, IWhisperable
     }
 
     public ValueTask EmitOutboundAsync(ReadOnlyMemory<byte> pcm)
-        => _outbound.Writer.WriteAsync(new AudioFrame(pcm, DateTimeOffset.UtcNow, "controllable"));
+        => _outbound.Writer.WriteAsync(new OutboundDirective.Audio(
+            new AudioFrame(pcm, DateTimeOffset.UtcNow, "controllable")));
 }

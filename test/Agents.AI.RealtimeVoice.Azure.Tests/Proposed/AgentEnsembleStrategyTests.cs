@@ -98,7 +98,7 @@ public class AgentEnsembleStrategyTests
 
         // Primary streams an audio frame back → strategy's outbound channel relays it.
         await primary.EmitAsync(new RealtimeBackendUpdate.Audio(new byte[] { 0x10, 0x20 }, DateTimeOffset.UtcNow));
-        var firstOutbound = await ReadOneAsync(strategy.OutboundAudio, TimeSpan.FromSeconds(2));
+        var firstOutbound = await ReadAudioAsync(strategy.Outbound, TimeSpan.FromSeconds(2));
         Assert.Equal(2, firstOutbound.Pcm.Length);
         Assert.Equal("primary", firstOutbound.SourceEdgeId);
 
@@ -183,7 +183,7 @@ public class AgentEnsembleStrategyTests
 
         // Specialist's audio is now what flows out of the strategy.
         await specialist.EmitAsync(new RealtimeBackendUpdate.Audio(new byte[] { 0x11, 0x22, 0x33 }, DateTimeOffset.UtcNow));
-        var outboundFromSpecialist = await ReadOneAsync(strategy.OutboundAudio, TimeSpan.FromSeconds(2));
+        var outboundFromSpecialist = await ReadAudioAsync(strategy.Outbound, TimeSpan.FromSeconds(2));
         Assert.Equal(3, outboundFromSpecialist.Pcm.Length);
         Assert.Equal("specialist", outboundFromSpecialist.SourceEdgeId);
 
@@ -214,6 +214,14 @@ public class AgentEnsembleStrategyTests
     {
         using var cts = new CancellationTokenSource(timeout);
         return await reader.ReadAsync(cts.Token);
+    }
+
+    private static async Task<AudioFrame> ReadAudioAsync(ChannelReader<OutboundDirective> reader, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        var directive = await reader.ReadAsync(cts.Token);
+        var audio = Assert.IsType<OutboundDirective.Audio>(directive);
+        return audio.Frame;
     }
 
     private static async Task<List<T>> CollectEventsAsync<T>(

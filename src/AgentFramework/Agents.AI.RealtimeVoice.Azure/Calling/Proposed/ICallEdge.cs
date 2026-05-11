@@ -39,20 +39,42 @@ public interface ICallEdge : IAsyncDisposable
     /// <summary>Inbound non-media signals (VAD, hold, hangup intent, etc.).</summary>
     ChannelReader<SessionSignal> InboundSignals { get; }
 
-    /// <summary>Send an outbound audio frame to the caller.</summary>
-    ValueTask SendAudioAsync(AudioFrame frame, CancellationToken cancellationToken = default);
+    /// <summary>The set of <see cref="OutboundDirective"/> kinds this edge can dispatch.</summary>
+    EdgeCapabilities Capabilities { get; }
 
     /// <summary>
-    /// Cancel any in-flight outbound audio (used for VAD-triggered barge-in:
-    /// caller starts talking → strategy stops the agent's current utterance).
+    /// Hand a directive to the edge. Edges drop (with a logged warning) any
+    /// directive whose kind is not present in <see cref="Capabilities"/>.
     /// </summary>
-    ValueTask StopAudioAsync(CancellationToken cancellationToken = default);
+    ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default);
 
     /// <summary>Open the wire and begin populating the inbound channels.</summary>
     Task ConnectAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Closed gracefully or due to error; fires exactly once.</summary>
     event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
+}
+
+/// <summary>
+/// Bit flags describing which <see cref="OutboundDirective"/> kinds an edge handles.
+/// Used by the session at start-up to validate strategy/edge pairings, and by the
+/// composite to choose strategies the edge can actually carry.
+/// </summary>
+[Flags]
+public enum EdgeCapabilities
+{
+    None = 0,
+    Audio = 1 << 0,
+    SpeakText = 1 << 1,
+    PlayFile = 1 << 2,
+    StopPlayback = 1 << 3,
+    CollectDtmf = 1 << 4,
+
+    /// <summary>Streaming edges: PCM audio in/out + barge-in stop.</summary>
+    Streaming = Audio | StopPlayback,
+
+    /// <summary>Verb-based edges: ACS Call Automation REST verbs.</summary>
+    Verb = SpeakText | PlayFile | StopPlayback | CollectDtmf,
 }
 
 public enum CallEdgeKind
