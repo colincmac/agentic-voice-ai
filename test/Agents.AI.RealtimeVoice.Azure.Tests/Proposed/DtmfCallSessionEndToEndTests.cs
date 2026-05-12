@@ -125,7 +125,7 @@ public class DtmfCallSessionEndToEndTests
         var previousState = session.Strategy.WorkflowState;
 
         // Build a replacement strategy seeded from the previous workflow state.
-        var replacement = new DtmfStrategy(
+        var replacement = new DtmfStreamingStrategy(
             workflow,
             services.GetRequiredService<ISpeechSynthesizer>(),
             restoreFrom: previousState);

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
@@ -36,9 +37,9 @@ public static class CallingApi
             HttpContext httpContext,
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
-            CancellationToken cancellationToken) =>
+            [FromQuery] string? mode = "streaming",
+            CancellationToken cancellationToken = default) =>
         {
-            var verbMode = string.Equals(httpContext.Request.Query["mode"], "verb", StringComparison.OrdinalIgnoreCase);
 
             foreach (var evt in incomingEvents)
             {
@@ -62,7 +63,7 @@ public static class CallingApi
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
                         incoming.ServerCallId,
-                        verbMode ? "verb" : "streaming");
+                        mode);
 
                     var callbackUri = new Uri(
                         services.Options.Value.Acs.CallBackUri,
@@ -70,7 +71,7 @@ public static class CallingApi
 
                     var answerOptions = new AnswerCallOptions(incoming.IncomingCallContext, callbackUri);
 
-                    if (!verbMode)
+                    if (mode != "verb")
                     {
                         var websocketUri = new Uri(
                             services.Options.Value.Acs.MediaStreamingUri,
@@ -84,19 +85,20 @@ public static class CallingApi
                             EnableDtmfTones = true,
                             TransportUri = websocketUri,
                             StartMediaStreaming = true,
-                            AudioFormat = services.Options.Value.Acs.audioFormat
+                            AudioFormat = services.Options.Value.Acs.AudioFormat
                         };
                     }
 
-                    var answerResult = (await services.CallAutomationClient
-                        .AnswerCallAsync(answerOptions, cancellationToken)).Value;
+                    var answerResult = await services.CallAutomationClient
+                        .AnswerCallAsync(answerOptions, cancellationToken).ConfigureAwait(false);
 
-                    var callConnection = answerResult.CallConnection;
+                    var callConnection = answerResult.Value.CallConnection;
+
                     services.Logger.LogInformation(
                         "Answered call. CallConnectionId: {CallConnectionId}",
                         callConnection.CallConnectionId);
 
-                    if (verbMode)
+                    if (mode == "verb")
                     {
                         // Verb-mode session is born here — no WS handshake will follow.
                         await StartVerbSessionAsync(services, callConnection, incoming, cancellationToken);
@@ -204,7 +206,7 @@ public static class CallingApi
         CancellationToken cancellationToken)
     {
         // Recognize verbs target the calling participant.
-        var fromIdentifier = Azure.Communication.CommunicationIdentifier.FromRawId(
+        var fromIdentifier = CommunicationIdentifier.FromRawId(
             incoming.FromCommunicationIdentifier!.RawId);
 
         var media = new CallMediaClient(callConnection, fromIdentifier);

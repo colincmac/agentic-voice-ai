@@ -1,4 +1,6 @@
+using Azure.Communication;
 using Azure.Communication.CallAutomation;
+using AcsDtmfTone = Azure.Communication.CallAutomation.DtmfTone;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
@@ -23,9 +25,9 @@ public interface ICallMediaClient
 public sealed class CallMediaClient : ICallMediaClient
 {
     private readonly CallMedia _media;
-    private readonly global::Azure.Communication.CommunicationIdentifier _target;
+    private readonly CommunicationIdentifier _target;
 
-    public CallMediaClient(CallConnection connection, global::Azure.Communication.CommunicationIdentifier targetParticipant)
+    public CallMediaClient(CallConnection connection, CommunicationIdentifier targetParticipant)
     {
         _media = connection.GetCallMedia();
         _target = targetParticipant;
@@ -77,24 +79,24 @@ public sealed class CallMediaClient : ICallMediaClient
         return _media.StartRecognizingAsync(options, cancellationToken);
     }
 
-    private static global::Azure.Communication.CallAutomation.DtmfTone MapStopTone(char digit) => digit switch
+    private static AcsDtmfTone MapStopTone(char digit) => digit switch
     {
-        '0' => global::Azure.Communication.CallAutomation.DtmfTone.Zero,
-        '1' => global::Azure.Communication.CallAutomation.DtmfTone.One,
-        '2' => global::Azure.Communication.CallAutomation.DtmfTone.Two,
-        '3' => global::Azure.Communication.CallAutomation.DtmfTone.Three,
-        '4' => global::Azure.Communication.CallAutomation.DtmfTone.Four,
-        '5' => global::Azure.Communication.CallAutomation.DtmfTone.Five,
-        '6' => global::Azure.Communication.CallAutomation.DtmfTone.Six,
-        '7' => global::Azure.Communication.CallAutomation.DtmfTone.Seven,
-        '8' => global::Azure.Communication.CallAutomation.DtmfTone.Eight,
-        '9' => global::Azure.Communication.CallAutomation.DtmfTone.Nine,
-        '*' => global::Azure.Communication.CallAutomation.DtmfTone.Asterisk,
-        '#' => global::Azure.Communication.CallAutomation.DtmfTone.Pound,
-        'A' or 'a' => global::Azure.Communication.CallAutomation.DtmfTone.A,
-        'B' or 'b' => global::Azure.Communication.CallAutomation.DtmfTone.B,
-        'C' or 'c' => global::Azure.Communication.CallAutomation.DtmfTone.C,
-        'D' or 'd' => global::Azure.Communication.CallAutomation.DtmfTone.D,
+        '0' => AcsDtmfTone.Zero,
+        '1' => AcsDtmfTone.One,
+        '2' => AcsDtmfTone.Two,
+        '3' => AcsDtmfTone.Three,
+        '4' => AcsDtmfTone.Four,
+        '5' => AcsDtmfTone.Five,
+        '6' => AcsDtmfTone.Six,
+        '7' => AcsDtmfTone.Seven,
+        '8' => AcsDtmfTone.Eight,
+        '9' => AcsDtmfTone.Nine,
+        '*' => AcsDtmfTone.Asterisk,
+        '#' => AcsDtmfTone.Pound,
+        'A' or 'a' => AcsDtmfTone.A,
+        'B' or 'b' => AcsDtmfTone.B,
+        'C' or 'c' => AcsDtmfTone.C,
+        'D' or 'd' => AcsDtmfTone.D,
         _ => throw new ArgumentOutOfRangeException(nameof(digit), digit, "Unsupported DTMF stop tone")
     };
 }

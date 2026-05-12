@@ -3,6 +3,7 @@ using Agents.AI.Extensions.LiveVoice.Media.Signaling;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using AcsDtmfTone = Azure.Communication.CallAutomation.DtmfTone;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
@@ -187,24 +188,24 @@ public sealed class AcsCallAutomationEdge : ICallEdge
         }
     }
 
-    private static bool TryMapTone(global::Azure.Communication.CallAutomation.DtmfTone acsTone, out char digit)
+    private static bool TryMapTone(AcsDtmfTone acsTone, out char digit)
     {
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Zero)     { digit = '0'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.One)      { digit = '1'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Two)      { digit = '2'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Three)    { digit = '3'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Four)     { digit = '4'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Five)     { digit = '5'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Six)      { digit = '6'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Seven)    { digit = '7'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Eight)    { digit = '8'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Nine)     { digit = '9'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Pound)    { digit = '#'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.Asterisk) { digit = '*'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.A)        { digit = 'A'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.B)        { digit = 'B'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.C)        { digit = 'C'; return true; }
-        if (acsTone == global::Azure.Communication.CallAutomation.DtmfTone.D)        { digit = 'D'; return true; }
+        if (acsTone == AcsDtmfTone.Zero)     { digit = '0'; return true; }
+        if (acsTone == AcsDtmfTone.One)      { digit = '1'; return true; }
+        if (acsTone == AcsDtmfTone.Two)      { digit = '2'; return true; }
+        if (acsTone == AcsDtmfTone.Three)    { digit = '3'; return true; }
+        if (acsTone == AcsDtmfTone.Four)     { digit = '4'; return true; }
+        if (acsTone == AcsDtmfTone.Five)     { digit = '5'; return true; }
+        if (acsTone == AcsDtmfTone.Six)      { digit = '6'; return true; }
+        if (acsTone == AcsDtmfTone.Seven)    { digit = '7'; return true; }
+        if (acsTone == AcsDtmfTone.Eight)    { digit = '8'; return true; }
+        if (acsTone == AcsDtmfTone.Nine)     { digit = '9'; return true; }
+        if (acsTone == AcsDtmfTone.Pound)    { digit = '#'; return true; }
+        if (acsTone == AcsDtmfTone.Asterisk) { digit = '*'; return true; }
+        if (acsTone == AcsDtmfTone.A)        { digit = 'A'; return true; }
+        if (acsTone == AcsDtmfTone.B)        { digit = 'B'; return true; }
+        if (acsTone == AcsDtmfTone.C)        { digit = 'C'; return true; }
+        if (acsTone == AcsDtmfTone.D)        { digit = 'D'; return true; }
         digit = '\0';
         return false;
     }

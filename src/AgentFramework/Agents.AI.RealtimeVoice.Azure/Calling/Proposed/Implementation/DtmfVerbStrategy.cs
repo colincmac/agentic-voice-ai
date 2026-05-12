@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
 /// <summary>
-/// Verb-based companion to <see cref="DtmfStrategy"/>. Emits
+/// Verb-based companion to <see cref="DtmfStreamingStrategy"/>. Emits
 /// <see cref="OutboundDirective.SpeakText"/> for prompts and
 /// <see cref="OutboundDirective.CollectDtmf"/> for input collection. No local
 /// speech synthesizer dependency — ACS does the rendering via its attached

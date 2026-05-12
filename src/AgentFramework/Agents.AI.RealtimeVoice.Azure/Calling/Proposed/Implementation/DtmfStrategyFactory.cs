@@ -19,7 +19,7 @@ public sealed class DtmfStrategyFactory : IConversationStrategyFactory
     {
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
         var loggerFactory = services.GetService<ILoggerFactory>();
-        IConversationStrategy strategy = new DtmfStrategy(workflow, synthesizer, restoreFrom, loggerFactory);
+        IConversationStrategy strategy = new DtmfStreamingStrategy(workflow, synthesizer, restoreFrom, loggerFactory);
         return ValueTask.FromResult(strategy);
     }
 }

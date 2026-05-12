@@ -18,7 +18,7 @@ public class AcsOptions
     public required string ConnectionString { get; set; }
     public required Uri CallBackUri { get; set; }
     public required Uri MediaStreamingUri { get; set; }
-    public AudioFormat audioFormat { get; set; } = AudioFormat.Pcm24KMono;
+    public AudioFormat AudioFormat { get; set; } = AudioFormat.Pcm24KMono;
     public Uri AcsResourceEndpoint => new(ConnectionString.Split(';').First(s => s.StartsWith("endpoint=", StringComparison.OrdinalIgnoreCase)).Split('=')[1]);
     public string AcsApiVersion { get; set; } = "2025-06-30";
     public Guid GlobalID { get; set; }

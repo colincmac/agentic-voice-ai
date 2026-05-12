@@ -11,7 +11,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 /// Tier 4 strategy: DTMF menu navigation driven directly by <see cref="RealtimeIvrWorkflowDefinition"/>.
 /// Ports <see cref="Transports.DtmfIvrTransport"/> onto <see cref="IConversationStrategy"/>.
 /// </summary>
-public sealed class DtmfStrategy : IConversationStrategy
+public sealed class DtmfStreamingStrategy : IConversationStrategy
 {
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly ISpeechSynthesizer _synthesizer;
@@ -35,7 +35,7 @@ public sealed class DtmfStrategy : IConversationStrategy
     private string _digitBuffer = string.Empty;
     private bool _suspended;
 
-    public DtmfStrategy(
+    public DtmfStreamingStrategy(
         RealtimeIvrWorkflowDefinition workflow,
         ISpeechSynthesizer synthesizer,
         IvrWorkflowState? restoreFrom = null,
@@ -43,7 +43,7 @@ public sealed class DtmfStrategy : IConversationStrategy
     {
         _workflow = workflow;
         _synthesizer = synthesizer;
-        _logger = loggerFactory?.CreateLogger<DtmfStrategy>() ?? NullLogger<DtmfStrategy>.Instance;
+        _logger = loggerFactory?.CreateLogger<DtmfStreamingStrategy>() ?? NullLogger<DtmfStreamingStrategy>.Instance;
 
         WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
         if (restoreFrom is not null)
@@ -287,25 +287,5 @@ public sealed class DtmfStrategy : IConversationStrategy
         }
 
         return prompt;
-    }
-}
-
-internal static class WorkflowStateRestore
-{
-    public static void CopyInto(IvrWorkflowState source, IvrWorkflowState target)
-    {
-        target.CurrentStepName = source.CurrentStepName;
-        target.Status = source.Status;
-        target.TotalTurns = source.TotalTurns;
-
-        foreach (var stepId in source.CompletedSteps)
-        {
-            target.MarkStepCompleted(stepId);
-        }
-
-        foreach (var key in source.Keys)
-        {
-            target.Set(key, source.Get<object>(key));
-        }
     }
 }
