@@ -545,11 +545,24 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     }
 
     /// <summary>
-    /// Configures DTMF menu options for this step, used in Tier 4 (pure DTMF) mode.
+    /// Configures DTMF menu options for this step from a digit→next-step-ID map.
+    /// Each entry becomes a declarative <see cref="DtmfMenuOption"/> whose label
+    /// matches the next step ID.
     /// </summary>
     public RealtimeIvrStepBuilder WithDtmfMenu(Dictionary<char, string> options)
     {
-        _stepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string>(options));
+        var menu = new Dictionary<char, DtmfMenuOption>(options.Count);
+        foreach (var kv in options)
+        {
+            menu[kv.Key] = new DtmfMenuOption
+            {
+                Digit = kv.Key,
+                Label = kv.Value,
+                NextStepId = kv.Value,
+            };
+        }
+
+        _stepDtmfConfiguration = new StepDtmfConfiguration { MenuOptions = menu };
 
         return this;
     }
@@ -629,12 +642,10 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
 /// </summary>
 public sealed class DtmfMenuBuilder(
     char terminationDigit = '#',
-    Dictionary<char, string>? options = null,
     int interDigitTimeoutMs = 5000,
     int minNumberOfDigits = 1,
     int maxNumberOfDigits = 1)
 {
-    private readonly Dictionary<char, string> _options = options ?? new();
     private readonly Dictionary<char, DtmfMenuOption> _menuOptions = new();
     private char _terminationDigit = terminationDigit;
     private int _interDigitTimeoutMs = interDigitTimeoutMs;
@@ -654,26 +665,11 @@ public sealed class DtmfMenuBuilder(
     private Uri? _onInvalidAudioFile;
 
     /// <summary>
-    /// Maps a DTMF digit to a menu option label. The caller is transitioned to the
-    /// step whose ID matches the label by default (legacy behaviour). To customise
-    /// the transition or run a tool, use the <see cref="Option(char, string, string?)"/>
-    /// or <see cref="Option(char, string, AITool, IReadOnlyDictionary{string, object?}?, string?, string?, Uri?)"/>
-    /// overloads.
-    /// </summary>
-    public DtmfMenuBuilder Option(char digit, string label)
-    {
-        _options[digit] = label;
-
-        return this;
-    }
-
-    /// <summary>
     /// Declarative option: pressing <paramref name="digit"/> transitions to
     /// <paramref name="nextStepId"/> with no side-effect.
     /// </summary>
     public DtmfMenuBuilder Option(char digit, string label, string? nextStepId)
     {
-        _options[digit] = label;
         _menuOptions[digit] = new DtmfMenuOption
         {
             Digit = digit,
@@ -706,7 +702,6 @@ public sealed class DtmfMenuBuilder(
         string? onFailurePrompt = null,
         Uri? onFailureAudioFile = null)
     {
-        _options[digit] = label;
         _menuOptions[digit] = new DtmfMenuOption
         {
             Digit = digit,
@@ -726,7 +721,6 @@ public sealed class DtmfMenuBuilder(
     /// </summary>
     public DtmfMenuBuilder Option(DtmfMenuOption option)
     {
-        _options[option.Digit] = option.Label;
         _menuOptions[option.Digit] = option;
 
         return this;
@@ -767,26 +761,6 @@ public sealed class DtmfMenuBuilder(
         _onValidNextStepId = onValidNextStepId;
         _onInvalidPrompt = onInvalidPrompt;
         _onInvalidAudioFile = onInvalidAudioFile;
-
-        return this;
-    }
-
-    /// <summary>
-    /// Adds a "Speak to agent" option mapped to the '0' key.
-    /// </summary>
-    public DtmfMenuBuilder WithSpeakToAgent(char digit = '0', string label = "Speak to a live agent")
-    {
-        _options[digit] = label;
-
-        return this;
-    }
-
-    /// <summary>
-    /// Adds a "Return to main menu" option mapped to the '*' key.
-    /// </summary>
-    public DtmfMenuBuilder WithReturnToMainMenu(char digit = '*', string label = "Return to main menu")
-    {
-        _options[digit] = label;
 
         return this;
     }
@@ -876,7 +850,6 @@ public sealed class DtmfMenuBuilder(
     {
         var config = new StepDtmfConfiguration(
             _terminationDigit,
-            _options.Count > 0 ? new Dictionary<char, string>(_options) : null,
             _interDigitTimeoutMs,
             _minNumberOfDigits,
             _maxNumberOfDigits,

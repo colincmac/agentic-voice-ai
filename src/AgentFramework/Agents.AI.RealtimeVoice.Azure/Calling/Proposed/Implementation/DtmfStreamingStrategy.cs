@@ -181,7 +181,7 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
         await PublishDtmfRecognizedAsync(digit.ToString(), ct).ConfigureAwait(false);
 
         var dtmf = step.StepDtmfConfiguration;
-        var hasMenu = (dtmf?.Options is { Count: > 0 }) || (dtmf?.MenuOptions is { Count: > 0 });
+        var hasMenu = dtmf?.MenuOptions is { Count: > 0 };
 
         if (hasMenu)
         {
@@ -196,62 +196,40 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
     {
         var dtmf = step.StepDtmfConfiguration;
-        if (dtmf is null)
+        if (dtmf?.MenuOptions is not { } menuOptions || !menuOptions.TryGetValue(digit, out var option))
         {
-            return;
-        }
-
-        // Prefer rich menu binding when present.
-        if (dtmf.MenuOptions is { } menuOptions && menuOptions.TryGetValue(digit, out var option))
-        {
-            WorkflowState.Set($"{_currentStepId}_selection", option.Label);
-
-            if (option.Action is null)
-            {
-                // Declarative option: jump directly to NextStepId (or fall back to legacy
-                // behaviour of matching the label to a valid transition).
-                var target = option.NextStepId ?? ResolveLegacyTransitionTarget(step, option.Label);
-                if (target is not null)
-                {
-                    await DispatchAsync(new DtmfActionResult.Transition(target), step, ct).ConfigureAwait(false);
-                }
-                return;
-            }
-
-            var actionResult = await InvokeActionAsync(
-                option.Action,
-                option.Arguments,
-                extraArgs: null,
-                successNextStepId: option.NextStepId,
-                failurePrompt: option.OnFailurePrompt,
-                failureAudio: option.OnFailureAudioFile,
-                ct).ConfigureAwait(false);
-
-            await DispatchAsync(actionResult, step, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // Legacy path: simple Dictionary<char, string> menu.
-        if (dtmf.Options is null || !dtmf.Options.TryGetValue(digit, out var selectedOption))
-        {
+            // Unrecognized digit — re-prompt.
             await SpeakAsync(step, ct).ConfigureAwait(false);
             return;
         }
 
-        WorkflowState.Set($"{_currentStepId}_selection", selectedOption);
+        WorkflowState.Set($"{_currentStepId}_selection", option.Label);
 
-        var nextStep = ResolveLegacyTransitionTarget(step, selectedOption);
-        if (nextStep is not null)
+        if (option.Action is null)
         {
-            await DispatchAsync(new DtmfActionResult.Transition(nextStep), step, ct).ConfigureAwait(false);
+            if (option.NextStepId is { } target)
+            {
+                await DispatchAsync(new DtmfActionResult.Transition(target), step, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "DTMF option for digit '{Digit}' has neither Action nor NextStepId; staying on step.",
+                    digit);
+            }
+            return;
         }
-    }
 
-    private static string? ResolveLegacyTransitionTarget(RealtimeIvrWorkflowStep step, string label)
-    {
-        var transitions = step.ValidTransitions;
-        return transitions.FirstOrDefault(t => string.Equals(t, label, StringComparison.OrdinalIgnoreCase))
-               ?? (transitions.Count > 0 ? transitions[0] : null);
+        var actionResult = await InvokeActionAsync(
+            option.Action,
+            option.Arguments,
+            extraArgs: null,
+            successNextStepId: option.NextStepId,
+            failurePrompt: option.OnFailurePrompt,
+            failureAudio: option.OnFailureAudioFile,
+            ct).ConfigureAwait(false);
+
+        await DispatchAsync(actionResult, step, ct).ConfigureAwait(false);
     }
 
     private async Task ProcessDigitCollectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
@@ -425,9 +403,9 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
         var prompt = new StringBuilder(step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty);
 
-        if (step.StepDtmfConfiguration?.Options is { Count: > 0 } menu)
+        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
         {
-            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value}"));
+            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value.Label}"));
             prompt.AppendLine(menuText);
         }
 

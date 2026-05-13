@@ -117,7 +117,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
             return;
         }
 
-        if (step.StepDtmfConfiguration?.Options is not null)
+        if (step.StepDtmfConfiguration?.MenuOptions is not null)
         {
             // Menu mode: single digit selects an option
             await ProcessMenuSelectionAsync(step, digit, cancellationToken).ConfigureAwait(false);
@@ -131,7 +131,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
 
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken cancellationToken)
     {
-        if (step.StepDtmfConfiguration?.Options is null || !step.StepDtmfConfiguration.Options.TryGetValue(digit, out var selectedOption))
+        if (step.StepDtmfConfiguration?.MenuOptions is null || !step.StepDtmfConfiguration.MenuOptions.TryGetValue(digit, out var option))
         {
             _logger.LogDebug("Invalid DTMF selection '{Digit}' for step {StepId}", digit, _currentStepId);
             await SynthesizeAndSendAudioAsync("That is not a valid option. Please try again.", cancellationToken).ConfigureAwait(false);
@@ -139,10 +139,12 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
             return;
         }
 
+        var selectedOption = option.NextStepId ?? option.Label;
+
         _logger.LogInformation("DTMF selection: '{Digit}' → '{Option}' at step {StepId}", digit, selectedOption, _currentStepId);
 
         // Store selection in workflow state
-        _workflowState.Set($"{_currentStepId}_selection", selectedOption);
+        _workflowState.Set($"{_currentStepId}_selection", option.Label);
 
         // Emit selection as a message for conversation context
         await EmitMessageAsync($"Selected: {selectedOption}", "user", cancellationToken).ConfigureAwait(false);
@@ -221,9 +223,9 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
         // Build prompt text from step description + DTMF menu options
         var prompt = step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty;
 
-        if (step.StepDtmfConfiguration?.Options is { Count: > 0 } menu)
+        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
         {
-            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value}"));
+            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value.Label}"));
             prompt = $"{prompt}. {menuText}.";
         }
         else if (!string.IsNullOrWhiteSpace(prompt))

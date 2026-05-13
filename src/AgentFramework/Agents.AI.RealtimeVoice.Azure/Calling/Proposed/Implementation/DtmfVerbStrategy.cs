@@ -153,7 +153,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), _currentStepId, tone.Timestamp),
             ct).ConfigureAwait(false);
 
-        if (step.StepDtmfConfiguration?.Options is not null)
+        if (step.StepDtmfConfiguration?.MenuOptions is not null)
         {
             await ProcessMenuSelectionAsync(step, tone.Digit, ct).ConfigureAwait(false);
         }
@@ -165,14 +165,16 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
     {
-        if (step.StepDtmfConfiguration?.Options is null || !step.StepDtmfConfiguration.Options.TryGetValue(digit, out var selectedOption))
+        if (step.StepDtmfConfiguration?.MenuOptions is null || !step.StepDtmfConfiguration.MenuOptions.TryGetValue(digit, out var option))
         {
             await SpeakAsync("That is not a valid option. Please try again.", ct).ConfigureAwait(false);
             await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
             return;
         }
 
-        WorkflowState.Set($"{_currentStepId}_selection", selectedOption);
+        var selectedOption = option.NextStepId ?? option.Label;
+
+        WorkflowState.Set($"{_currentStepId}_selection", option.Label);
 
         var transitions = step.ValidTransitions;
         var nextStep = transitions.FirstOrDefault(t => string.Equals(t, selectedOption, StringComparison.OrdinalIgnoreCase))
@@ -241,7 +243,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             await SpeakAsync(prompt, ct).ConfigureAwait(false);
         }
 
-        if (step.StepDtmfConfiguration?.Options is not null)
+        if (step.StepDtmfConfiguration?.MenuOptions is not null)
         {
             await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
         }
@@ -286,9 +288,9 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     {
         var prompt = step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty;
 
-        if (step.StepDtmfConfiguration?.Options is { Count: > 0 } menu)
+        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
         {
-            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value}"));
+            var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value.Label}"));
             prompt = $"{prompt}. {menuText}.";
         }
         else if (!string.IsNullOrWhiteSpace(prompt))

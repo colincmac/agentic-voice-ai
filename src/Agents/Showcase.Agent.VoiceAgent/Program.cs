@@ -139,11 +139,14 @@ var dtmf2 = new RealtimeIvrWorkflowDefinition()
                         new StateTransition { NextStep = "main_menu", Condition = "selected language" }
                     ]
                 },
-                StepDtmfConfiguration = new StepDtmfConfiguration(maxNumberOfDigits: 1, options: new Dictionary<char, string>
+                StepDtmfConfiguration = new StepDtmfConfiguration(maxNumberOfDigits: 1)
                 {
-                    ['1'] = "english",
-                    ['2'] = "spanish"
-                })
+                    MenuOptions = new Dictionary<char, DtmfMenuOption>
+                    {
+                        ['1'] = new() { Digit = '1', Label = "english", NextStepId = "english" },
+                        ['2'] = new() { Digit = '2', Label = "spanish", NextStepId = "spanish" },
+                    }
+                }
             },
             new RealtimeIvrWorkflowStep
             {

@@ -6,7 +6,6 @@ namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
 public sealed class StepDtmfConfiguration(
     char terminationDigit = '#',
-    Dictionary<char, string>? options = null,
     int interDigitTimeoutMs = 5000,
     int minNumberOfDigits = 1,
     int maxNumberOfDigits = 1,
@@ -19,15 +18,11 @@ public sealed class StepDtmfConfiguration(
 
     public string? PromptOverride { get; set; } = promptOverride;
 
-    // If using a DTMF menu, the keys are the digits to press, and the values are descriptions of the option (e.g. "For sales, press 1")
-    public Dictionary<char, string>? Options = options;
-
     /// <summary>
-    /// Rich per-digit option bindings used when an option needs to invoke a tool
-    /// (e.g. "press 0 to talk to a live agent") or has a custom failure prompt.
-    /// When present, this dictionary takes precedence over <see cref="Options"/>.
-    /// Labels in <see cref="Options"/> are still used to render the menu prompt
-    /// for digits that don't have a <see cref="DtmfMenuOption"/> binding.
+    /// Per-digit menu bindings. Each entry maps a DTMF digit to a
+    /// <see cref="DtmfMenuOption"/> describing the label spoken in the menu prompt
+    /// and the action taken when the digit is pressed (a transition, a tool
+    /// invocation, or both).
     /// </summary>
     public IReadOnlyDictionary<char, DtmfMenuOption>? MenuOptions { get; set; }
 
