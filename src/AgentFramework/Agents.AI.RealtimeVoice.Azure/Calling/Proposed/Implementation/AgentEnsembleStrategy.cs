@@ -19,6 +19,7 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
     private readonly IAgentEnsemble _ensemble;
     private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -39,6 +40,7 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _primaryLock = new();
 
+    private IIvrWorkflowNavigator? _navigator;
     private StrategyStartContext? _startContext;
     private CancellationTokenSource? _primaryPumpCts;
     private Task? _primaryPumps;
@@ -54,14 +56,10 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     {
         _ensemble = ensemble;
         _workflow = workflow;
+        _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<AgentEnsembleStrategy>() ?? NullLogger<AgentEnsembleStrategy>.Instance;
 
-        WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
-        if (restoreFrom is not null)
-        {
-            WorkflowStateExtensions.CopyInto(restoreFrom, WorkflowState);
-        }
-        WorkflowState.CurrentStepName ??= workflow.InitialStepId;
+        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.AgentEnsemble;
@@ -84,15 +82,22 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
         }
         _startContext = context;
 
+        _navigator = new IvrWorkflowNavigator(
+            _workflow,
+            WorkflowState,
+            context.Services,
+            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+
         _ensemble.PrimaryChanged += OnPrimaryChangedAsync;
 
         var primary = _ensemble.PrimaryAgent;
         await primary.Backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-        var prompt = _workflow.BuildPromptForStep(WorkflowState.CurrentStepName!, WorkflowState);
+        var step = _navigator.EnterInitialStep();
+        var prompt = _navigator.BuildCurrentStepPrompt();
         await primary.Backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
 
-        await EmitAsync(new StrategyEvent.WorkflowStepEntered(WorkflowState.CurrentStepName!, DateTimeOffset.UtcNow)).ConfigureAwait(false);
+        await EmitAsync(new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow)).ConfigureAwait(false);
         await EmitAsync(new StrategyEvent.AgentSpeakingChanged(primary.AgentId, primary.DisplayName, DateTimeOffset.UtcNow)).ConfigureAwait(false);
 
         StartPrimaryPumps(primary);
@@ -172,7 +177,7 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
         try
         {
-            var prompt = _workflow.BuildPromptForStep(WorkflowState.CurrentStepName!, WorkflowState);
+            var prompt = _navigator!.BuildCurrentStepPrompt();
             await newPrimary.Backend.UpdateSystemPromptAsync(prompt, _cts.Token).ConfigureAwait(false);
         }
         catch (Exception ex) { _logger.LogWarning(ex, "New primary prompt update failed"); }

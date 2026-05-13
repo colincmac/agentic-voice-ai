@@ -16,7 +16,7 @@ public sealed class StepDtmfConfiguration(
     public Uri? OnErrorAudioFile { get; set; } = null;
     public string? OnErrorPrompt { get; set; } = null;
 
-    public string? PromptOverride { get; set; } = promptOverride;
+    public string? SsmlPromptOverride { get; set; } = promptOverride;
 
     /// <summary>
     /// Per-digit menu bindings. Each entry maps a DTMF digit to a

@@ -681,14 +681,15 @@ public sealed class DtmfMenuBuilder(
     }
 
     /// <summary>
-    /// Binds a digit to an <see cref="AITool"/>. The tool is invoked with the
+    /// Binds a digit to an <see cref="AITool"/> resolved by name from the owning step's
+    /// <see cref="RealtimeIvrWorkflowStep.AvailableTools"/>. The tool is invoked with the
     /// supplied <paramref name="arguments"/> (resolved through the call-scoped
     /// service provider) and its return value is interpreted to decide what
     /// happens next. See <see cref="DtmfActionResult"/> for the supported shapes.
     /// </summary>
     /// <param name="digit">The DTMF digit that selects this option.</param>
     /// <param name="label">Human-readable label spoken in the menu prompt.</param>
-    /// <param name="action">The tool to invoke (commonly one already exposed to the LLM).</param>
+    /// <param name="actionToolName">Name of the tool to invoke (must match an entry in the step's <see cref="RealtimeIvrWorkflowStep.AvailableTools"/>).</param>
     /// <param name="arguments">Arguments bound at configuration time.</param>
     /// <param name="nextStepId">Step to transition to on success. Ignored when the tool returns a <see cref="DtmfActionResult"/>.</param>
     /// <param name="onFailurePrompt">Prompt spoken if the tool reports a failure or throws.</param>
@@ -696,7 +697,7 @@ public sealed class DtmfMenuBuilder(
     public DtmfMenuBuilder Option(
         char digit,
         string label,
-        AITool action,
+        string actionToolName,
         IReadOnlyDictionary<string, object?>? arguments = null,
         string? nextStepId = null,
         string? onFailurePrompt = null,
@@ -706,7 +707,7 @@ public sealed class DtmfMenuBuilder(
         {
             Digit = digit,
             Label = label,
-            Action = action,
+            ActionToolName = actionToolName,
             Arguments = arguments,
             NextStepId = nextStepId,
             OnFailurePrompt = onFailurePrompt,

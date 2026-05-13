@@ -16,6 +16,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 public sealed class DtmfVerbStrategy : IConversationStrategy
 {
     private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -32,7 +33,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     private readonly CancellationTokenSource _cts = new();
 
     private Task? _runLoop;
-    private string? _currentStepId;
+    private IIvrWorkflowNavigator? _navigator;
     private string _digitBuffer = string.Empty;
     private bool _suspended;
 
@@ -42,16 +43,10 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         ILoggerFactory? loggerFactory = null)
     {
         _workflow = workflow;
+        _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<DtmfVerbStrategy>() ?? NullLogger<DtmfVerbStrategy>.Instance;
 
-        WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
-        if (restoreFrom is not null)
-        {
-            WorkflowStateExtensions.CopyInto(restoreFrom, WorkflowState);
-        }
-
-        _currentStepId = WorkflowState.CurrentStepName ?? workflow.InitialStepId;
-        WorkflowState.CurrentStepName = _currentStepId;
+        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.Dtmf;
@@ -109,9 +104,16 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task RunAsync(StrategyStartContext context, CancellationToken ct)
     {
+        _navigator = new IvrWorkflowNavigator(
+            _workflow,
+            WorkflowState,
+            context.Services,
+            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+
         try
         {
-            await EnterStepAsync(_currentStepId, ct).ConfigureAwait(false);
+            var initial = _navigator.EnterInitialStep();
+            await EnterStepAsync(initial, ct).ConfigureAwait(false);
 
             await foreach (var tone in context.InboundDtmf.ReadAllAsync(ct).ConfigureAwait(false))
             {
@@ -139,18 +141,14 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task HandleDigitAsync(DtmfTone tone, CancellationToken ct)
     {
-        if (_currentStepId is null)
-        {
-            return;
-        }
-        var step = _workflow.GetStep(_currentStepId);
+        var step = _navigator?.CurrentStep;
         if (step is null)
         {
             return;
         }
 
         await _events.Writer.WriteAsync(
-            new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), _currentStepId, tone.Timestamp),
+            new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), step.Id, tone.Timestamp),
             ct).ConfigureAwait(false);
 
         if (step.StepDtmfConfiguration?.MenuOptions is not null)
@@ -165,28 +163,17 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
     {
-        if (step.StepDtmfConfiguration?.MenuOptions is null || !step.StepDtmfConfiguration.MenuOptions.TryGetValue(digit, out var option))
+        if (!_navigator!.TryResolveDtmfDigit(digit, out var option))
         {
             await SpeakAsync("That is not a valid option. Please try again.", ct).ConfigureAwait(false);
             await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
             return;
         }
 
-        var selectedOption = option.NextStepId ?? option.Label;
+        WorkflowState.Set($"{step.Id}_selection", option.Label);
 
-        WorkflowState.Set($"{_currentStepId}_selection", option.Label);
-
-        var transitions = step.ValidTransitions;
-        var nextStep = transitions.FirstOrDefault(t => string.Equals(t, selectedOption, StringComparison.OrdinalIgnoreCase))
-                       ?? (transitions.Count > 0 ? transitions[0] : null);
-
-        if (nextStep is not null)
-        {
-            WorkflowState.MarkStepCompleted(_currentStepId!);
-            _currentStepId = nextStep;
-            WorkflowState.CurrentStepName = nextStep;
-            await EnterStepAsync(nextStep, ct).ConfigureAwait(false);
-        }
+        var actionResult = await _navigator.InvokeMenuActionAsync(option, extraArguments: null, ct).ConfigureAwait(false);
+        await DispatchAsync(actionResult, step, ct).ConfigureAwait(false);
     }
 
     private async Task ProcessDigitCollectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
@@ -194,16 +181,13 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         switch (digit)
         {
             case '#' when _digitBuffer.Length > 0:
-                WorkflowState.Set(_currentStepId!, _digitBuffer);
+                WorkflowState.Set(step.Id, _digitBuffer);
                 _digitBuffer = string.Empty;
 
                 var transitions = step.ValidTransitions;
                 if (transitions.Count > 0)
                 {
-                    WorkflowState.MarkStepCompleted(_currentStepId!);
-                    _currentStepId = transitions[0];
-                    WorkflowState.CurrentStepName = _currentStepId;
-                    await EnterStepAsync(_currentStepId, ct).ConfigureAwait(false);
+                    await DispatchAsync(new DtmfActionResult.Transition(transitions[0]), step, ct).ConfigureAwait(false);
                 }
                 break;
 
@@ -221,20 +205,71 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         }
     }
 
-    private async Task EnterStepAsync(string? stepId, CancellationToken ct)
+    private async Task DispatchAsync(DtmfActionResult result, RealtimeIvrWorkflowStep step, CancellationToken ct)
     {
-        if (stepId is null)
+        switch (result)
         {
-            return;
-        }
-        var step = _workflow.GetStep(stepId);
-        if (step is null)
-        {
-            return;
-        }
+            case DtmfActionResult.Transition transition:
+                var tr = _navigator!.TransitionTo(transition.NextStepId);
+                if (tr.Succeeded)
+                {
+                    await EnterStepAsync(tr.NewStep!, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "DTMF action requested transition to '{StepId}' but it was rejected: {Reason}.",
+                        transition.NextStepId, tr.Reason);
+                }
+                break;
 
+            case DtmfActionResult.Repeat repeat:
+                if (!string.IsNullOrEmpty(repeat.Prompt))
+                {
+                    await SpeakAsync(repeat.Prompt, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SpeakAsync(BuildPrompt(step), ct).ConfigureAwait(false);
+                }
+                if (step.StepDtmfConfiguration?.MenuOptions is not null)
+                {
+                    await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
+                }
+                break;
+
+            case DtmfActionResult.Reject reject:
+                var errorPrompt = reject.ErrorPrompt
+                    ?? step.StepDtmfConfiguration?.OnErrorPrompt
+                    ?? "That is not a valid option. Please try again.";
+                await SpeakAsync(errorPrompt, ct).ConfigureAwait(false);
+                if (step.StepDtmfConfiguration?.MenuOptions is not null)
+                {
+                    await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
+                }
+                break;
+
+            case DtmfActionResult.Escalate escalate:
+                await _events.Writer.WriteAsync(
+                    new StrategyEvent.EscalationRequested(escalate.Reason, DateTimeOffset.UtcNow),
+                    ct).ConfigureAwait(false);
+                if (_navigator!.CurrentStep is { } currentForEscalation)
+                {
+                    WorkflowState.MarkStepCompleted(currentForEscalation.Id);
+                }
+                break;
+
+            case DtmfActionResult.HangUp:
+            case DtmfActionResult.Complete:
+                _navigator!.Complete();
+                break;
+        }
+    }
+
+    private async Task EnterStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
         await _events.Writer.WriteAsync(
-            new StrategyEvent.WorkflowStepEntered(stepId, DateTimeOffset.UtcNow),
+            new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
 
         var prompt = BuildPrompt(step);
@@ -255,7 +290,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                     MaxTones: 16,
                     At: DateTimeOffset.UtcNow,
                     StopTone: '#',
-                    OperationContext: stepId),
+                    OperationContext: step.Id),
                 ct).ConfigureAwait(false);
         }
     }
@@ -266,7 +301,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                 MaxTones: 1,
                 At: DateTimeOffset.UtcNow,
                 StopTone: null,
-                OperationContext: _currentStepId),
+                OperationContext: step.Id),
             ct).AsTask();
 
     private async Task SpeakAsync(string text, CancellationToken ct)
@@ -280,7 +315,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             return;
         }
         await _outbound.Writer.WriteAsync(
-            new OutboundDirective.SpeakText(text, DateTimeOffset.UtcNow, OperationContext: _currentStepId),
+            new OutboundDirective.SpeakText(text, DateTimeOffset.UtcNow, OperationContext: WorkflowState.CurrentStepName),
             ct).ConfigureAwait(false);
     }
 

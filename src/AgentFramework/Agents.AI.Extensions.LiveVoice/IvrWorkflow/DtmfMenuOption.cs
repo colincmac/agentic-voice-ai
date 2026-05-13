@@ -1,22 +1,20 @@
-using Microsoft.Extensions.AI;
-
 namespace Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
 /// <summary>
 /// Describes the action to take when a specific DTMF digit is pressed inside a menu step.
-/// Combines an existing <see cref="AITool"/> (typically one already exposed to the LLM,
-/// such as <c>transfer_call</c> or <c>hang_up_call</c>) with arguments bound at
+/// References an existing tool by name (resolved from
+/// <see cref="RealtimeIvrWorkflowStep.AvailableTools"/>) plus arguments bound at
 /// configuration time, an optional declarative transition, and an optional failure prompt.
 /// </summary>
 /// <remarks>
-/// When <see cref="Action"/> is <see langword="null"/>, the option is purely declarative:
-/// pressing the digit moves the workflow to <see cref="NextStepId"/> (or the legacy
-/// "label as step id" behaviour if both are null).
+/// When <see cref="ActionToolName"/> is <see langword="null"/>, the option is purely
+/// declarative: pressing the digit moves the workflow to <see cref="NextStepId"/>.
 ///
-/// When <see cref="Action"/> is set, the strategy invokes the tool with <see cref="Arguments"/>
-/// (resolved through the call-scoped <see cref="IServiceProvider"/>), then interprets the
-/// return value to decide what to do next. See <see cref="DtmfActionResult"/> for the
-/// supported return shapes.
+/// When <see cref="ActionToolName"/> is set, the strategy looks up the tool in the
+/// owning step's <see cref="RealtimeIvrWorkflowStep.AvailableTools"/>, invokes it with
+/// <see cref="Arguments"/> (resolved through the call-scoped
+/// <see cref="System.IServiceProvider"/>), then interprets the return value to decide
+/// what to do next. See <see cref="DtmfActionResult"/> for the supported return shapes.
 /// </remarks>
 public sealed record DtmfMenuOption
 {
@@ -27,14 +25,17 @@ public sealed record DtmfMenuOption
     public required string Label { get; init; }
 
     /// <summary>
-    /// Tool invoked when the digit is pressed. Optional — when null, the option is
-    /// purely declarative and transitions to <see cref="NextStepId"/>.
+    /// Name of the tool invoked when the digit is pressed. Resolved against
+    /// <see cref="RealtimeIvrWorkflowStep.AvailableTools"/> by
+    /// <see cref="Microsoft.Extensions.AI.AITool.Name"/>. Optional — when null, the
+    /// option is purely declarative and transitions to <see cref="NextStepId"/>.
     /// </summary>
-    public AITool? Action { get; init; }
+    public string? ActionToolName { get; init; }
 
     /// <summary>
     /// Arguments bound at configuration time. The strategy passes these to
-    /// <see cref="AIFunction.InvokeAsync"/> alongside the call-scoped service provider.
+    /// <see cref="Microsoft.Extensions.AI.AIFunction.InvokeAsync"/> alongside the call-scoped
+    /// service provider.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? Arguments { get; init; }
 

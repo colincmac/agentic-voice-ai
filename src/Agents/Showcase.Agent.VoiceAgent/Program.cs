@@ -1,32 +1,23 @@
-using System.Collections.Concurrent;
-using A2A.AspNetCore;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.LiveVoice.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Hosting;
-using Agents.AI.Realtime;
-using Agents.AI.RealtimeVoice.Azure;
 using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
-using Agents.AI.RealtimeVoice.Azure.Calling;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Hosting;
-using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Azure;
 using OpenTelemetry.Resources;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Configuration;
-using Showcase.Agent.VoiceAgent.Teams;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 
@@ -112,54 +103,14 @@ builder.Services.Configure<CommunicationOptions>(builder.Configuration.GetSectio
 builder.Services.AddSingleton<ISpeechSynthesizer, AzureSpeechSynthesizer>(sp =>
 {
     var endpoint = builder.Configuration.GetConnectionString("azurespeech");
-    if(string.IsNullOrEmpty(endpoint)) throw new InvalidOperationException("Azure Speech endpoint is not configured.");
+    if (string.IsNullOrEmpty(endpoint)) throw new InvalidOperationException("Azure Speech endpoint is not configured.");
 
     return new AzureSpeechSynthesizer(new Uri(endpoint));
 });
 var callerIntentWorkflow = ConversationWorkflowFactory.CreateCallerIntentWorkflow(sessionId: "default");
 var dtmfWorkflow = ConversationWorkflowFactory.CreateDtmfWorkflow(sessionId: "default");
 
-var dtmf2 = new RealtimeIvrWorkflowDefinition()
-{
-    Name = "test-ivr",
-    BasePrompt = new RealtimePrompt(),
-    Steps =
-        [
-            new RealtimeIvrWorkflowStep
-            {
-                Id = "language",
-                ConversationState = new ConversationState
-                {
-                    Id = "language",
-                    Description = "Welcome to Contoso",
-                    Goal = "Route the caller",
-                    Instructions = ["Greet the caller and offer menu"],
-                    Transitions =
-                    [
-                        new StateTransition { NextStep = "main_menu", Condition = "selected language" }
-                    ]
-                },
-                StepDtmfConfiguration = new StepDtmfConfiguration(maxNumberOfDigits: 1)
-                {
-                    MenuOptions = new Dictionary<char, DtmfMenuOption>
-                    {
-                        ['1'] = new() { Digit = '1', Label = "english", NextStepId = "english" },
-                        ['2'] = new() { Digit = '2', Label = "spanish", NextStepId = "spanish" },
-                    }
-                }
-            },
-            new RealtimeIvrWorkflowStep
-            {
-                Id = "main_menu",
-                ConversationState = new ConversationState
-                {
-                    Id = "main_menu",
-                    Description = "Main menu",
-                    Instructions = ["Greet the caller and offer menu options"]
-                }
-            }
-        ]
-};
+var dtmf2 = IvrSampleWorkflow.DtmfOnly();
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp => callerIntentWorkflow);
 
 // The realtime agent that the new realtime backend wraps. Reads its config from

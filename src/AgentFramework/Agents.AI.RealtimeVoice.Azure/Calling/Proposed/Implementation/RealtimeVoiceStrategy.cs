@@ -15,6 +15,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 {
     private readonly IRealtimeVoiceBackend _backend;
     private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -29,6 +30,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly CancellationTokenSource _cts = new();
+    private IIvrWorkflowNavigator? _navigator;
     private Task? _agentLoop;
     private Task? _audioPump;
     private bool _suspended;
@@ -41,14 +43,10 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     {
         _backend = backend;
         _workflow = workflow;
+        _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<RealtimeVoiceStrategy>() ?? NullLogger<RealtimeVoiceStrategy>.Instance;
 
-        WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
-        if (restoreFrom is not null)
-        {
-            WorkflowStateExtensions.CopyInto(restoreFrom, WorkflowState);
-        }
-        WorkflowState.CurrentStepName ??= workflow.InitialStepId;
+        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.RealtimeVoice;
@@ -70,13 +68,20 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             return;
         }
 
+        _navigator = new IvrWorkflowNavigator(
+            _workflow,
+            WorkflowState,
+            context.Services,
+            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+
         await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         // Seed the agent with the system prompt for the current workflow step.
-        var prompt = _workflow.BuildPromptForStep(WorkflowState.CurrentStepName!, WorkflowState);
+        var step = _navigator.EnterInitialStep();
+        var prompt = _navigator.BuildCurrentStepPrompt();
         await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
         await _events.Writer.WriteAsync(
-            new StrategyEvent.WorkflowStepEntered(WorkflowState.CurrentStepName!, DateTimeOffset.UtcNow),
+            new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
         await _events.Writer.WriteAsync(
             new StrategyEvent.AgentSpeakingChanged(_backend.AgentId, _backend.AgentDisplayName, DateTimeOffset.UtcNow),
