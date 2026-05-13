@@ -3,6 +3,8 @@
 **/tpe-config.json
 **/tpe-config.*.json
 
+__blobstorage__
+__azurite*
 **/tpe-teams-output.json
 **/tpe-teams-output.*.json
 **/tpe-secrets.json
