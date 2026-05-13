@@ -32,7 +32,14 @@ public sealed class RealtimeIvrWorkflowStep
     public IReadOnlyList<ToolUsageRule>? ToolRules { get; init; }
 
     /// <summary>
-    /// Gets the guards that must pass before this step can execute.
+    /// Gets the guards that gate any tool invocation on this step. When a guard fails,
+    /// the tool call is blocked and the failure reason is surfaced to the caller — as a
+    /// <see cref="DtmfActionResult.Reject"/> on the DTMF path (via <see cref="IIvrWorkflowNavigator.InvokeActionAsync"/>),
+    /// or as a string tool result on the LLM/realtime path (via <see cref="GuardedAIFunction"/>
+    /// and <see cref="IIvrWorkflowNavigator.WrapToolsWithCurrentGuards"/>). Built-in guards
+    /// check workflow state (e.g., <see cref="RequiredStateGuard"/>,
+    /// <see cref="PreviousStepCompletedGuard"/>); custom guards can use any predicate over
+    /// <see cref="IvrWorkflowState"/>.
     /// </summary>
     public IReadOnlyList<IIvrStepGuard> Guards { get; init; } = [];
 

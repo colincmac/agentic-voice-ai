@@ -139,6 +139,22 @@ public sealed class IvrWorkflowNavigator(
             return new DtmfActionResult.Reject(failurePrompt, failureAudio);
         }
 
+        if (CurrentStep is { Guards: { Count: > 0 } guards } gatedStep)
+        {
+            for (var i = 0; i < guards.Count; i++)
+            {
+                var guard = guards[i];
+                var gr = await guard.EvaluateAsync(State, cancellationToken).ConfigureAwait(false);
+                if (!gr.Passed)
+                {
+                    _logger.LogInformation(
+                        "DTMF action '{Tool}' blocked by guard '{GuardType}' on step '{Step}': {Reason}",
+                        fn.Name, guard.GetType().Name, gatedStep.Id, gr.FailureReason);
+                    return new DtmfActionResult.Reject(failurePrompt, failureAudio);
+                }
+            }
+        }
+
         var args = new AIFunctionArguments { Services = _services };
         if (boundArguments is not null)
         {
@@ -177,6 +193,18 @@ public sealed class IvrWorkflowNavigator(
         CurrentStep is { } step
             ? Definition.BuildPromptForStep(step, State, context)
             : RealtimeAIPromptTemplate.Render(Definition.BasePrompt);
+
+    public IEnumerable<AITool> WrapToolsWithCurrentGuards(IEnumerable<AITool> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+
+        if (CurrentStep is not { Guards: { Count: > 0 } guards })
+        {
+            return tools;
+        }
+
+        return GuardedAIFunction.WrapTools(tools, guards, () => State);
+    }
 
     public string BuildDtmfMenuPrompt(RealtimeIvrWorkflowStep step)
     {

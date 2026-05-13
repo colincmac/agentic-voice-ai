@@ -89,6 +89,22 @@ public interface IIvrWorkflowNavigator
 
     /// <summary>Render the user-facing "Press X for Y" summary for a DTMF menu step.</summary>
     string BuildDtmfMenuPrompt(RealtimeIvrWorkflowStep step);
+
+    /// <summary>
+    /// Wrap each <see cref="Microsoft.Extensions.AI.AIFunction"/> in <paramref name="tools"/>
+    /// with a <see cref="GuardedAIFunction"/> bound to <see cref="CurrentStep"/>'s
+    /// <see cref="RealtimeIvrWorkflowStep.Guards"/> and the live <see cref="State"/>.
+    /// Non-<see cref="Microsoft.Extensions.AI.AIFunction"/> tools and tools wrapped while no step is
+    /// current (or while the current step has no guards) are returned unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Intended for the realtime/LLM tool path: callers register the resulting collection
+    /// with the realtime agent so tool calls are sandboxed by the same workflow guards
+    /// the navigator enforces on DTMF actions. Guards are read live from <see cref="CurrentStep"/>
+    /// at the time of <em>this call</em>; rebind on step transitions.
+    /// </remarks>
+    IEnumerable<Microsoft.Extensions.AI.AITool> WrapToolsWithCurrentGuards(
+        IEnumerable<Microsoft.Extensions.AI.AITool> tools);
 }
 
 /// <summary>Result of <see cref="IIvrWorkflowNavigator.TransitionTo"/>.</summary>
