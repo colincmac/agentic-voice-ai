@@ -34,6 +34,7 @@ builder.Services.AddAzureClients(clientBuilder =>
     clientBuilder.UseCredential(credential);
 });
 
+
 if (builder.Environment.IsDevelopment())
 {
     var resourceAttributes = new Dictionary<string, object> {
@@ -77,7 +78,7 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 //builder.Services.AddOpenApi();
-builder.Services.AddProblemDetails();
+//builder.Services.AddProblemDetails();
 
 // Add services to the container.
 
@@ -111,7 +112,7 @@ var callerIntentWorkflow = ConversationWorkflowFactory.CreateCallerIntentWorkflo
 var dtmfWorkflow = ConversationWorkflowFactory.CreateDtmfWorkflow(sessionId: "default");
 
 var dtmf2 = IvrSampleWorkflow.DtmfOnly();
-builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp => callerIntentWorkflow);
+builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp => dtmf2);
 
 // The realtime agent that the new realtime backend wraps. Reads its config from
 // Agents:TriageAgent and uses the "voicelive" conversation client registered above.
@@ -122,9 +123,9 @@ builder.AddRealtimeAIAgent(
 
 builder.AddCallSessionContainer()
     .AddAcsCallAutomation()
-    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
-    .AddCallControlTools()
-    .AddDashboardProjectionObserver();
+    .AddDtmfStrategy()
+    //.AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddCallControlTools();
 
 // TEAMS
 builder.AddAgentApplicationOptions();
@@ -162,7 +163,7 @@ app.MapGet("/", async ([FromServices] AuthorizingRealtimeAIAgent agent, Cancella
     return "Testing";
 });
 app.MapWellKnownDidDocument();
-app.MapTeams();
+//app.MapTeams();
 
 
 app.MapCallAutomation();

@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
@@ -49,6 +50,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
 
     private Task? _backgroundLoop;
     private int _disconnectFired;
+    private readonly CallingTelemetry _telemetry;
 
     public AcsCallerEdge(
         WebSocket webSocket,
@@ -56,13 +58,15 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
         CancellationToken httpContextCancellation,
         CallAutomationClient? callAutomationClient = null,
 
-        ILogger<AcsCallerEdge>? logger = null)
+        ILogger<AcsCallerEdge>? logger = null,
+        CallingTelemetry? telemetry = null)
     {
         _webSocket = webSocket;
         _call = callConnection;
         _callAutomationClient = callAutomationClient;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(httpContextCancellation);
         _logger = logger ?? NullLogger<AcsCallerEdge>.Instance;
+        _telemetry = telemetry ?? CallingTelemetry.Default;
 
         Metadata = new CallEdgeMetadata
         {
@@ -125,6 +129,8 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
             return Task.CompletedTask;
         }
 
+        _telemetry.EdgeConnected(EdgeId, Kind);
+
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _backgroundLoop = Task.WhenAll(
             ReceiveLoopAsync(linked.Token),
@@ -134,29 +140,38 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
 
     public async ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default)
     {
-        switch (directive)
+        try
         {
-            case OutboundDirective.Audio audio:
-                await _outbound.Writer.WriteAsync(audio.Frame.Pcm.ToArray(), cancellationToken).ConfigureAwait(false);
-                break;
+            switch (directive)
+            {
+                case OutboundDirective.Audio audio:
+                    await _outbound.Writer.WriteAsync(audio.Frame.Pcm.ToArray(), cancellationToken).ConfigureAwait(false);
+                    break;
 
-            case OutboundDirective.StopPlayback:
-                if (_webSocket.State == WebSocketState.Open)
-                {
-                    var stop = OutStreamingData.GetStopAudioForOutbound();
-                    await _webSocket.SendAsync(
-                        new ArraySegment<byte>(Encoding.UTF8.GetBytes(stop)),
-                        WebSocketMessageType.Text,
-                        endOfMessage: true,
-                        cancellationToken).ConfigureAwait(false);
-                }
-                break;
+                case OutboundDirective.StopPlayback:
+                    if (_webSocket.State == WebSocketState.Open)
+                    {
+                        var stop = OutStreamingData.GetStopAudioForOutbound();
+                        await _webSocket.SendAsync(
+                            new ArraySegment<byte>(Encoding.UTF8.GetBytes(stop)),
+                            WebSocketMessageType.Text,
+                            endOfMessage: true,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    break;
 
-            default:
-                _logger.LogWarning(
-                    "Streaming ACS edge {EdgeId} cannot dispatch {DirectiveKind}; pair this strategy with an AcsCallAutomationEdge instead",
-                    EdgeId, directive.GetType().Name);
-                break;
+                default:
+                    _logger.LogWarning(
+                        "Streaming ACS edge {EdgeId} cannot dispatch {DirectiveKind}; pair this strategy with an AcsCallAutomationEdge instead",
+                        EdgeId, directive.GetType().Name);
+                    _telemetry.DirectiveUnsupported(EdgeId, directive.GetType().Name, Capabilities);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _telemetry.DirectiveDispatchFailed(EdgeId, directive.GetType().Name, ex);
+            throw;
         }
     }
 
@@ -272,6 +287,8 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
         {
             return;
         }
+
+        _telemetry.EdgeDisconnected(EdgeId, Kind, reason);
 
         var handlers = Disconnected;
         if (handlers is null)

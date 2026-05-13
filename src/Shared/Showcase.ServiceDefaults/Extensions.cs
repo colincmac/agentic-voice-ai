@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.OpenTelemetry;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -104,6 +105,10 @@ public static class Extensions
         if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
         {
             otelBuilder.UseAzureMonitor();
+            builder.UseMicrosoftOpenTelemetry(o =>
+            {
+                o.Exporters = ExportTarget.AzureMonitor;
+            });
         }
 
         return builder;

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading.Channels;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -25,8 +27,12 @@ public sealed class CallSession : ICallSession
     private readonly IServiceScope _scope;
     private readonly ICallSessionRegistry _registry;
     private readonly ICallQualityReporter _quality;
+    private readonly CallingTelemetry _telemetry;
     private readonly ILogger<CallSession> _logger;
     private readonly CancellationTokenSource _cts = new();
+    private Activity? _callActivity;
+    private DateTimeOffset _lastStateChangeAt = DateTimeOffset.UtcNow;
+    private long _firstAudioRecorded;
     private readonly List<ICallObserver> _observers;
     private readonly List<Channel<StrategyEvent>> _observerFanout = [];
     private readonly Lock _stateLock = new();
@@ -64,7 +70,8 @@ public sealed class CallSession : ICallSession
         ICallQualityReporter qualityReporter,
         IServiceScope scope,
         ICallSessionRegistry registry,
-        ILogger<CallSession>? logger = null)
+        ILogger<CallSession>? logger = null,
+        CallingTelemetry? telemetry = null)
     {
         CallId = callId;
         CallerEdge = callerEdge;
@@ -73,8 +80,10 @@ public sealed class CallSession : ICallSession
         _quality = qualityReporter;
         _scope = scope;
         _registry = registry;
+        _telemetry = telemetry ?? CallingTelemetry.Default;
         _logger = logger ?? NullLogger<CallSession>.Instance;
         StartedAt = DateTimeOffset.UtcNow;
+        _lastStateChangeAt = StartedAt;
     }
 
     public string CallId { get; }
@@ -103,6 +112,9 @@ public sealed class CallSession : ICallSession
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        _callActivity = _telemetry.StartCallActivity(CallId, _strategy.Tier, _strategy.Kind);
+        _telemetry.CallStarted(CallId, _strategy.Tier);
+
         await TransitionAsync(CallSessionState.Connecting).ConfigureAwait(false);
 
         // Seed the dashboard so updates have something to mutate.
@@ -195,6 +207,12 @@ public sealed class CallSession : ICallSession
             RaisedAt: DateTimeOffset.UtcNow));
 
         await ApplyModeAsync(mode, cancellationToken).ConfigureAwait(false);
+        _telemetry.SupervisorAttached(CallId, mode);
+        using (var attachSpan = _telemetry.StartChildActivity(CallingActivitySource.SupervisorAttachActivityName, CallId))
+        {
+            attachSpan?.SetTag(CallingActivitySource.SupervisorIdTag, supervisorEdge.EdgeId);
+            attachSpan?.SetTag(CallingActivitySource.SupervisorModeTag, mode.ToString());
+        }
         _logger.LogInformation("Supervisor {SupervisorId} attached to call {CallId} in {Mode} mode",
             supervisorEdge.EdgeId, CallId, mode);
         return true;
@@ -280,11 +298,16 @@ public sealed class CallSession : ICallSession
         try { await supervisor.DisposeAsync().ConfigureAwait(false); }
         catch (Exception ex) { _logger.LogWarning(ex, "Supervisor edge dispose failed"); }
 
+        _telemetry.SupervisorDetached(CallId, lastMode);
         _logger.LogInformation("Supervisor detached from call {CallId}", CallId);
     }
 
     public async Task<bool> ReplaceStrategyAsync(IConversationStrategy newStrategy, CancellationToken cancellationToken = default)
     {
+        using var span = _telemetry.StartChildActivity(CallingActivitySource.ReplaceStrategyActivityName, CallId);
+        span?.SetTag("strategy.from.kind", _strategy.Kind.ToString());
+        span?.SetTag("strategy.to.kind", newStrategy.Kind.ToString());
+
         await TransitionAsync(CallSessionState.Suspended).ConfigureAwait(false);
 
         var old = Interlocked.Exchange(ref _strategy, newStrategy);
@@ -316,17 +339,32 @@ public sealed class CallSession : ICallSession
                 $"Call {CallId} cannot be transferred: caller edge {CallerEdge.GetType().Name} does not support call control.");
         }
 
+        using var span = _telemetry.StartChildActivity(CallingActivitySource.TransferActivityName, CallId);
+        span?.SetTag(CallingActivitySource.TransferKindTag, request.Kind.ToString());
+        span?.SetTag(CallingActivitySource.TransferTargetTag, request.TargetIdentifier);
+        _telemetry.TransferInitiated(CallId, request.Kind);
+
         _logger.LogInformation(
             "Transferring call {CallId} to {Target} ({Kind})",
             CallId, request.TargetIdentifier, request.Kind);
 
         // Stop the strategy first so it doesn't keep speaking over the transfer.
         try { await _strategy.StopAsync(cancellationToken).ConfigureAwait(false); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Strategy stop on transfer failed for call {CallId}", CallId); }
+        catch (Exception ex)
+        {
+            CallingActivitySource.SetError(span, ex);
+            _logger.LogWarning(ex, "Strategy stop on transfer failed for call {CallId}", CallId);
+        }
 
-        // The edge survives until ACS confirms the transfer (CallDisconnected
-        // callback). EndAsync will be triggered then via OnEdgeDisconnectedAsync.
-        await control.TransferAsync(request, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await control.TransferAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            CallingActivitySource.SetError(span, ex);
+            throw;
+        }
 
         _quality.RaiseAlert(CallId, new QualityAlert(
             AlertId: $"transfer-{Guid.NewGuid():N}",
@@ -342,6 +380,11 @@ public sealed class CallSession : ICallSession
         {
             return;
         }
+
+        using var span = _telemetry.StartChildActivity(CallingActivitySource.HangupActivityName, CallId);
+        span?.SetTag(CallingActivitySource.HangupForEveryoneTag, hangUpForEveryone);
+        span?.SetTag(CallingActivitySource.HangupReasonTag, reason);
+        _telemetry.HangupIssued(CallId, hangUpForEveryone, reason);
 
         if (CallerEdge is ICallControl control && control.CanControl)
         {
@@ -403,6 +446,17 @@ public sealed class CallSession : ICallSession
 
         await TransitionAsync(CallSessionState.Ended).ConfigureAwait(false);
         await _registry.RemoveAsync(CallId, cancellationToken).ConfigureAwait(false);
+
+        var duration = DateTimeOffset.UtcNow - StartedAt;
+        _telemetry.CallEnded(CallId, _strategy.Tier, _state, reason, duration);
+        if (_callActivity is not null)
+        {
+            _callActivity.SetTag(CallingActivitySource.CallEndReasonTag, reason ?? "unspecified");
+            _callActivity.SetTag("call.duration_s", duration.TotalSeconds);
+            _callActivity.Stop();
+            _callActivity.Dispose();
+            _callActivity = null;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -452,6 +506,7 @@ public sealed class CallSession : ICallSession
         {
             await foreach (var frame in CallerEdge.InboundAudio.ReadAllAsync(_cts.Token).ConfigureAwait(false))
             {
+                _telemetry.InboundAudioFrame(CallerEdge.EdgeId);
                 ICallEdge? supervisor;
                 SupervisorMode? mode;
                 lock (_stateLock)
@@ -507,13 +562,24 @@ public sealed class CallSession : ICallSession
                 {
                     if (CallerEdge.Capabilities.HasFlag(DirectiveCapability(directive)))
                     {
+                        var dispatchStart = Stopwatch.GetTimestamp();
                         await CallerEdge.DispatchAsync(directive, _cts.Token).ConfigureAwait(false);
+                        _telemetry.DirectiveDispatched(
+                            CallerEdge.EdgeId,
+                            directive.GetType().Name,
+                            Stopwatch.GetElapsedTime(dispatchStart));
+
+                        if (Interlocked.Exchange(ref _firstAudioRecorded, 1) == 0)
+                        {
+                            _telemetry.RecordTimeToFirstAudio(CallId, _strategy.Tier, DateTimeOffset.UtcNow - StartedAt);
+                        }
                     }
                     else
                     {
                         _logger.LogWarning(
                             "Caller edge for call {CallId} cannot dispatch {DirectiveKind}; capabilities are {Capabilities}",
                             CallId, directive.GetType().Name, CallerEdge.Capabilities);
+                        _telemetry.DirectiveUnsupported(CallerEdge.EdgeId, directive.GetType().Name, CallerEdge.Capabilities);
                         // Surface the mismatch so observers / dashboards can flag it.
                         var mismatch = new StrategyEvent.DispatchUnsupported(
                             directive.GetType().Name,
@@ -625,6 +691,9 @@ public sealed class CallSession : ICallSession
         {
             await foreach (var ev in _strategy.Events.ReadAllAsync(_cts.Token).ConfigureAwait(false))
             {
+                _telemetry.StrategyEventEmitted(CallId, ev);
+                using (_telemetry.StartStrategyEventActivity(CallId, ev)) { /* span captured in using to record end time */ }
+
                 foreach (var bridge in _observerFanout)
                 {
                     bridge.Writer.TryWrite(ev);
@@ -662,15 +731,39 @@ public sealed class CallSession : ICallSession
     private async ValueTask TransitionAsync(CallSessionState target)
     {
         bool changed;
+        CallSessionState previous;
+        DateTimeOffset previousAt;
         lock (_stateLock)
         {
+            previous = _state;
+            previousAt = _lastStateChangeAt;
             changed = _state != target;
             _state = target;
+            if (changed)
+            {
+                _lastStateChangeAt = DateTimeOffset.UtcNow;
+            }
         }
 
         if (!changed)
         {
             return;
+        }
+
+        var elapsed = DateTimeOffset.UtcNow - previousAt;
+        _telemetry.StateTransition(CallId, previous, target, elapsed);
+        _callActivity?.AddEvent(new ActivityEvent(
+            name: "call.state_transition",
+            tags: new ActivityTagsCollection
+            {
+                { CallingActivitySource.CallStateFromTag, previous.ToString() },
+                { CallingActivitySource.CallStateToTag, target.ToString() },
+                { "elapsed_ms", elapsed.TotalMilliseconds },
+            }));
+        if (target == CallSessionState.Faulted)
+        {
+            _telemetry.CallFaulted(CallId, _strategy.Tier, previous.ToString());
+            _callActivity?.SetStatus(ActivityStatusCode.Error, "call faulted");
         }
 
         _quality.Update(CallId, current => current with { State = target });
@@ -719,6 +812,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
     private readonly IReadOnlyDictionary<AgentTier, IConversationStrategyFactory> _strategyFactories;
     private readonly CallSessionRegistry _registry;
     private readonly ICallQualityReporter _quality;
+    private readonly CallingTelemetry _telemetry;
     private readonly IEnumerable<ICallObserver> _defaultObservers;
     private readonly ILoggerFactory? _loggerFactory;
 
@@ -728,12 +822,14 @@ public sealed class CallSessionFactory : ICallSessionFactory
         ICallSessionRegistry registry,
         ICallQualityReporter quality,
         IEnumerable<ICallObserver>? defaultObservers = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        CallingTelemetry? telemetry = null)
     {
         _scopeFactory = scopeFactory;
         _strategyFactories = strategyFactories.ToDictionary(f => f.Tier, f => f);
         _registry = (CallSessionRegistry)registry;
         _quality = quality;
+        _telemetry = telemetry ?? CallingTelemetry.Default;
         _defaultObservers = defaultObservers ?? [];
         _loggerFactory = loggerFactory;
     }
@@ -747,13 +843,31 @@ public sealed class CallSessionFactory : ICallSessionFactory
                 $"No IConversationStrategyFactory registered for tier {tier}");
         }
 
+        using var createSpan = _telemetry.StartChildActivity(
+            CallingActivitySource.CreateSessionActivityName,
+            request.CallId);
+        createSpan?.SetTag(CallingActivitySource.CallTierTag, tier.ToString());
+
         var scope = _scopeFactory.CreateScope();
-        var strategy = await factory.CreateAsync(
-            request.CallId,
-            scope.ServiceProvider,
-            request.Workflow,
-            restoreFrom: null,
-            cancellationToken).ConfigureAwait(false);
+        IConversationStrategy strategy;
+        try
+        {
+            strategy = await factory.CreateAsync(
+                request.CallId,
+                scope.ServiceProvider,
+                request.Workflow,
+                restoreFrom: null,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            CallingActivitySource.SetError(createSpan, ex);
+            scope.Dispose();
+            throw;
+        }
+
+        _telemetry.CallCreated(request.CallId, tier, strategy.Kind);
+        createSpan?.SetTag(CallingActivitySource.CallStrategyKindTag, strategy.Kind.ToString());
 
         var observers = (request.Observers ?? []).Concat(_defaultObservers).ToList();
 
@@ -765,7 +879,8 @@ public sealed class CallSessionFactory : ICallSessionFactory
             _quality,
             scope,
             _registry,
-            _loggerFactory?.CreateLogger<CallSession>());
+            _loggerFactory?.CreateLogger<CallSession>(),
+            _telemetry);
 
         // Bind the per-call scoped accessor so AI tool collections resolved
         // from this scope can reach the live session.

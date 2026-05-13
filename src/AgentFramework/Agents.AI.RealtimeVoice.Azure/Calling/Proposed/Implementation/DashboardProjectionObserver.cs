@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
+
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
 /// <summary>
@@ -9,7 +12,13 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 public sealed class DashboardProjectionObserver : ICallObserver
 {
     private readonly CancellationTokenSource _cts = new();
+    private readonly CallingTelemetry _telemetry;
     private Task? _loop;
+
+    public DashboardProjectionObserver(CallingTelemetry? telemetry = null)
+    {
+        _telemetry = telemetry ?? CallingTelemetry.Default;
+    }
 
     public string ObserverId { get; } = $"dashboard-projection";
 
@@ -20,8 +29,13 @@ public sealed class DashboardProjectionObserver : ICallObserver
             return Task.CompletedTask;
         }
 
+        using (var span = _telemetry.StartChildActivity("contact_center.observer.start", observation.CallId))
+        {
+            span?.SetTag(CallingActivitySource.ObserverIdTag, ObserverId);
+        }
+
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
-        _loop = Task.Run(() => RunAsync(observation, linked.Token), CancellationToken.None);
+        _loop = Task.Run(() => RunAsync(observation, _telemetry, linked.Token), CancellationToken.None);
         return Task.CompletedTask;
     }
 
@@ -40,13 +54,26 @@ public sealed class DashboardProjectionObserver : ICallObserver
         _cts.Dispose();
     }
 
-    private static async Task RunAsync(CallObservation observation, CancellationToken ct)
+    private static async Task RunAsync(CallObservation observation, CallingTelemetry telemetry, CancellationToken ct)
     {
         try
         {
             await foreach (var ev in observation.Events.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                switch (ev)
+                // Only open a child activity for alert-bearing events to keep span volume sane.
+                Activity? span = ev switch
+                {
+                    StrategyEvent.TierDegraded
+                        or StrategyEvent.EscalationRequested
+                        or StrategyEvent.Faulted
+                        or StrategyEvent.DispatchUnsupported
+                        => telemetry.StartStrategyEventActivity(observation.CallId, ev),
+                    _ => null
+                };
+
+                try
+                {
+                    switch (ev)
                 {
                     case StrategyEvent.AgentUtterance utterance:
                         observation.QualityReporter.Update(observation.CallId, current => current with
@@ -108,6 +135,11 @@ public sealed class DashboardProjectionObserver : ICallObserver
                             Message: fault.Message,
                             RaisedAt: fault.At));
                         break;
+                    }
+                }
+                finally
+                {
+                    span?.Dispose();
                 }
             }
         }

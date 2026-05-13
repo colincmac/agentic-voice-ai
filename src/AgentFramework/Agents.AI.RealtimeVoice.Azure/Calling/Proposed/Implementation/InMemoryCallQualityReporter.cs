@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -7,7 +8,8 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
 /// <summary>
 /// In-process implementation of <see cref="ICallQualityReporter"/>. Holds the live
-/// snapshot per call, broadcasts each update to all subscribers.
+/// snapshot per call, broadcasts each update to all subscribers, and dual-emits
+/// alerts/updates to <see cref="CallingTelemetry"/> for OTel-driven alerting.
 /// </summary>
 public sealed class InMemoryCallQualityReporter : ICallQualityReporter
 {
@@ -15,10 +17,14 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
     private readonly ConcurrentDictionary<string, List<QualityAlert>> _alerts = new();
     private readonly List<Subscriber> _subscribers = [];
     private readonly Lock _subscribersLock = new();
+    private readonly CallingTelemetry _telemetry;
     private readonly ILogger<InMemoryCallQualityReporter> _logger;
 
-    public InMemoryCallQualityReporter(ILoggerFactory? loggerFactory = null)
+    public InMemoryCallQualityReporter(
+        ILoggerFactory? loggerFactory = null,
+        CallingTelemetry? telemetry = null)
     {
+        _telemetry = telemetry ?? CallingTelemetry.Default;
         _logger = loggerFactory?.CreateLogger<InMemoryCallQualityReporter>()
                   ?? NullLogger<InMemoryCallQualityReporter>.Instance;
     }
@@ -51,6 +57,7 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
         var next = mutate(current) with { UpdatedAt = DateTimeOffset.UtcNow };
 
         _snapshots[callId] = next;
+        _telemetry.SnapshotUpdated(callId);
         Broadcast(next);
     }
 
@@ -66,6 +73,7 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
             list.Add(alert);
         }
 
+        _telemetry.AlertRaised(callId, alert);
         UpdateSnapshotAlerts(callId);
     }
 
@@ -76,9 +84,20 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
             return;
         }
 
+        QualityAlert? removed = null;
         lock (list)
         {
-            list.RemoveAll(a => a.AlertId == alertId);
+            var idx = list.FindIndex(a => a.AlertId == alertId);
+            if (idx >= 0)
+            {
+                removed = list[idx];
+                list.RemoveAt(idx);
+            }
+        }
+
+        if (removed is not null)
+        {
+            _telemetry.AlertResolved(callId, removed);
         }
 
         UpdateSnapshotAlerts(callId);

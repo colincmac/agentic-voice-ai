@@ -28,6 +28,7 @@
     <PackageReference Include="StackExchange.Redis" />
 
     <PackageReference Include="Microsoft.Extensions.Telemetry.Abstractions" />
+    <PackageReference Include="Microsoft.OpenTelemetry" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.Net.ClientFactory" />
 

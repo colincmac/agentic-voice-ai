@@ -34,13 +34,12 @@ public static class CallingApi
         var routeGroup = endpoints.MapGroup(path).AllowAnonymous();
 
         routeGroup.MapPost(HANDLE_INCOMING_PATH, async (
-            HttpContext httpContext,
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
-            [FromQuery] string? mode = "streaming",
+            //[FromQuery] string? mode = "streaming",
             CancellationToken cancellationToken = default) =>
         {
-
+            var mode = "streaming";
             foreach (var evt in incomingEvents)
             {
                 if (!evt.TryGetSystemEventData(out var eventData))
@@ -172,7 +171,7 @@ public static class CallingApi
                     CallId = callId,
                     CallerEdge = edge,
                     Workflow = services.Workflow,
-                    PreferredTier = AgentTier.RealtimeVoice
+                    PreferredTier = AgentTier.DtmfOnly
                 }, httpContext.RequestAborted);
 
                 await session.StartAsync(httpContext.RequestAborted);

@@ -8,13 +8,13 @@ public static class IvrSampleWorkflow
 
     public static RealtimeIvrWorkflowDefinition DtmfOnly() => new RealtimeIvrWorkflowDefinition()
     {
-        Name = "test-ivr",
+        Name = "dtmf-ivr",
         BasePrompt = new RealtimePrompt(),
         Steps =
         [
             new RealtimeIvrWorkflowStep
             {
-                Id = "language",
+                Id = "01_language",
                 ConversationState = new ConversationState
                 {
                     Id = "language",

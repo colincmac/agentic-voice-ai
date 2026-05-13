@@ -5,6 +5,7 @@ using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
 using Agents.AI.RealtimeVoice.Azure.AITools;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,7 +52,27 @@ public static class CallSessionContainerExtensions
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
+        builder.AddCallSessionContainerTelemetry();
+
         return new CallSessionContainerBuilder(builder);
+    }
+
+    /// <summary>
+    /// Registers the dedicated <see cref="CallingTelemetry"/> singleton for the
+    /// new Calling/Proposed stack and wires its <see cref="System.Diagnostics.ActivitySource"/>
+    /// / <see cref="System.Diagnostics.Metrics.Meter"/> into the host's
+    /// OpenTelemetry pipeline. Safe to call multiple times.
+    /// </summary>
+    public static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
+    {
+        builder.Services.TryAddSingleton<CallingTelemetry>();
+
+        builder.Services
+            .AddOpenTelemetry()
+            .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
+            .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
+
+        return builder;
     }
 }
 

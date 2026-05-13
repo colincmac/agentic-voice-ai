@@ -93,14 +93,14 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
     public AzureSpeechSynthesizer(
         Uri endpoint,
         string voiceName = "en-US-Ava:DragonHDLatestNeural",
-        SpeechSynthesisOutputFormat outputFormat = SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm,
+        SpeechSynthesisOutputFormat outputFormat = SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm,
         int concurrency = 2,
         string locale = "en-US",
         string gender = "Female",
         ILogger<AzureSpeechSynthesizer>? logger = null)
     {
         _speechConfig = SpeechConfig.FromEndpoint(endpoint, new AzureCliCredential());
-        _speechConfig.SpeechSynthesisVoiceName = voiceName;
+        //_speechConfig.SpeechSynthesisVoiceName = voiceName;
         _speechConfig.SetSpeechSynthesisOutputFormat(outputFormat);
 
         _locale = locale;

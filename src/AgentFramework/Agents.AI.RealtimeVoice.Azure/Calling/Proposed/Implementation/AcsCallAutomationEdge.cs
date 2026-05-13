@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,6 +24,7 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
     private readonly ICallMediaClient _media;
     private readonly ICallControlClient? _control;
     private readonly ILogger<AcsCallAutomationEdge> _logger;
+    private readonly CallingTelemetry _telemetry;
     private readonly CancellationTokenSource _cts = new();
 
     // Caller-side audio is never produced by this edge — verb-based calls have no
@@ -43,13 +46,15 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
         ICallMediaClient media,
         CallEdgeMetadata metadata,
         ICallControlClient? control = null,
-        ILogger<AcsCallAutomationEdge>? logger = null)
+        ILogger<AcsCallAutomationEdge>? logger = null,
+        CallingTelemetry? telemetry = null)
     {
         EdgeId = callConnectionId;
         _media = media;
         _control = control;
         Metadata = metadata;
         _logger = logger ?? NullLogger<AcsCallAutomationEdge>.Instance;
+        _telemetry = telemetry ?? CallingTelemetry.Default;
     }
 
     public string EdgeId { get; }
@@ -96,25 +101,31 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         _connected = true;
+        _telemetry.EdgeConnected(EdgeId, Kind);
         return Task.CompletedTask;
     }
 
     public async ValueTask DispatchAsync(OutboundDirective directive, CancellationToken cancellationToken = default)
     {
+        var directiveKind = directive.GetType().Name;
+        var dispatchStart = Stopwatch.GetTimestamp();
         try
         {
             switch (directive)
             {
                 case OutboundDirective.SpeakText speak:
                     await _media.PlayTextAsync(speak.Text, speak.VoiceName, speak.OperationContext, cancellationToken).ConfigureAwait(false);
+                    _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
                     break;
 
                 case OutboundDirective.PlayFile play:
                     await _media.PlayFileAsync(play.FileUri, play.OperationContext, cancellationToken).ConfigureAwait(false);
+                    _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
                     break;
 
                 case OutboundDirective.StopPlayback:
                     await _media.CancelAllAsync(cancellationToken).ConfigureAwait(false);
+                    _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
                     break;
 
                 case OutboundDirective.CollectDtmf recognize:
@@ -125,18 +136,21 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
                         recognize.InitialSilenceTimeout,
                         recognize.OperationContext,
                         cancellationToken).ConfigureAwait(false);
+                    _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
                     break;
 
                 default:
                     _logger.LogWarning(
                         "Verb ACS edge {EdgeId} cannot dispatch {DirectiveKind}; pair this strategy with an AcsCallerEdge instead",
-                        EdgeId, directive.GetType().Name);
+                        EdgeId, directiveKind);
+                    _telemetry.DirectiveUnsupported(EdgeId, directiveKind, Capabilities);
                     break;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Verb ACS edge {EdgeId} failed to dispatch {DirectiveKind}", EdgeId, directive.GetType().Name);
+            _telemetry.DirectiveDispatchFailed(EdgeId, directiveKind, ex);
+            _logger.LogWarning(ex, "Verb ACS edge {EdgeId} failed to dispatch {DirectiveKind}", EdgeId, directiveKind);
         }
     }
 
@@ -155,6 +169,7 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
                 if (TryMapTone(tone, out var digit))
                 {
                     _inboundDtmf.Writer.TryWrite(new DtmfTone(digit, at));
+                    _telemetry.InboundDtmfTone(EdgeId);
                 }
             }
         }
@@ -201,6 +216,8 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
         {
             return;
         }
+
+        _telemetry.EdgeDisconnected(EdgeId, Kind, reason);
 
         var handlers = Disconnected;
         if (handlers is null)

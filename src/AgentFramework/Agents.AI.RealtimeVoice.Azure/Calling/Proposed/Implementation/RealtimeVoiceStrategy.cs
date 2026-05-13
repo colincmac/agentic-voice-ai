@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -18,6 +20,8 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     private readonly RealtimeIvrWorkflowDefinition _workflow;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
+    private readonly CallingTelemetry _telemetry;
+    private string _callId = string.Empty;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
         new BoundedChannelOptions(500)
@@ -40,12 +44,14 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         IRealtimeVoiceBackend backend,
         RealtimeIvrWorkflowDefinition workflow,
         IvrWorkflowState? restoreFrom = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        CallingTelemetry? telemetry = null)
     {
         _backend = backend;
         _workflow = workflow;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<RealtimeVoiceStrategy>() ?? NullLogger<RealtimeVoiceStrategy>.Instance;
+        _telemetry = telemetry ?? CallingTelemetry.Default;
 
         WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
@@ -69,13 +75,26 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             return;
         }
 
+        _callId = context.CallId;
+
         _navigator = new IvrWorkflowNavigator(
             _workflow,
             WorkflowState,
             context.Services,
             _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
 
-        await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        using (var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId))
+        {
+            try
+            {
+                await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                CallingActivitySource.SetError(connectSpan, ex);
+                throw;
+            }
+        }
 
         // Seed the agent with the system prompt for the current workflow step.
         var step = _navigator.EnterInitialStep();
@@ -195,6 +214,10 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         catch (Exception ex)
         {
             _logger.LogError(ex, "Realtime agent loop crashed");
+            using (var faultSpan = _telemetry.StartChildActivity("contact_center.strategy.agent_loop.faulted", _callId))
+            {
+                CallingActivitySource.SetError(faultSpan, ex);
+            }
             await _events.Writer.WriteAsync(
                 new StrategyEvent.Faulted(ex.Message, ex, DateTimeOffset.UtcNow),
                 CancellationToken.None).ConfigureAwait(false);
