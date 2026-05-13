@@ -1,8 +1,6 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
-using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -778,116 +776,5 @@ public sealed class CallSession : ICallSession
             try { await handler(target).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogWarning(ex, "StateChanged handler threw"); }
         }
-    }
-}
-
-/// <summary>
-/// Default in-process registry of active call sessions.
-/// </summary>
-public sealed class CallSessionRegistry : ICallSessionRegistry
-{
-    private readonly ConcurrentDictionary<string, ICallSession> _sessions = new();
-
-    internal void Add(ICallSession session) => _sessions[session.CallId] = session;
-
-    public ICallSession? TryGet(string callId)
-    {
-        _sessions.TryGetValue(callId, out var session);
-        return session;
-    }
-
-    public IReadOnlyCollection<ICallSession> ActiveSessions => _sessions.Values.ToArray();
-
-    public Task<bool> RemoveAsync(string callId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_sessions.TryRemove(callId, out _));
-}
-
-/// <summary>
-/// Default <see cref="ICallSessionFactory"/>. Resolves the strategy synchronously
-/// (no fire-and-forget background attach), then constructs the session.
-/// </summary>
-public sealed class CallSessionFactory : ICallSessionFactory
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IReadOnlyDictionary<AgentTier, IConversationStrategyFactory> _strategyFactories;
-    private readonly CallSessionRegistry _registry;
-    private readonly ICallQualityReporter _quality;
-    private readonly CallingTelemetry _telemetry;
-    private readonly IEnumerable<ICallObserver> _defaultObservers;
-    private readonly ILoggerFactory? _loggerFactory;
-
-    public CallSessionFactory(
-        IServiceScopeFactory scopeFactory,
-        IEnumerable<IConversationStrategyFactory> strategyFactories,
-        ICallSessionRegistry registry,
-        ICallQualityReporter quality,
-        IEnumerable<ICallObserver>? defaultObservers = null,
-        ILoggerFactory? loggerFactory = null,
-        CallingTelemetry? telemetry = null)
-    {
-        _scopeFactory = scopeFactory;
-        _strategyFactories = strategyFactories.ToDictionary(f => f.Tier, f => f);
-        _registry = (CallSessionRegistry)registry;
-        _quality = quality;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
-        _defaultObservers = defaultObservers ?? [];
-        _loggerFactory = loggerFactory;
-    }
-
-    public async Task<ICallSession> CreateAsync(CallSessionRequest request, CancellationToken cancellationToken = default)
-    {
-        var tier = request.PreferredTier ?? AgentTier.DtmfOnly;
-        if (!_strategyFactories.TryGetValue(tier, out var factory))
-        {
-            throw new InvalidOperationException(
-                $"No IConversationStrategyFactory registered for tier {tier}");
-        }
-
-        using var createSpan = _telemetry.StartChildActivity(
-            CallingActivitySource.CreateSessionActivityName,
-            request.CallId);
-        createSpan?.SetTag(CallingActivitySource.CallTierTag, tier.ToString());
-
-        var scope = _scopeFactory.CreateScope();
-        IConversationStrategy strategy;
-        try
-        {
-            strategy = await factory.CreateAsync(
-                request.CallId,
-                scope.ServiceProvider,
-                request.Workflow,
-                restoreFrom: null,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            CallingActivitySource.SetError(createSpan, ex);
-            scope.Dispose();
-            throw;
-        }
-
-        _telemetry.CallCreated(request.CallId, tier, strategy.Kind);
-        createSpan?.SetTag(CallingActivitySource.CallStrategyKindTag, strategy.Kind.ToString());
-
-        var observers = (request.Observers ?? []).Concat(_defaultObservers).ToList();
-
-        var session = new CallSession(
-            request.CallId,
-            request.CallerEdge,
-            strategy,
-            observers,
-            _quality,
-            scope,
-            _registry,
-            _loggerFactory?.CreateLogger<CallSession>(),
-            _telemetry);
-
-        // Bind the per-call scoped accessor so AI tool collections resolved
-        // from this scope can reach the live session.
-        var accessor = scope.ServiceProvider.GetService<CallSessionAccessor>();
-        accessor?.Set(session);
-
-        _registry.Add(session);
-        return session;
     }
 }

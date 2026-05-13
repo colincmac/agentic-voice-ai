@@ -39,6 +39,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     private Task? _agentLoop;
     private Task? _audioPump;
     private bool _suspended;
+    private bool _prewarmed;
 
     public RealtimeVoiceStrategy(
         IRealtimeVoiceBackend backend,
@@ -77,10 +78,33 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         _callId = context.CallId;
 
+        if (!_prewarmed)
+        {
+            await PrepareBackendAsync(context.Services, cancellationToken).ConfigureAwait(false);
+        }
+
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        _audioPump = Task.Run(() => PumpInboundAudioAsync(context, linked.Token), CancellationToken.None);
+        _agentLoop = Task.Run(() => RunAgentLoopAsync(linked.Token), CancellationToken.None);
+    }
+
+    public async ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        if (_prewarmed)
+        {
+            return;
+        }
+
+        await PrepareBackendAsync(services, cancellationToken).ConfigureAwait(false);
+        _prewarmed = true;
+    }
+
+    private async Task PrepareBackendAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
         _navigator = new IvrWorkflowNavigator(
             _workflow,
             WorkflowState,
-            context.Services,
+            services,
             _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
 
         using (var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId))
@@ -106,16 +130,14 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         var prompt = _navigator.BuildCurrentStepPrompt();
         await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+
+        // Events buffer in the unbounded channel until the session pumps them out.
         await _events.Writer.WriteAsync(
             new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
         await _events.Writer.WriteAsync(
             new StrategyEvent.AgentSpeakingChanged(_backend.AgentId, _backend.AgentDisplayName, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
-
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
-        _audioPump = Task.Run(() => PumpInboundAudioAsync(context, linked.Token), CancellationToken.None);
-        _agentLoop = Task.Run(() => RunAgentLoopAsync(linked.Token), CancellationToken.None);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)

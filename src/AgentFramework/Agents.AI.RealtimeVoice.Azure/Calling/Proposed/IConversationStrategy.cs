@@ -49,6 +49,20 @@ public interface IConversationStrategy : IAsyncDisposable
 
     Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Optional hook to perform expensive, edge-independent setup ahead of <see cref="StartAsync"/>.
+    /// Implementations may connect upstream sessions, build the IVR navigator, push the initial
+    /// system prompt / tool surface, and pre-synthesize the first prompt — anything that does not
+    /// require live caller audio or DTMF channels.
+    /// </summary>
+    /// <remarks>
+    /// Called by <c>CallSessionFactory.PrewarmAsync</c> while ACS is still negotiating the media
+    /// channel, so the strategy is ready to interact the moment <see cref="StartAsync"/> is invoked.
+    /// The default is a no-op for strategies that have no useful warm-up work.
+    /// </remarks>
+    ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
     Task StopAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

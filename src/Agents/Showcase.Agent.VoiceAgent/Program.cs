@@ -124,7 +124,7 @@ builder.AddRealtimeAIAgent(
 builder.AddCallSessionContainer()
     .AddAcsCallAutomation()
     .AddDtmfStrategy()
-    //.AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
     .AddCallControlTools();
 
 // TEAMS

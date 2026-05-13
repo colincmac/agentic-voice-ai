@@ -97,6 +97,29 @@ public static class CallingApi
                         "Answered call. CallConnectionId: {CallConnectionId}",
                         callConnection.CallConnectionId);
 
+                    // Kick off strategy prewarm right after answering so the realtime backend
+                    // connect / first-prompt TTS overlap with ACS opening the media channel.
+                    // CreateAsync below will claim this prewarmed entry by callId.
+                    var prewarmCallId = $"call_{callConnection.CallConnectionId}";
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await services.SessionFactory.PrewarmAsync(new CallSessionPrewarmRequest
+                            {
+                                CallId = prewarmCallId,
+                                Workflow = services.Workflow,
+                                PreferredTier = AgentTier.DtmfOnly
+                            }, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            services.Logger.LogWarning(ex,
+                                "Strategy prewarm failed for call {CallId}; CreateAsync will build a fresh strategy",
+                                prewarmCallId);
+                        }
+                    }, CancellationToken.None);
+
                     if (mode == "verb")
                     {
                         // Verb-mode session is born here — no WS handshake will follow.

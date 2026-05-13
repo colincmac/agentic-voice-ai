@@ -36,6 +36,9 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     private IIvrWorkflowNavigator? _navigator;
     private string _digitBuffer = string.Empty;
     private bool _suspended;
+    private bool _prewarmed;
+    private RealtimeIvrWorkflowStep? _prewarmedInitialStep;
+    private List<OutboundDirective>? _prewarmedInitialDirectives;
 
     public DtmfVerbStrategy(
         RealtimeIvrWorkflowDefinition workflow,
@@ -73,6 +76,37 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         return Task.CompletedTask;
     }
 
+    public async ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        if (_prewarmed)
+        {
+            return;
+        }
+
+        _navigator = new IvrWorkflowNavigator(
+            _workflow,
+            WorkflowState,
+            services,
+            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+
+        var initial = _navigator.EnterInitialStep();
+        _prewarmedInitialStep = initial;
+        _prewarmedInitialDirectives = BuildEnterStepDirectives(initial, out var prompt);
+
+        await _events.Writer.WriteAsync(
+            new StrategyEvent.WorkflowStepEntered(initial.Id, DateTimeOffset.UtcNow),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(prompt))
+        {
+            await _events.Writer.WriteAsync(
+                new StrategyEvent.AgentUtterance("dtmf-verb", prompt, DateTimeOffset.UtcNow),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        _prewarmed = true;
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await _cts.CancelAsync().ConfigureAwait(false);
@@ -104,16 +138,34 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task RunAsync(StrategyStartContext context, CancellationToken ct)
     {
-        _navigator = new IvrWorkflowNavigator(
-            _workflow,
-            WorkflowState,
-            context.Services,
-            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        if (!_prewarmed)
+        {
+            _navigator = new IvrWorkflowNavigator(
+                _workflow,
+                WorkflowState,
+                context.Services,
+                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        }
 
         try
         {
-            var initial = _navigator.EnterInitialStep();
-            await EnterStepAsync(initial, ct).ConfigureAwait(false);
+            if (_prewarmed && _prewarmedInitialDirectives is { Count: > 0 } buffered)
+            {
+                foreach (var directive in buffered)
+                {
+                    if (_suspended)
+                    {
+                        break;
+                    }
+                    await _outbound.Writer.WriteAsync(directive, ct).ConfigureAwait(false);
+                }
+                _prewarmedInitialDirectives = null;
+            }
+            else
+            {
+                var initial = _navigator!.EnterInitialStep();
+                await EnterStepAsync(initial, ct).ConfigureAwait(false);
+            }
 
             await foreach (var tone in context.InboundDtmf.ReadAllAsync(ct).ConfigureAwait(false))
             {
@@ -272,27 +324,58 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
 
-        var prompt = BuildPrompt(step);
+        var directives = BuildEnterStepDirectives(step, out var prompt);
+
         if (!string.IsNullOrWhiteSpace(prompt))
         {
-            await SpeakAsync(prompt, ct).ConfigureAwait(false);
+            await _events.Writer.WriteAsync(
+                new StrategyEvent.AgentUtterance("dtmf-verb", prompt, DateTimeOffset.UtcNow),
+                ct).ConfigureAwait(false);
+        }
+
+        foreach (var directive in directives)
+        {
+            if (_suspended)
+            {
+                break;
+            }
+            await _outbound.Writer.WriteAsync(directive, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Render a step into the speak + recognize directives that drive the verb-mode caller edge.
+    /// Returns the prompt text (used for the AgentUtterance event) via <paramref name="prompt"/>.
+    /// Used by both the live <see cref="EnterStepAsync"/> path and <see cref="PrewarmAsync"/>.
+    /// </summary>
+    private static List<OutboundDirective> BuildEnterStepDirectives(RealtimeIvrWorkflowStep step, out string prompt)
+    {
+        var directives = new List<OutboundDirective>();
+        prompt = BuildPrompt(step);
+
+        if (!string.IsNullOrWhiteSpace(prompt))
+        {
+            directives.Add(new OutboundDirective.SpeakText(prompt, DateTimeOffset.UtcNow, OperationContext: step.Id));
         }
 
         if (step.StepDtmfConfiguration?.MenuOptions is not null)
         {
-            await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
+            directives.Add(new OutboundDirective.CollectDtmf(
+                MaxTones: 1,
+                At: DateTimeOffset.UtcNow,
+                StopTone: null,
+                OperationContext: step.Id));
         }
         else if (step.ValidTransitions.Count > 0)
         {
-            // Free-form digit collection terminated by '#'.
-            await _outbound.Writer.WriteAsync(
-                new OutboundDirective.CollectDtmf(
-                    MaxTones: 16,
-                    At: DateTimeOffset.UtcNow,
-                    StopTone: '#',
-                    OperationContext: step.Id),
-                ct).ConfigureAwait(false);
+            directives.Add(new OutboundDirective.CollectDtmf(
+                MaxTones: 16,
+                At: DateTimeOffset.UtcNow,
+                StopTone: '#',
+                OperationContext: step.Id));
         }
+
+        return directives;
     }
 
     private Task RecognizeMenuAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)

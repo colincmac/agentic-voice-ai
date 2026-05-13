@@ -110,6 +110,28 @@ public enum SupervisorMode
 public interface ICallSessionFactory
 {
     Task<ICallSession> CreateAsync(CallSessionRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pre-build the strategy (and its scope) for an upcoming call so all expensive work —
+    /// realtime backend connect, navigator construction, initial system-prompt push, first-prompt
+    /// TTS — happens in parallel with the platform's media-channel handshake. The next
+    /// <see cref="CreateAsync"/> call with the same <see cref="CallSessionPrewarmRequest.CallId"/>
+    /// claims the prewarmed entry instead of building from scratch.
+    /// </summary>
+    /// <remarks>
+    /// Safe to call fire-and-forget from the IncomingCall webhook. Orphaned entries (where
+    /// <see cref="CreateAsync"/> never claims them) are evicted and disposed automatically.
+    /// </remarks>
+    Task PrewarmAsync(CallSessionPrewarmRequest request, CancellationToken cancellationToken = default);
+}
+
+public sealed record CallSessionPrewarmRequest
+{
+    public required string CallId { get; init; }
+    public required RealtimeIvrWorkflowDefinition Workflow { get; init; }
+
+    /// <summary>Override tier resolution. When null, defaults to <see cref="AgentTier.DtmfOnly"/>.</summary>
+    public AgentTier? PreferredTier { get; init; }
 }
 
 public sealed record CallSessionRequest

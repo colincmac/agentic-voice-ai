@@ -37,6 +37,9 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
     private readonly StringBuilder _digitBuffer = new();
 
     private bool _suspended;
+    private bool _prewarmed;
+    private List<OutboundDirective>? _prewarmedInitialDirectives;
+    private RealtimeIvrWorkflowStep? _prewarmedInitialStep;
     private DateTime _lastDtmfReceivedTime = DateTime.MinValue;
     private CancellationTokenSource? _interDigitTimeoutCts;
     private int _interDigitTimeoutMs = 5000;
@@ -81,6 +84,41 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
         return Task.CompletedTask;
     }
 
+    public async ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        if (_prewarmed)
+        {
+            return;
+        }
+
+        _navigator = new IvrWorkflowNavigator(
+            _workflow,
+            WorkflowState,
+            services,
+            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+
+        var initial = _navigator.EnterInitialStep();
+        _prewarmedInitialStep = initial;
+
+        // Pre-synthesize the first prompt so the caller hears the initial step
+        // the moment StartAsync runs, instead of waiting for TTS round-trips.
+        _prewarmedInitialDirectives = await BuildSpeakDirectivesAsync(initial, cancellationToken).ConfigureAwait(false);
+
+        await _events.Writer.WriteAsync(
+            new StrategyEvent.WorkflowStepEntered(initial.Id, DateTimeOffset.UtcNow),
+            cancellationToken).ConfigureAwait(false);
+
+        if (_synthesizer is not null)
+        {
+            var (prompt, _) = BuildPrompt(initial);
+            await _events.Writer.WriteAsync(
+                new StrategyEvent.AgentUtterance("dtmf", prompt, DateTimeOffset.UtcNow),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        _prewarmed = true;
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await _cts.CancelAsync().ConfigureAwait(false);
@@ -112,16 +150,38 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
     private async Task RunAsync(StrategyStartContext context, CancellationToken ct)
     {
-        _navigator = new IvrWorkflowNavigator(
-            _workflow,
-            WorkflowState,
-            context.Services,
-            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        if (!_prewarmed)
+        {
+            _navigator = new IvrWorkflowNavigator(
+                _workflow,
+                WorkflowState,
+                context.Services,
+                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        }
 
         try
         {
-            var initial = _navigator.EnterInitialStep();
-            await EnterStepAsync(initial, ct).ConfigureAwait(false);
+            if (_prewarmed && _prewarmedInitialStep is not null)
+            {
+                // Replay buffered prompt audio/directives — no TTS round-trip on the call's critical path.
+                if (_prewarmedInitialDirectives is { Count: > 0 } buffered)
+                {
+                    foreach (var directive in buffered)
+                    {
+                        if (_suspended)
+                        {
+                            break;
+                        }
+                        await _outbound.Writer.WriteAsync(directive, ct).ConfigureAwait(false);
+                    }
+                    _prewarmedInitialDirectives = null;
+                }
+            }
+            else
+            {
+                var initial = _navigator!.EnterInitialStep();
+                await EnterStepAsync(initial, ct).ConfigureAwait(false);
+            }
 
             await foreach (var tone in context.InboundDtmf.ReadAllAsync(ct).ConfigureAwait(false))
             {
@@ -314,47 +374,61 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
     {
         try
         {
-            if (_synthesizer is not null)
-            {
-                var (prompt, format) = BuildPrompt(step);
+            var directives = await BuildSpeakDirectivesAsync(step, ct).ConfigureAwait(false);
 
-                await foreach (var pcm in _synthesizer.SynthesizeAsync(prompt, format, ct).ConfigureAwait(false))
+            foreach (var directive in directives)
+            {
+                if (_suspended)
                 {
-                    if (_suspended)
-                    {
-                        break;
-                    }
-                    await _outbound.Writer.WriteAsync(
-                        new OutboundDirective.Audio(
-                            new AudioFrame(pcm, DateTimeOffset.UtcNow, SourceEdgeId: null)),
-                        ct).ConfigureAwait(false);
+                    break;
                 }
+                await _outbound.Writer.WriteAsync(directive, ct).ConfigureAwait(false);
+            }
+
+            if (_synthesizer is not null && directives.Count > 0)
+            {
+                var (prompt, _) = BuildPrompt(step);
                 await _events.Writer.WriteAsync(
                     new StrategyEvent.AgentUtterance("dtmf", prompt, DateTimeOffset.UtcNow),
                     ct).ConfigureAwait(false);
             }
-            else
-            {
-                if(step.StepDtmfConfiguration?.AudioFile is Uri fileUri)
-                {
-                    await _outbound.Writer.WriteAsync(
-                        new OutboundDirective.PlayFile(FileUri: fileUri, DateTimeOffset.UtcNow),
-                        ct).ConfigureAwait(false);
-                }
-                else if(!string.IsNullOrEmpty(step.StepDtmfConfiguration?.SsmlPromptOverride))
-                {
-                    await _outbound.Writer.WriteAsync(
-                        new OutboundDirective.SpeakText(step.StepDtmfConfiguration.SsmlPromptOverride, DateTimeOffset.UtcNow),
-                        ct).ConfigureAwait(false);
-                }
-            }
-
         }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "TTS synthesis failed for DTMF strategy");
         }
+    }
+
+    /// <summary>
+    /// Build the outbound directives that render the step's prompt — synthesizing PCM
+    /// up-front when an <see cref="ISpeechSynthesizer"/> is available, or falling back to
+    /// platform speak/play directives. Used by both the live <see cref="SpeakAsync"/> path
+    /// and <see cref="PrewarmAsync"/> so the first prompt can be queued before the call is live.
+    /// </summary>
+    private async Task<List<OutboundDirective>> BuildSpeakDirectivesAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        var directives = new List<OutboundDirective>();
+
+        if (_synthesizer is not null)
+        {
+            var (prompt, format) = BuildPrompt(step);
+            await foreach (var pcm in _synthesizer.SynthesizeAsync(prompt, format, ct).ConfigureAwait(false))
+            {
+                directives.Add(new OutboundDirective.Audio(
+                    new AudioFrame(pcm, DateTimeOffset.UtcNow, SourceEdgeId: null)));
+            }
+        }
+        else if (step.StepDtmfConfiguration?.AudioFile is Uri fileUri)
+        {
+            directives.Add(new OutboundDirective.PlayFile(FileUri: fileUri, DateTimeOffset.UtcNow));
+        }
+        else if (!string.IsNullOrEmpty(step.StepDtmfConfiguration?.SsmlPromptOverride))
+        {
+            directives.Add(new OutboundDirective.SpeakText(step.StepDtmfConfiguration.SsmlPromptOverride, DateTimeOffset.UtcNow));
+        }
+
+        return directives;
     }
 
     private static (string prompt, SynthesizerInputFormat format) BuildPrompt(RealtimeIvrWorkflowStep step)
