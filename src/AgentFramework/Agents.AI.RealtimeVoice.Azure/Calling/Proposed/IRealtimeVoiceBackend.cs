@@ -1,3 +1,5 @@
+using Microsoft.Extensions.AI;
+
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 
 // SKETCH — adapter abstraction so RealtimeVoiceStrategy is decoupled from
@@ -32,6 +34,20 @@ public interface IRealtimeVoiceBackend : IAsyncDisposable
     /// Implementations may no-op if their backend doesn't support live prompt updates.
     /// </summary>
     ValueTask UpdateSystemPromptAsync(string prompt, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Replace the realtime backend's tool surface. Used by the strategy to push the
+    /// guard-wrapped tool list for the current workflow step (typically obtained via
+    /// <c>IIvrWorkflowNavigator.WrapToolsWithCurrentGuards</c>) at session start and on
+    /// any subsequent step transition.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation is a no-op so backends that don't support live tool
+    /// updates compile without changes. Production backends that drive a realtime model
+    /// session must override and forward to the underlying realtime client.
+    /// </remarks>
+    ValueTask UpdateToolsAsync(IEnumerable<AITool> tools, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
 
     /// <summary>
     /// Stream of updates from the model. Completes when the connection closes.

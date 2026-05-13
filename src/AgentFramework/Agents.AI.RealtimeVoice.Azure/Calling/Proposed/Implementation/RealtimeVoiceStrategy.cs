@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -78,6 +79,12 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         // Seed the agent with the system prompt for the current workflow step.
         var step = _navigator.EnterInitialStep();
+
+        // Push the step's tool surface, wrapped with the step's guards so any tool
+        // invocation by the realtime model is gated by the navigator's live state.
+        var initialTools = _navigator.WrapToolsWithCurrentGuards(step.AvailableTools ?? Array.Empty<AITool>());
+        await _backend.UpdateToolsAsync(initialTools, cancellationToken).ConfigureAwait(false);
+
         var prompt = _navigator.BuildCurrentStepPrompt();
         await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
         await _events.Writer.WriteAsync(

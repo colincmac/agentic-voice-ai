@@ -2,10 +2,12 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Realtime;
+using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+#pragma warning disable MEAI001
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
@@ -70,6 +72,62 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
         var session = EnsureSession();
         var systemMessage = new ChatMessage(ChatRole.System, prompt);
         await _agent.SendAsync(session, systemMessage, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends a <see cref="SessionUpdateRealtimeClientMessage"/> with the new tool list, cloning every other
+    /// option from the live session so the realtime model retains its current instructions, voice, audio
+    /// format, etc. Intended to be called by the strategy at session start and on each workflow step
+    /// transition with the navigator's guard-wrapped tools.
+    /// <para>
+    /// Tools pushed via this path are NOT wrapped in <c>AuthorizingAgentFunction</c> (that wrap only happens
+    /// via the agent's <c>RealtimeClientFactory</c> at session creation). Today this is harmless because the
+    /// authorizing wrapper is pass-through; if approval/auth middleware is reintroduced, expose a
+    /// tool-wrapping callback on the agent and apply it here.
+    /// </para>
+    /// </remarks>
+    public async ValueTask UpdateToolsAsync(IEnumerable<AITool> tools, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+
+        var session = EnsureSession();
+        var clientSession = session.ClientSession
+            ?? throw new InvalidOperationException(
+                $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
+
+        var updated = CloneOptionsWithTools(clientSession.Options, [.. tools]);
+        await clientSession.SendAsync(
+            new SessionUpdateRealtimeClientMessage(updated),
+            cancellationToken).ConfigureAwait(false);
+
+        _logger.LogDebug("Realtime backend tools updated for agent {AgentId} (tool count {Count})",
+            AgentId, updated.Tools?.Count ?? 0);
+    }
+
+    private static RealtimeSessionOptions CloneOptionsWithTools(RealtimeSessionOptions? source, IReadOnlyList<AITool> tools)
+    {
+        if (source is null)
+        {
+            return new RealtimeSessionOptions { Tools = tools };
+        }
+
+        return new RealtimeSessionOptions
+        {
+            Tools = tools,
+            InputAudioFormat = source.InputAudioFormat,
+            Instructions = source.Instructions,
+            MaxOutputTokens = source.MaxOutputTokens,
+            Model = source.Model,
+            OutputAudioFormat = source.OutputAudioFormat,
+            OutputModalities = source.OutputModalities,
+            RawRepresentationFactory = source.RawRepresentationFactory,
+            SessionKind = source.SessionKind,
+            ToolMode = source.ToolMode,
+            TranscriptionOptions = source.TranscriptionOptions,
+            Voice = source.Voice,
+            VoiceActivityDetection = source.VoiceActivityDetection
+        };
     }
 
     public async IAsyncEnumerable<RealtimeBackendUpdate> RunAsync(

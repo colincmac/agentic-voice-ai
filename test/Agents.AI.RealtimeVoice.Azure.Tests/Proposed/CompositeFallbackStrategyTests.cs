@@ -6,6 +6,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
@@ -238,6 +239,7 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public string AgentDisplayName { get; }
     public string? LastSystemPrompt { get; private set; }
     public List<ReadOnlyMemory<byte>> ReceivedAudio { get; } = [];
+    public List<IReadOnlyList<AITool>> ToolUpdates { get; } = [];
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -254,6 +256,12 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public ValueTask UpdateSystemPromptAsync(string prompt, CancellationToken cancellationToken = default)
     {
         LastSystemPrompt = prompt;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask UpdateToolsAsync(IEnumerable<AITool> tools, CancellationToken cancellationToken = default)
+    {
+        ToolUpdates.Add(tools.ToList().AsReadOnly());
         return ValueTask.CompletedTask;
     }
 
