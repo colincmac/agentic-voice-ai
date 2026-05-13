@@ -46,7 +46,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
         if (restoreFrom is not null)
         {
-            WorkflowStateRestore.CopyInto(restoreFrom, WorkflowState);
+            WorkflowStateExtensions.CopyInto(restoreFrom, WorkflowState);
         }
         WorkflowState.CurrentStepName ??= workflow.InitialStepId;
     }

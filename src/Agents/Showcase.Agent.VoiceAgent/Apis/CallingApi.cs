@@ -162,6 +162,7 @@ public static class CallingApi
                     webSocket,
                     callProperties,
                     httpContext.RequestAborted,
+                    services.CallAutomationClient,
                     loggerFactory.CreateLogger<AcsCallerEdge>());
 
                 var callId = $"call_{callConnectionId}";
@@ -210,6 +211,7 @@ public static class CallingApi
             incoming.FromCommunicationIdentifier!.RawId);
 
         var media = new CallMediaClient(callConnection, fromIdentifier);
+        var control = new CallControlClient(callConnection);
         var metadata = new CallEdgeMetadata
         {
             DisplayName = incoming.FromCommunicationIdentifier!.RawId,
@@ -222,6 +224,7 @@ public static class CallingApi
             callConnection.CallConnectionId,
             media,
             metadata,
+            control,
             services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>());
 
         var callId = $"call_{callConnection.CallConnectionId}";

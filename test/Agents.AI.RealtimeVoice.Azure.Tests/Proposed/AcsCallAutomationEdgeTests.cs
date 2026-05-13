@@ -187,7 +187,7 @@ public class AcsCallAutomationEdgeTests
         // Pair the streaming-DTMF strategy (emits Audio) with a verb edge (drops Audio).
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new DtmfStrategyFactory()],
+            [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
             defaultObservers: [new DashboardProjectionObserver()]);
@@ -236,7 +236,7 @@ public class AcsCallAutomationEdgeTests
                     Instructions = ["Greet"],
                     Transitions = [new StateTransition { NextStep = "billing", Condition = "billing" }]
                 },
-                DtmfMenuOptions = new Dictionary<char, string> { ['1'] = "support", ['2'] = "billing" }
+                StepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string> { ['1'] = "support", ['2'] = "billing" })
             },
             new RealtimeIvrWorkflowStep
             {

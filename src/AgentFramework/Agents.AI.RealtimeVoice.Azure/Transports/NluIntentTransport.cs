@@ -258,7 +258,7 @@ public sealed class NluIntentTransport : IChannelTransport, IAudioConsumer, IAud
     {
         try
         {
-            await foreach (var audioFrame in _synthesizer.SynthesizeAsync(text, cancellationToken).ConfigureAwait(false))
+            await foreach (var audioFrame in _synthesizer.SynthesizeAsync(text, SynthesizerInputFormat.SSML, cancellationToken).ConfigureAwait(false))
             {
                 await _audioHandler(ChannelId, audioFrame, cancellationToken).ConfigureAwait(false);
             }

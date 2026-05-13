@@ -18,5 +18,10 @@ public interface ISpeechSynthesizer
     /// <param name="text">The text to synthesize into speech.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>An async stream of raw audio frames.</returns>
-    IAsyncEnumerable<ReadOnlyMemory<byte>> SynthesizeAsync(string text, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ReadOnlyMemory<byte>> SynthesizeAsync(string text, SynthesizerInputFormat inputFormat = SynthesizerInputFormat.Text, CancellationToken cancellationToken = default);
+}
+public enum SynthesizerInputFormat
+{
+    Text,
+    SSML
 }

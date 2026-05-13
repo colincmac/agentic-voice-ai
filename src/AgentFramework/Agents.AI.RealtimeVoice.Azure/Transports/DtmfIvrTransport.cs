@@ -14,7 +14,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Transports;
 /// <summary>
 /// Transport for Tier 4 degradation: pure DTMF menu navigation with no AI dependency.
 /// Drives the IVR workflow directly by mapping DTMF tone signals to workflow step
-/// transitions using <see cref="RealtimeIvrWorkflowStep.DtmfMenuOptions"/>.
+/// transitions using <see cref="RealtimeIvrWorkflowStep.StepDtmfConfiguration"/>.
 /// <para>
 /// Does not implement <see cref="IAudioConsumer"/> — voice input is ignored.
 /// Only processes <see cref="SessionSignal"/> with <see cref="SessionSignalKind.Dtmf"/>.
@@ -117,7 +117,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
             return;
         }
 
-        if (step.DtmfMenuOptions is not null)
+        if (step.StepDtmfConfiguration?.Options is not null)
         {
             // Menu mode: single digit selects an option
             await ProcessMenuSelectionAsync(step, digit, cancellationToken).ConfigureAwait(false);
@@ -131,7 +131,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
 
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken cancellationToken)
     {
-        if (step.DtmfMenuOptions is null || !step.DtmfMenuOptions.TryGetValue(digit, out var selectedOption))
+        if (step.StepDtmfConfiguration?.Options is null || !step.StepDtmfConfiguration.Options.TryGetValue(digit, out var selectedOption))
         {
             _logger.LogDebug("Invalid DTMF selection '{Digit}' for step {StepId}", digit, _currentStepId);
             await SynthesizeAndSendAudioAsync("That is not a valid option. Please try again.", cancellationToken).ConfigureAwait(false);
@@ -221,7 +221,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
         // Build prompt text from step description + DTMF menu options
         var prompt = step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty;
 
-        if (step.DtmfMenuOptions is { Count: > 0 } menu)
+        if (step.StepDtmfConfiguration?.Options is { Count: > 0 } menu)
         {
             var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value}"));
             prompt = $"{prompt}. {menuText}.";
@@ -244,7 +244,7 @@ public sealed class DtmfIvrTransport : IChannelTransport, ISignalConsumer, IAudi
     {
         try
         {
-            await foreach (var audioFrame in _synthesizer.SynthesizeAsync(text, cancellationToken).ConfigureAwait(false))
+            await foreach (var audioFrame in _synthesizer.SynthesizeAsync(text, SynthesizerInputFormat.SSML, cancellationToken).ConfigureAwait(false))
             {
                 await _audioHandler(ChannelId, audioFrame, cancellationToken).ConfigureAwait(false);
             }

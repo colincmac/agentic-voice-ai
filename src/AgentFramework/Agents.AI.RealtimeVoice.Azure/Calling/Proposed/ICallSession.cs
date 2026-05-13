@@ -62,6 +62,16 @@ public interface ICallSession : IAsyncDisposable
     /// <summary>Initiate transfer (TPE → Dynamics CCaaS). Strategy stops, edge survives until ACS confirms.</summary>
     Task TransferAsync(TransferRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Hang up the call leg through the caller edge's platform call-control surface
+    /// (ACS Call Automation today). This is the AI-callable / supervisor-callable
+    /// equivalent of the caller hanging up. Implementations should also tear down
+    /// local session resources (equivalent to <see cref="EndAsync(string?, CancellationToken)"/>).
+    /// </summary>
+    /// <param name="hangUpForEveryone">When <see langword="true"/>, ends the call for all parties.</param>
+    /// <param name="reason">Optional human-readable reason recorded in telemetry.</param>
+    Task HangUpAsync(bool hangUpForEveryone = true, string? reason = null, CancellationToken cancellationToken = default);
+
     Task EndAsync(string? reason = null, CancellationToken cancellationToken = default);
 
     event Func<CallSessionState, ValueTask>? StateChanged;

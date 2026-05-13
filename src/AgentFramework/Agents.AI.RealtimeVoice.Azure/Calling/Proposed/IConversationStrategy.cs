@@ -91,12 +91,13 @@ public enum StrategyKind
 
 /// <summary>
 /// Discriminated event emitted by a strategy. Observers and the session pattern-match
-/// on the concrete record. Replaces today's <c>SessionContextEvent</c> + <c>object Payload</c>.
+/// on the concrete record.
 /// </summary>
 public abstract record StrategyEvent(DateTimeOffset At)
 {
     public sealed record Transcript(string Speaker, string Text, bool IsFinal, DateTimeOffset At) : StrategyEvent(At);
     public sealed record AgentUtterance(string AgentId, string Text, DateTimeOffset At) : StrategyEvent(At);
+    public sealed record AudioPlayed(string audioFileId, DateTimeOffset At) : StrategyEvent(At);
     public sealed record AgentSpeakingChanged(string AgentId, string? AgentDisplayName, DateTimeOffset At) : StrategyEvent(At);
     public sealed record DelegateInsight(string AgentId, string Insight, double? Confidence, DateTimeOffset At) : StrategyEvent(At);
     public sealed record FunctionCalled(string Name, IReadOnlyDictionary<string, object?> Arguments, DateTimeOffset At) : StrategyEvent(At);

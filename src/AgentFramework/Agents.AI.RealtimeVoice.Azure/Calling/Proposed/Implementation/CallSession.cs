@@ -300,10 +300,71 @@ public sealed class CallSession : ICallSession
         return true;
     }
 
-    public Task TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
+    public async Task TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Transfer requested for call {CallId}; not yet implemented", CallId);
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (_state is CallSessionState.Ended or CallSessionState.Ending or CallSessionState.Faulted)
+        {
+            _logger.LogWarning("Transfer requested for call {CallId} in terminal state {State}; ignoring", CallId, _state);
+            return;
+        }
+
+        if (CallerEdge is not ICallControl control || !control.CanControl)
+        {
+            throw new InvalidOperationException(
+                $"Call {CallId} cannot be transferred: caller edge {CallerEdge.GetType().Name} does not support call control.");
+        }
+
+        _logger.LogInformation(
+            "Transferring call {CallId} to {Target} ({Kind})",
+            CallId, request.TargetIdentifier, request.Kind);
+
+        // Stop the strategy first so it doesn't keep speaking over the transfer.
+        try { await _strategy.StopAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Strategy stop on transfer failed for call {CallId}", CallId); }
+
+        // The edge survives until ACS confirms the transfer (CallDisconnected
+        // callback). EndAsync will be triggered then via OnEdgeDisconnectedAsync.
+        await control.TransferAsync(request, cancellationToken).ConfigureAwait(false);
+
+        _quality.RaiseAlert(CallId, new QualityAlert(
+            AlertId: $"transfer-{Guid.NewGuid():N}",
+            Kind: QualityAlertKind.SupervisorWhisper,
+            Severity: QualityAlertSeverity.Info,
+            Message: $"Transfer initiated to {request.TargetIdentifier} ({request.Kind})",
+            RaisedAt: DateTimeOffset.UtcNow));
+    }
+
+    public async Task HangUpAsync(bool hangUpForEveryone = true, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        if (_state is CallSessionState.Ended or CallSessionState.Ending)
+        {
+            return;
+        }
+
+        if (CallerEdge is ICallControl control && control.CanControl)
+        {
+            try
+            {
+                _logger.LogInformation(
+                    "Hanging up call {CallId} (forEveryone={ForEveryone}) reason={Reason}",
+                    CallId, hangUpForEveryone, reason ?? "<none>");
+                await control.HangUpAsync(hangUpForEveryone, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Platform hang-up failed for call {CallId}; tearing down locally", CallId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Call {CallId} caller edge {EdgeKind} does not support call control; tearing down locally only",
+                CallId, CallerEdge.GetType().Name);
+        }
+
+        await EndAsync(reason ?? "hangup", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task EndAsync(string? reason = null, CancellationToken cancellationToken = default)
@@ -705,6 +766,11 @@ public sealed class CallSessionFactory : ICallSessionFactory
             scope,
             _registry,
             _loggerFactory?.CreateLogger<CallSession>());
+
+        // Bind the per-call scoped accessor so AI tool collections resolved
+        // from this scope can reach the live session.
+        var accessor = scope.ServiceProvider.GetService<CallSessionAccessor>();
+        accessor?.Set(session);
 
         _registry.Add(session);
         return session;

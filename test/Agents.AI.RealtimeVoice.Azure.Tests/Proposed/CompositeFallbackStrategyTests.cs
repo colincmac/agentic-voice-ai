@@ -38,7 +38,7 @@ public class CompositeFallbackStrategyTests
         // The composite — realtime first, DTMF underneath — is built by a tiny
         // wrapper factory so CallSessionFactory's tier-keyed dispatch still works.
         var realtimeFactory = new RealtimeVoiceStrategyFactory();
-        var dtmfFactory = new DtmfStrategyFactory();
+        var dtmfFactory = new DtmfStreamingStrategyFactory();
         var compositeFactory = new CompositeStrategyFactoryAdapter(
             tier: AgentTier.RealtimeVoice,
             inner: [realtimeFactory, dtmfFactory]);
@@ -131,7 +131,7 @@ public class CompositeFallbackStrategyTests
                     Instructions = ["Greet the caller"],
                     Transitions = [new StateTransition { NextStep = "billing", Condition = "billing" }]
                 },
-                DtmfMenuOptions = new Dictionary<char, string> { ['1'] = "support", ['2'] = "billing" }
+                StepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string> { ['1'] = "support", ['2'] = "billing" })
             },
             new RealtimeIvrWorkflowStep
             {

@@ -3,6 +3,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
+using Agents.AI.RealtimeVoice.Azure.AITools;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Communication.CallAutomation;
@@ -45,6 +46,9 @@ public static class CallSessionContainerExtensions
         services.TryAddSingleton<InMemoryCallQualityReporter>();
         services.TryAddSingleton<ICallQualityReporter>(sp => sp.GetRequiredService<InMemoryCallQualityReporter>());
 
+        services.TryAddScoped<CallSessionAccessor>();
+        services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
+
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
         return new CallSessionContainerBuilder(builder);
@@ -72,10 +76,11 @@ public sealed class CallSessionContainerBuilder
     /// When set, resolves the agent registered under that key (e.g. <c>"TriageAgent"</c>).
     /// When null, resolves the unkeyed <see cref="RealtimeAIAgent"/>.
     /// </param>
-    public CallSessionContainerBuilder AddRealtimeVoiceStrategy(string? realtimeAgentServiceKey = null)
+    public CallSessionContainerBuilder AddRealtimeVoiceStrategy(
+        string? realtimeAgentServiceKey = null,
+        RealtimeAgentRunOptions? runOptions = null,
+        AgentFunctionInvocationMiddleware? middlewareOverride = null)
     {
-        // The auth/session-scoped registrations the legacy AddConversationHub used to
-        // provide. Idempotent so repeated calls are safe.
         Services.TryAddScoped<IAgentSessionRegistry, AgentSessionRegistry>();
         Services.TryAddSingleton<IToolApprovalStore, InMemoryToolApprovalStore>();
         Services.TryAddScoped<IToolApprovalHandlerProvider, ToolApprovalHandlerProvider>();
@@ -85,12 +90,14 @@ public sealed class CallSessionContainerBuilder
             var agent = !string.IsNullOrEmpty(realtimeAgentServiceKey)
                 ? sp.GetRequiredKeyedService<RealtimeAIAgent>(realtimeAgentServiceKey)
                 : sp.GetRequiredService<RealtimeAIAgent>();
+
             var registry = sp.GetRequiredService<IAgentSessionRegistry>();
             var toolCollections = sp.GetServices<IAIToolCollection>();
+
             return new AuthorizingRealtimeAIAgent(
                 agent,
                 registry,
-                delegateFunc: null,
+                delegateFunc: middlewareOverride,
                 toolCollections,
                 sp);
         });
@@ -99,9 +106,9 @@ public sealed class CallSessionContainerBuilder
         {
             var agent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
             var loggerFactory = sp.GetService<ILoggerFactory>();
-            return new AuthorizingAgentRealtimeBackend(agent, runOptions: null, loggerFactory);
+            return new AuthorizingAgentRealtimeBackend(agent, runOptions: runOptions, loggerFactory);
         });
-        Services.AddSingleton<IConversationStrategyFactory, Implementation.RealtimeVoiceStrategyFactory>();
+        Services.AddSingleton<IConversationStrategyFactory, RealtimeVoiceStrategyFactory>();
         return this;
     }
 
@@ -124,9 +131,16 @@ public sealed class CallSessionContainerBuilder
     /// Registers the Tier 4 DTMF strategy. Requires an <see cref="Agents.AI.Extensions.LiveVoice.Media.Audio.ISpeechSynthesizer"/>
     /// to be registered separately for prompt playback.
     /// </summary>
-    public CallSessionContainerBuilder AddDtmfStrategy()
+    public CallSessionContainerBuilder AddDtmfStrategy(bool useStreaming = true)
     {
-        Services.AddSingleton<IConversationStrategyFactory, Implementation.DtmfStrategyFactory>();
+        if (useStreaming)
+        {
+            Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
+        }
+        else
+        {
+            Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
+        }
         return this;
     }
 
@@ -139,7 +153,7 @@ public sealed class CallSessionContainerBuilder
     /// </summary>
     public CallSessionContainerBuilder AddDtmfVerbStrategy()
     {
-        Services.AddSingleton<IConversationStrategyFactory, Implementation.DtmfVerbStrategyFactory>();
+        Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
         return this;
     }
 
@@ -150,6 +164,18 @@ public sealed class CallSessionContainerBuilder
     public CallSessionContainerBuilder AddDashboardProjectionObserver()
     {
         Services.AddSingleton<ICallObserver, DashboardProjectionObserver>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers <see cref="CallControlTools"/> as a scoped <see cref="IAIToolCollection"/>
+    /// so the realtime agent can hang up or transfer the live call. Resolves the
+    /// scoped <see cref="ICallSessionAccessor"/> bound by <c>CallSessionFactory</c>,
+    /// so this only works inside the per-call DI scope.
+    /// </summary>
+    public CallSessionContainerBuilder AddCallControlTools()
+    {
+        Services.AddScoped<IAIToolCollection, CallControlTools>();
         return this;
     }
 }

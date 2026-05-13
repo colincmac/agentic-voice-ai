@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.Media.Signaling;
+using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,10 +17,11 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 /// flavour of DTMF). Pair verb-based strategies with
 /// <see cref="AcsCallAutomationEdge"/> instead.
 /// </summary>
-public sealed class AcsCallerEdge : ICallEdge
+public sealed class AcsCallerEdge : ICallEdge, ICallControl
 {
     private readonly WebSocket _webSocket;
     private readonly CallConnectionProperties _call;
+    private readonly CallAutomationClient? _callAutomationClient;
     private readonly ILogger<AcsCallerEdge> _logger;
     private readonly CancellationTokenSource _cts;
 
@@ -52,10 +54,13 @@ public sealed class AcsCallerEdge : ICallEdge
         WebSocket webSocket,
         CallConnectionProperties callConnection,
         CancellationToken httpContextCancellation,
+        CallAutomationClient? callAutomationClient = null,
+
         ILogger<AcsCallerEdge>? logger = null)
     {
         _webSocket = webSocket;
         _call = callConnection;
+        _callAutomationClient = callAutomationClient;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(httpContextCancellation);
         _logger = logger ?? NullLogger<AcsCallerEdge>.Instance;
 
@@ -84,7 +89,34 @@ public sealed class AcsCallerEdge : ICallEdge
 
     public EdgeCapabilities Capabilities => EdgeCapabilities.Streaming;
 
+    public bool CanControl => _callAutomationClient is not null;
+
     public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
+
+    public async Task HangUpAsync(bool hangUpForEveryone, CancellationToken cancellationToken = default)
+    {
+        if (_callAutomationClient is null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(AcsCallerEdge)} {EdgeId} cannot hang up: no CallAutomationClient was provided.");
+        }
+
+        var connection = _callAutomationClient.GetCallConnection(_call.CallConnectionId);
+        await connection.HangUpAsync(hangUpForEveryone, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
+    {
+        if (_callAutomationClient is null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(AcsCallerEdge)} {EdgeId} cannot transfer: no CallAutomationClient was provided.");
+        }
+
+        var connection = _callAutomationClient.GetCallConnection(_call.CallConnectionId);
+        var options = AcsCallControl.BuildTransferOptions(request);
+        await connection.TransferCallToParticipantAsync(options, cancellationToken).ConfigureAwait(false);
+    }
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {

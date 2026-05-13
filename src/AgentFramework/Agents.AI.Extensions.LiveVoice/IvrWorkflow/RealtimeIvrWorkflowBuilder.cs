@@ -188,6 +188,7 @@ public sealed class RealtimeIvrWorkflowBuilder
             var combinedTools = step.AvailableTools is null
                 ? _commonTools
                 : [.. step.AvailableTools, .. _commonTools];
+
             return new RealtimeIvrWorkflowStep
             {
                 Id = step.Id,
@@ -201,7 +202,7 @@ public sealed class RealtimeIvrWorkflowBuilder
                 MaxDuration = step.MaxDuration,
                 RequiredAuthLevel = step.RequiredAuthLevel,
                 OnCompleted = step.OnCompleted,
-                DtmfMenuOptions = step.DtmfMenuOptions,
+                StepDtmfConfiguration = step.StepDtmfConfiguration,
             };
         }).ToList();
 
@@ -235,7 +236,7 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     private TimeSpan? _maxDuration;
     private AuthenticationLevel _requiredAuthLevel = AuthenticationLevel.None;
     private Func<IvrWorkflowState, CancellationToken, Task>? _onCompleted;
-    private Dictionary<char, string>? _dtmfMenuOptions;
+    private StepDtmfConfiguration? _stepDtmfConfiguration;
 
     private readonly JsonSerializerOptions _jsonSerializerOptions = jsonSerializerOptions ?? LiveVoiceJsonUtilities.DefaultOptions;
 
@@ -548,7 +549,7 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     /// </summary>
     public RealtimeIvrStepBuilder WithDtmfMenu(Dictionary<char, string> options)
     {
-        _dtmfMenuOptions = new Dictionary<char, string>(options);
+        _stepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string>(options));
 
         return this;
     }
@@ -560,7 +561,7 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
     {
         var builder = new DtmfMenuBuilder();
         configure(builder);
-        _dtmfMenuOptions = builder.Build();
+        _stepDtmfConfiguration = builder.Build();
 
         return this;
     }
@@ -619,21 +620,45 @@ public sealed class RealtimeIvrStepBuilder(JsonSerializerOptions? jsonSerializer
             MaxDuration = _maxDuration,
             RequiredAuthLevel = _requiredAuthLevel,
             OnCompleted = _onCompleted,
-            DtmfMenuOptions = _dtmfMenuOptions?.AsReadOnly(),
+            StepDtmfConfiguration = _stepDtmfConfiguration,
         };
     }
 }
-public record AIToolConfiguration(AITool tool, ToolConfiguration? toolConfiguration = null);
-
 /// <summary>
 /// Fluent builder for constructing DTMF menu options for a workflow step.
 /// </summary>
-public sealed class DtmfMenuBuilder
+public sealed class DtmfMenuBuilder(
+    char terminationDigit = '#',
+    Dictionary<char, string>? options = null,
+    int interDigitTimeoutMs = 5000,
+    int minNumberOfDigits = 1,
+    int maxNumberOfDigits = 1)
 {
-    private readonly Dictionary<char, string> _options = new();
+    private readonly Dictionary<char, string> _options = options ?? new();
+    private readonly Dictionary<char, DtmfMenuOption> _menuOptions = new();
+    private char _terminationDigit = terminationDigit;
+    private int _interDigitTimeoutMs = interDigitTimeoutMs;
+    private int _minNumberOfDigits = minNumberOfDigits;
+    private int _maxNumberOfDigits = maxNumberOfDigits;
+    private string? _promptOverride;
+    private Uri? _audioFile;
+    private Uri? _onErrorAudioFile;
+    private string? _onErrorPrompt;
+
+    private AITool? _digitCollectionValidator;
+    private string _digitsParameterName = "digits";
+    private IReadOnlyDictionary<string, object?>? _digitCollectionArguments;
+    private string? _collectedStateKey;
+    private string? _onValidNextStepId;
+    private string? _onInvalidPrompt;
+    private Uri? _onInvalidAudioFile;
 
     /// <summary>
-    /// Maps a DTMF digit to a menu option label.
+    /// Maps a DTMF digit to a menu option label. The caller is transitioned to the
+    /// step whose ID matches the label by default (legacy behaviour). To customise
+    /// the transition or run a tool, use the <see cref="Option(char, string, string?)"/>
+    /// or <see cref="Option(char, string, AITool, IReadOnlyDictionary{string, object?}?, string?, string?, Uri?)"/>
+    /// overloads.
     /// </summary>
     public DtmfMenuBuilder Option(char digit, string label)
     {
@@ -643,11 +668,115 @@ public sealed class DtmfMenuBuilder
     }
 
     /// <summary>
+    /// Declarative option: pressing <paramref name="digit"/> transitions to
+    /// <paramref name="nextStepId"/> with no side-effect.
+    /// </summary>
+    public DtmfMenuBuilder Option(char digit, string label, string? nextStepId)
+    {
+        _options[digit] = label;
+        _menuOptions[digit] = new DtmfMenuOption
+        {
+            Digit = digit,
+            Label = label,
+            NextStepId = nextStepId,
+        };
+
+        return this;
+    }
+
+    /// <summary>
+    /// Binds a digit to an <see cref="AITool"/>. The tool is invoked with the
+    /// supplied <paramref name="arguments"/> (resolved through the call-scoped
+    /// service provider) and its return value is interpreted to decide what
+    /// happens next. See <see cref="DtmfActionResult"/> for the supported shapes.
+    /// </summary>
+    /// <param name="digit">The DTMF digit that selects this option.</param>
+    /// <param name="label">Human-readable label spoken in the menu prompt.</param>
+    /// <param name="action">The tool to invoke (commonly one already exposed to the LLM).</param>
+    /// <param name="arguments">Arguments bound at configuration time.</param>
+    /// <param name="nextStepId">Step to transition to on success. Ignored when the tool returns a <see cref="DtmfActionResult"/>.</param>
+    /// <param name="onFailurePrompt">Prompt spoken if the tool reports a failure or throws.</param>
+    /// <param name="onFailureAudioFile">Audio played if the tool reports a failure (alternative to <paramref name="onFailurePrompt"/>).</param>
+    public DtmfMenuBuilder Option(
+        char digit,
+        string label,
+        AITool action,
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        string? nextStepId = null,
+        string? onFailurePrompt = null,
+        Uri? onFailureAudioFile = null)
+    {
+        _options[digit] = label;
+        _menuOptions[digit] = new DtmfMenuOption
+        {
+            Digit = digit,
+            Label = label,
+            Action = action,
+            Arguments = arguments,
+            NextStepId = nextStepId,
+            OnFailurePrompt = onFailurePrompt,
+            OnFailureAudioFile = onFailureAudioFile,
+        };
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a pre-built <see cref="DtmfMenuOption"/>.
+    /// </summary>
+    public DtmfMenuBuilder Option(DtmfMenuOption option)
+    {
+        _options[option.Digit] = option.Label;
+        _menuOptions[option.Digit] = option;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Configures the step to collect a sequence of digits (e.g. an account number)
+    /// and validate them with the supplied <see cref="AITool"/> once the buffer is
+    /// terminated or full.
+    /// </summary>
+    /// <param name="validator">
+    /// Tool invoked with the collected digits. The strategy passes the digits as
+    /// argument <paramref name="digitsParameterName"/> together with any
+    /// <paramref name="arguments"/>. The tool may return a <see cref="DtmfActionResult"/>
+    /// for fine-grained control, or any envelope with a <c>bool Success</c> property
+    /// (such as <c>CallControlResult</c>) — success transitions to
+    /// <paramref name="onValidNextStepId"/>, failure plays <paramref name="onInvalidPrompt"/>.
+    /// </param>
+    /// <param name="digitsParameterName">Name of the tool argument that receives the collected digits.</param>
+    /// <param name="collectedStateKey">State key under which to store the digits on success. Defaults to <c>"{stepId}_collected"</c>.</param>
+    /// <param name="onValidNextStepId">Step to transition to when the validator reports success.</param>
+    /// <param name="onInvalidPrompt">Prompt spoken when the validator reports failure.</param>
+    /// <param name="onInvalidAudioFile">Audio file played when the validator reports failure.</param>
+    /// <param name="arguments">Additional bound arguments passed to the validator.</param>
+    public DtmfMenuBuilder ValidateWith(
+        AITool validator,
+        string digitsParameterName = "digits",
+        string? collectedStateKey = null,
+        string? onValidNextStepId = null,
+        string? onInvalidPrompt = null,
+        Uri? onInvalidAudioFile = null,
+        IReadOnlyDictionary<string, object?>? arguments = null)
+    {
+        _digitCollectionValidator = validator;
+        _digitsParameterName = digitsParameterName;
+        _digitCollectionArguments = arguments;
+        _collectedStateKey = collectedStateKey;
+        _onValidNextStepId = onValidNextStepId;
+        _onInvalidPrompt = onInvalidPrompt;
+        _onInvalidAudioFile = onInvalidAudioFile;
+
+        return this;
+    }
+
+    /// <summary>
     /// Adds a "Speak to agent" option mapped to the '0' key.
     /// </summary>
-    public DtmfMenuBuilder WithSpeakToAgent()
+    public DtmfMenuBuilder WithSpeakToAgent(char digit = '0', string label = "Speak to a live agent")
     {
-        _options['0'] = "Speak to a live agent";
+        _options[digit] = label;
 
         return this;
     }
@@ -655,12 +784,119 @@ public sealed class DtmfMenuBuilder
     /// <summary>
     /// Adds a "Return to main menu" option mapped to the '*' key.
     /// </summary>
-    public DtmfMenuBuilder WithReturnToMainMenu()
+    public DtmfMenuBuilder WithReturnToMainMenu(char digit = '*', string label = "Return to main menu")
     {
-        _options['*'] = "Return to main menu";
+        _options[digit] = label;
 
         return this;
     }
 
-    internal Dictionary<char, string> Build() => new(_options);
+    /// <summary>
+    /// Sets the termination digit used to signal the end of digit input.
+    /// </summary>
+    public DtmfMenuBuilder WithTerminationDigit(char digit)
+    {
+        _terminationDigit = digit;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the inter-digit timeout in milliseconds.
+    /// </summary>
+    public DtmfMenuBuilder WithInterDigitTimeoutMs(int timeoutMs)
+    {
+        _interDigitTimeoutMs = timeoutMs;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the minimum number of digits expected.
+    /// </summary>
+    public DtmfMenuBuilder WithMinNumberOfDigits(int min)
+    {
+        _minNumberOfDigits = min;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the maximum number of digits expected.
+    /// </summary>
+    public DtmfMenuBuilder WithMaxNumberOfDigits(int max)
+    {
+        _maxNumberOfDigits = max;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets a prompt override for this DTMF step.
+    /// </summary>
+    public DtmfMenuBuilder WithPromptOverride(string prompt)
+    {
+        _promptOverride = prompt;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets an audio file URI to play for this DTMF step.
+    /// </summary>
+    public DtmfMenuBuilder WithAudioFile(Uri audioFile)
+    {
+        _audioFile = audioFile;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets an audio file URI to play when an error occurs.
+    /// </summary>
+    public DtmfMenuBuilder WithOnErrorAudioFile(Uri onErrorAudioFile)
+    {
+        _onErrorAudioFile = onErrorAudioFile;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Sets a prompt to play when an error occurs.
+    /// </summary>
+    public DtmfMenuBuilder WithOnErrorPrompt(string prompt)
+    {
+        _onErrorPrompt = prompt;
+
+        return this;
+    }
+
+
+    internal StepDtmfConfiguration Build()
+    {
+        var config = new StepDtmfConfiguration(
+            _terminationDigit,
+            _options.Count > 0 ? new Dictionary<char, string>(_options) : null,
+            _interDigitTimeoutMs,
+            _minNumberOfDigits,
+            _maxNumberOfDigits,
+            _promptOverride)
+        {
+            AudioFile = _audioFile,
+            OnErrorAudioFile = _onErrorAudioFile,
+            OnErrorPrompt = _onErrorPrompt,
+            MenuOptions = _menuOptions.Count > 0
+                ? new Dictionary<char, DtmfMenuOption>(_menuOptions)
+                : null,
+            DigitCollectionValidator = _digitCollectionValidator,
+            DigitsParameterName = _digitsParameterName,
+            DigitCollectionArguments = _digitCollectionArguments,
+            CollectedStateKey = _collectedStateKey,
+            OnValidNextStepId = _onValidNextStepId,
+            OnInvalidPrompt = _onInvalidPrompt,
+            OnInvalidAudioFile = _onInvalidAudioFile,
+        };
+
+        return config;
+    }
 }

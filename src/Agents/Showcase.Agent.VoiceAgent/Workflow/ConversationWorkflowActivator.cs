@@ -33,11 +33,11 @@ public static class ConversationWorkflowFactory
                         new StateTransition { NextStep = "billing", Condition = "selected billing" }
                     ]
                 },
-                DtmfMenuOptions = new Dictionary<char, string>
+                StepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string>
                 {
                     ['1'] = "support",
                     ['2'] = "billing"
-                }
+                })
             },
             new RealtimeIvrWorkflowStep
             {

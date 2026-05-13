@@ -2,7 +2,7 @@ using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 
-internal static class WorkflowStateRestore
+internal static class WorkflowStateExtensions
 {
     public static void CopyInto(IvrWorkflowState source, IvrWorkflowState target)
     {

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -98,7 +99,7 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
         string gender = "Female",
         ILogger<AzureSpeechSynthesizer>? logger = null)
     {
-        _speechConfig = SpeechConfig.FromEndpoint(endpoint);
+        _speechConfig = SpeechConfig.FromEndpoint(endpoint, new AzureCliCredential());
         _speechConfig.SpeechSynthesisVoiceName = voiceName;
         _speechConfig.SetSpeechSynthesisOutputFormat(outputFormat);
 
@@ -115,6 +116,7 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
     /// <inheritdoc />
     public async IAsyncEnumerable<ReadOnlyMemory<byte>> SynthesizeAsync(
         string text,
+        SynthesizerInputFormat inputFormat = SynthesizerInputFormat.SSML,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(text))
@@ -122,7 +124,7 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
             yield break;
         }
 
-        var ssml = GenerateSsml(_locale, _gender, _speechConfig.SpeechSynthesisVoiceName, text);
+        var ssml = inputFormat == SynthesizerInputFormat.SSML ? text : GenerateSsml(_locale, _gender, _speechConfig.SpeechSynthesisVoiceName, text) ;
         var synthesizer = _pool.Get();
 
         void OnCanceled(object? sender, SpeechSynthesisEventArgs e)

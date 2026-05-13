@@ -17,9 +17,10 @@ namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
 /// Audio directives are dropped — there's no streaming channel to write them to.
 /// </para>
 /// </summary>
-public sealed class AcsCallAutomationEdge : ICallEdge
+public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
 {
     private readonly ICallMediaClient _media;
+    private readonly ICallControlClient? _control;
     private readonly ILogger<AcsCallAutomationEdge> _logger;
     private readonly CancellationTokenSource _cts = new();
 
@@ -41,10 +42,12 @@ public sealed class AcsCallAutomationEdge : ICallEdge
         string callConnectionId,
         ICallMediaClient media,
         CallEdgeMetadata metadata,
+        ICallControlClient? control = null,
         ILogger<AcsCallAutomationEdge>? logger = null)
     {
         EdgeId = callConnectionId;
         _media = media;
+        _control = control;
         Metadata = metadata;
         _logger = logger ?? NullLogger<AcsCallAutomationEdge>.Instance;
     }
@@ -65,7 +68,30 @@ public sealed class AcsCallAutomationEdge : ICallEdge
 
     public EdgeCapabilities Capabilities => EdgeCapabilities.Verb;
 
+    public bool CanControl => _control is not null;
+
     public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
+
+    public Task HangUpAsync(bool hangUpForEveryone, CancellationToken cancellationToken = default)
+    {
+        if (_control is null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(AcsCallAutomationEdge)} {EdgeId} cannot hang up: no ICallControlClient was provided.");
+        }
+        return _control.HangUpAsync(hangUpForEveryone, cancellationToken);
+    }
+
+    public Task TransferAsync(TransferRequest request, CancellationToken cancellationToken = default)
+    {
+        if (_control is null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(AcsCallAutomationEdge)} {EdgeId} cannot transfer: no ICallControlClient was provided.");
+        }
+        var options = AcsCallControl.BuildTransferOptions(request);
+        return _control.TransferAsync(options, cancellationToken);
+    }
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {

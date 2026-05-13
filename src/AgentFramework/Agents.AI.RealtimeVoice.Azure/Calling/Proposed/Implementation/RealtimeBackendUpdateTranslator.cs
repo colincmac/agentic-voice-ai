@@ -62,9 +62,8 @@ public static class RealtimeBackendUpdateTranslator
                     break;
 
                 case RealtimeVadContent:
-                    // VAD events drive presence detection in the legacy transport.
-                    // No current strategy consumes them through the backend update stream;
-                    // when one needs them, add a RealtimeBackendUpdate.Vad case here.
+                    // TODO: Update to emit VAD events. They drive scenarios like presence detection.
+                    // No current strategy consumes them through the backend update stream.
                     break;
             }
         }

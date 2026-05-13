@@ -47,7 +47,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         WorkflowState = new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
         if (restoreFrom is not null)
         {
-            WorkflowStateRestore.CopyInto(restoreFrom, WorkflowState);
+            WorkflowStateExtensions.CopyInto(restoreFrom, WorkflowState);
         }
 
         _currentStepId = WorkflowState.CurrentStepName ?? workflow.InitialStepId;
@@ -153,7 +153,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), _currentStepId, tone.Timestamp),
             ct).ConfigureAwait(false);
 
-        if (step.DtmfMenuOptions is not null)
+        if (step.StepDtmfConfiguration?.Options is not null)
         {
             await ProcessMenuSelectionAsync(step, tone.Digit, ct).ConfigureAwait(false);
         }
@@ -165,7 +165,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
     private async Task ProcessMenuSelectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
     {
-        if (step.DtmfMenuOptions is null || !step.DtmfMenuOptions.TryGetValue(digit, out var selectedOption))
+        if (step.StepDtmfConfiguration?.Options is null || !step.StepDtmfConfiguration.Options.TryGetValue(digit, out var selectedOption))
         {
             await SpeakAsync("That is not a valid option. Please try again.", ct).ConfigureAwait(false);
             await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
@@ -241,7 +241,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             await SpeakAsync(prompt, ct).ConfigureAwait(false);
         }
 
-        if (step.DtmfMenuOptions is not null)
+        if (step.StepDtmfConfiguration?.Options is not null)
         {
             await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
         }
@@ -286,7 +286,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     {
         var prompt = step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty;
 
-        if (step.DtmfMenuOptions is { Count: > 0 } menu)
+        if (step.StepDtmfConfiguration?.Options is { Count: > 0 } menu)
         {
             var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value}"));
             prompt = $"{prompt}. {menuText}.";
@@ -300,19 +300,3 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     }
 }
 
-public sealed class DtmfVerbStrategyFactory : IConversationStrategyFactory
-{
-    public AgentTier Tier => AgentTier.DtmfOnly;
-
-    public ValueTask<IConversationStrategy> CreateAsync(
-        string callId,
-        IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
-        IvrWorkflowState? restoreFrom,
-        CancellationToken cancellationToken = default)
-    {
-        var loggerFactory = services.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as ILoggerFactory;
-        IConversationStrategy strategy = new DtmfVerbStrategy(workflow, restoreFrom, loggerFactory);
-        return ValueTask.FromResult(strategy);
-    }
-}

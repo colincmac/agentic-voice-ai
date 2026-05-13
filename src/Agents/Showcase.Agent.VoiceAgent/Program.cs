@@ -109,10 +109,54 @@ builder.AddKeyedConversationClient("voicelive")
 // AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
 builder.Services.Configure<CommunicationOptions>(builder.Configuration.GetSection(CommunicationOptions.SectionName));
 
+builder.Services.AddSingleton<ISpeechSynthesizer, AzureSpeechSynthesizer>(sp =>
+{
+    var endpoint = builder.Configuration.GetConnectionString("azurespeech");
+    if(string.IsNullOrEmpty(endpoint)) throw new InvalidOperationException("Azure Speech endpoint is not configured.");
 
+    return new AzureSpeechSynthesizer(new Uri(endpoint));
+});
 var callerIntentWorkflow = ConversationWorkflowFactory.CreateCallerIntentWorkflow(sessionId: "default");
 var dtmfWorkflow = ConversationWorkflowFactory.CreateDtmfWorkflow(sessionId: "default");
 
+var dtmf2 = new RealtimeIvrWorkflowDefinition()
+{
+    Name = "test-ivr",
+    BasePrompt = new RealtimePrompt(),
+    Steps =
+        [
+            new RealtimeIvrWorkflowStep
+            {
+                Id = "language",
+                ConversationState = new ConversationState
+                {
+                    Id = "language",
+                    Description = "Welcome to Contoso",
+                    Goal = "Route the caller",
+                    Instructions = ["Greet the caller and offer menu"],
+                    Transitions =
+                    [
+                        new StateTransition { NextStep = "main_menu", Condition = "selected language" }
+                    ]
+                },
+                StepDtmfConfiguration = new StepDtmfConfiguration(maxNumberOfDigits: 1, options: new Dictionary<char, string>
+                {
+                    ['1'] = "english",
+                    ['2'] = "spanish"
+                })
+            },
+            new RealtimeIvrWorkflowStep
+            {
+                Id = "main_menu",
+                ConversationState = new ConversationState
+                {
+                    Id = "main_menu",
+                    Description = "Main menu",
+                    Instructions = ["Greet the caller and offer menu options"]
+                }
+            }
+        ]
+};
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp => callerIntentWorkflow);
 
 // The realtime agent that the new realtime backend wraps. Reads its config from
@@ -125,6 +169,7 @@ builder.AddRealtimeAIAgent(
 builder.AddCallSessionContainer()
     .AddAcsCallAutomation()
     .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddCallControlTools()
     .AddDashboardProjectionObserver();
 
 // TEAMS

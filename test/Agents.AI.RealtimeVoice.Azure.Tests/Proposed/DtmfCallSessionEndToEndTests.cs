@@ -36,7 +36,7 @@ public class DtmfCallSessionEndToEndTests
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new DtmfStrategyFactory()],
+            [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
             defaultObservers: [new DashboardProjectionObserver()]);
@@ -96,7 +96,7 @@ public class DtmfCallSessionEndToEndTests
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new DtmfStrategyFactory()],
+            [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
             defaultObservers: []);
@@ -160,11 +160,11 @@ public class DtmfCallSessionEndToEndTests
                         new StateTransition { NextStep = "billing", Condition = "selected billing" }
                     ]
                 },
-                DtmfMenuOptions = new Dictionary<char, string>
+                StepDtmfConfiguration = new StepDtmfConfiguration(options: new Dictionary<char, string>
                 {
                     ['1'] = "support",
                     ['2'] = "billing"
-                }
+                })
             },
             new RealtimeIvrWorkflowStep
             {
@@ -320,6 +320,7 @@ internal sealed class FakeSpeechSynthesizer : ISpeechSynthesizer
 {
     public async IAsyncEnumerable<ReadOnlyMemory<byte>> SynthesizeAsync(
         string text,
+        SynthesizerInputFormat inputFormat = SynthesizerInputFormat.Text,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // Deterministic non-empty PCM payload so audio assertions are simple.
