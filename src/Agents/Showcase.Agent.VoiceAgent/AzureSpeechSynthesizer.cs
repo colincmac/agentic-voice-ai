@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.ContactCenter.Media.Audio;
 using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;

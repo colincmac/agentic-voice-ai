@@ -1,9 +1,9 @@
+using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Messaging;
+using Agents.AI.ContactCenter.Models;
+using Agents.AI.ContactCenter.Transports;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
-using Agents.AI.Extensions.LiveVoice.Media.Messaging;
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Models;
-using Agents.AI.RealtimeVoice.Azure.Transports;
+
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Mocks;
 

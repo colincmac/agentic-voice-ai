@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.Extensions.LiveVoice;
 using Agents.AI.RealtimeVoice;
 using Azure.AI.OpenAI;
 using Azure.Identity;

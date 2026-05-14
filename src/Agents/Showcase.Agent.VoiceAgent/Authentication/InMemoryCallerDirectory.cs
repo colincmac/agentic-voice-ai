@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
+using Agents.AI.ContactCenter.Authentication;
 using Microsoft.Extensions.Logging;
 
 namespace Showcase.Agent.VoiceAgent.Authentication;

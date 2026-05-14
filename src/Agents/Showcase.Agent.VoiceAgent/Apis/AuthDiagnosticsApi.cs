@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Authentication;
 using Showcase.Agent.VoiceAgent.Authentication;
 
 namespace Showcase.Agent.VoiceAgent.Apis;

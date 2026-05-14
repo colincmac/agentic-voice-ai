@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow;
 using Microsoft.Extensions.AI;
 
 namespace Showcase.Agent.VoiceAgent.Authentication;

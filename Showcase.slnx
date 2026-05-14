@@ -32,10 +32,8 @@
     <File Path="test/Directory.Packages.props" />
   </Folder>
   <Folder Name="/test/">
+    <Project Path="test/Agents.AI.ContactCenter.Tests/Agents.AI.ContactCenter.Tests.csproj" Id="b05a394d-f0b3-4e8b-936a-8f8c3518944f" />
     <Project Path="test/Agents.AI.Extensions.Tests/Agents.AI.Extensions.Tests.csproj" />
-    <Project Path="test/Agents.AI.RealtimeVoice.Azure.Tests/Agents.AI.RealtimeVoice.Azure.Tests.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
     <Project Path="test/AI.TestingFramework/AI.TestingFramework.csproj" Id="dea5a116-fe7d-44d4-8bfe-a666c8382c96" />
     <Project Path="test/Showcase.Authentication.Tests/Showcase.Authentication.Tests.csproj" Id="ba6141fc-b68a-4fbc-a017-087da2a554d4">
       <BuildDependency Project="src/Shared/Showcase.Authentication/Showcase.Authentication.csproj" />
@@ -43,9 +41,8 @@
     <Project Path="test/Showcase.EnterpriseMcp.Tests/Showcase.EnterpriseMcp.Tests.csproj" Id="572e4d5b-2102-4c05-b999-67c8d0af265a" />
   </Folder>
   <Folder Name="/AgentFramework/">
-    <Project Path="src/AgentFramework/Agents.AI.Extensions.LiveVoice/Agents.AI.Extensions.LiveVoice.csproj" Id="b5a73c19-bb07-443b-b104-053272fbae8d" />
+    <Project Path="src/AgentFramework/Agents.AI.ContactCenter/Agents.AI.ContactCenter.csproj" Id="3f8c0b5f-241d-424a-b098-b927600f02e8" />
     <Project Path="src/AgentFramework/Agents.AI.Extensions/Agents.AI.Extensions.csproj" Id="bc13d9e5-23c5-4e53-a58d-fdd97d228377" />
-    <Project Path="src/AgentFramework/Agents.AI.RealtimeVoice.Azure/Agents.AI.RealtimeVoice.Azure.csproj" Id="fb0c81ed-e07c-42d8-ac95-af2d4428cb84" />
     <Project Path="src/AgentFramework/Agents.AI.RealtimeVoice.Teams/Agents.AI.RealtimeVoice.Teams.csproj" Id="9cc10d62-861c-4046-9705-8881fda413ca" />
     <Project Path="src/AgentFramework/Agents.AI/Agents.AI.csproj" Id="99613f2c-8456-4d20-a29f-7e963d0a7fe8" />
     <Project Path="src/AgentFramework/Extensions.AI/Extensions.AI.csproj" Id="a0a31bc0-8e72-45df-a14b-26d864a26ab7" />

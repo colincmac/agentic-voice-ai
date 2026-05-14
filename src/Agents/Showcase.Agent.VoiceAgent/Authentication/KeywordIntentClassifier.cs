@@ -1,4 +1,4 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 

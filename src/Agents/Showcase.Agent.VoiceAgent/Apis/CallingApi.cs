@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text.Json;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Implementation;
-using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;

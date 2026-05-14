@@ -20,9 +20,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
-    <ProjectReference Include="..\..\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Agents.AI\Agents.AI.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Extensions.AI\Extensions.AI.csproj" />
+    <ProjectReference Include="..\..\AgentFramework\Agents.AI.ContactCenter\Agents.AI.ContactCenter.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.Development.json">

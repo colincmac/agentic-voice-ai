@@ -12,8 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
-    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
-    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
   </ItemGroup>
 
 

@@ -13,12 +13,11 @@
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" />
-    <PackageReference Include="System.CommandLine"  />
+    <PackageReference Include="System.CommandLine" />
 
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
-    <ProjectReference Include="..\..\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Agents.AI\Agents.AI.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Extensions.AI\Extensions.AI.csproj" />
   </ItemGroup>

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Authentication;
 
 namespace Showcase.Agent.VoiceAgent.Authentication;
 

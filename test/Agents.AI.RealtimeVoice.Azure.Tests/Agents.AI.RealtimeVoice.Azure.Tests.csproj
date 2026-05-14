@@ -10,8 +10,4 @@
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
-  </ItemGroup>
-
 </Project>

@@ -1,4 +1,4 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -17,7 +17,7 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 ///     (account balance, billing) on a successful PIN entry. The PIN is validated by the
 ///     <see cref="PinValidationTools.ValidatePinTool(InMemoryCallerDirectory, ILoggerFactory?)"/>
 ///     bound as the digit-collection validator, which elevates the caller's identity in the
-///     scoped <see cref="Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication.CallerAuthenticationState"/>.
+///     scoped <see cref="Agents.AI.ContactCenter.Authentication.CallerAuthenticationState"/>.
 ///   </item>
 ///   <item>
 ///     <see cref="BuildAuthenticatedRealtimeWorkflow"/> — voice-driven companion: the realtime

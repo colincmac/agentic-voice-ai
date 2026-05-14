@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
+using Agents.AI.ContactCenter.Authentication;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

@@ -1,5 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
+using Agents.AI.ContactCenter.Calling;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Showcase.Agent.VoiceAgent.Apis;

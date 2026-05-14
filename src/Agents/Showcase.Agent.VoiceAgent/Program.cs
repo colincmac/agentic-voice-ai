@@ -1,12 +1,12 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Hosting;
-using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
-using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Agents.AI.ContactCenter.Authorization.IdentityVerification;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.ContactCenter.Configuration;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
@@ -52,13 +52,6 @@ else
 }
 builder.Services.AddHttpClient();
 builder.Services.AddHttpLogging(o => { });
-//builder.Services.AddAzureClients(clientBuilder =>
-//{
-//    // Set up any default settings
-//    clientBuilder.ConfigureDefaults(
-//        builder.Configuration.GetSection("AzureDefaults"));
-//});
-
 // Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
 
@@ -85,7 +78,6 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 // Add services to the container.
 
 
-// END ACS
 builder.AddKeyedChatClient("chat")
     .UseFunctionInvocation()
     .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
@@ -158,7 +150,6 @@ builder.AddRealtimeAIAgent(
     liveConversationClientKey: "voicelive");
 
 builder.AddCallSessionContainer()
-    .AddAcsCallAutomation()
     // Inner factories — the composite below shadows the top tier and reuses these
     // through DI. Order matters: register the inner tiers BEFORE the composite so
     // the composite's lookup finds them.

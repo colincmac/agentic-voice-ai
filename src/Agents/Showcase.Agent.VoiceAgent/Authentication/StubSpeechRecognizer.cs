@@ -1,6 +1,6 @@
 using System.Threading.Channels;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
-using Agents.AI.Extensions.LiveVoice.Media.Transcription;
+using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Transcription;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

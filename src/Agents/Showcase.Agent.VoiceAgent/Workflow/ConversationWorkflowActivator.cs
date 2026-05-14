@@ -1,7 +1,7 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
-using Agents.AI.RealtimeVoice.Azure.Authorization.Biometrics;
-using Agents.AI.RealtimeVoice.Azure.Calling;
+using Agents.AI.ContactCenter.Authorization.Biometrics;
+using Agents.AI.ContactCenter.Calling;
 
 namespace Showcase.Agent.VoiceAgent.Workflow;
 

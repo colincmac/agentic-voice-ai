@@ -41,12 +41,11 @@
   <!-- A2A dependency -->
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\Showcase.ServiceDefaults\Showcase.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\..\AgentFramework\Agents.AI.Extensions.LiveVoice\Agents.AI.Extensions.LiveVoice.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
-    <ProjectReference Include="..\..\AgentFramework\Agents.AI.RealtimeVoice.Azure\Agents.AI.RealtimeVoice.Azure.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.RealtimeVoice.Teams\Agents.AI.RealtimeVoice.Teams.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Agents.AI\Agents.AI.csproj" />
     <ProjectReference Include="..\..\AgentFramework\Extensions.AI\Extensions.AI.csproj" />
+    <ProjectReference Include="..\..\AgentFramework\Agents.AI.ContactCenter\Agents.AI.ContactCenter.csproj" />
   </ItemGroup>
 
 

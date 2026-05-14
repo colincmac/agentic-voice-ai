@@ -1,6 +1,6 @@
-using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
-using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
-using Agents.AI.RealtimeVoice.Azure.Configuration;
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication.CallAutomation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
