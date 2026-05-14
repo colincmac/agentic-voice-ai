@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout to the branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Azure Login
         uses: azure/login@v2
@@ -22,16 +22,15 @@ jobs:
           client-id: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_SUBSCRIPTION_ID }}
-
+          
       - name: Build and push container image to registry
         uses: azure/container-apps-deploy-action@v2
         with:
           appSourcePath: ${{ github.workspace }}/src/python-services/voice-biometrics
           dockerfilePath: Dockerfile
-          registryUsername: ${{ secrets.WDGVOICEBIOMETRICS_REGISTRY_USERNAME }}
-          registryPassword: ${{ secrets.WDGVOICEBIOMETRICS_REGISTRY_PASSWORD }}
+          acrName: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACR_NAME }}
           containerAppName: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACA_NAME }}
           resourceGroup: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_RESOURCE_GROUP }}
-          imageToBuild: default/${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACA_NAME }}:${{ github.sha }}
+          imageToBuild: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACR_NAME }}.azurecr.io/voice-biometrics-api:${{ github.sha }}
 
 
