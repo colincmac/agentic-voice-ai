@@ -32,6 +32,6 @@ jobs:
           registryPassword: ${{ secrets.WDGVOICEBIOMETRICS_REGISTRY_PASSWORD }}
           containerAppName: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACA_NAME }}
           resourceGroup: ${{ secrets.WDGVOICEBIOMETRICS_AZURE_RESOURCE_GROUP }}
-          imageToBuild: default/${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACA_NAME }}:${ github.sha::8 }
+          imageToBuild: default/${{ secrets.WDGVOICEBIOMETRICS_AZURE_ACA_NAME }}:${{ github.sha }}
 
 
