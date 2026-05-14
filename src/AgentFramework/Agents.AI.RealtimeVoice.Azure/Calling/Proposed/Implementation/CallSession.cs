@@ -489,6 +489,7 @@ public sealed class CallSession : ICallSession
         InboundAudio = _strategyInbound.Reader,
         InboundDtmf = CallerEdge.InboundDtmf,
         Services = _scope.ServiceProvider,
+        CallerMetadata = CallerEdge.Metadata,
         RestoreFrom = null
     };
 

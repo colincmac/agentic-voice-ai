@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 
 namespace Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
@@ -89,6 +90,13 @@ public sealed record StrategyStartContext
     /// <summary>Call-scoped DI for resolving agents, recognizers, synthesizers.</summary>
     public required IServiceProvider Services { get; init; }
 
+    /// <summary>
+    /// Snapshot of the caller-edge metadata (phone number, display name, server call id).
+    /// Strategies pass this into authenticators and may include it in observability events.
+    /// Null only when the strategy is started without a caller edge (e.g. self-test harnesses).
+    /// </summary>
+    public CallEdgeMetadata? CallerMetadata { get; init; }
+
     /// <summary>Existing workflow state to resume from (null on initial create).</summary>
     public IvrWorkflowState? RestoreFrom { get; init; }
 }
@@ -121,6 +129,18 @@ public abstract record StrategyEvent(DateTimeOffset At)
     public sealed record EscalationRequested(string Reason, DateTimeOffset At) : StrategyEvent(At);
     public sealed record TierDegraded(AgentTier From, AgentTier To, string Reason, DateTimeOffset At) : StrategyEvent(At);
     public sealed record Faulted(string Message, Exception? Exception, DateTimeOffset At) : StrategyEvent(At);
+
+    /// <summary>Caller's identity was established or elevated by an <see cref="ICallerAuthenticator"/>.</summary>
+    public sealed record CallerIdentified(CallerIdentity Identity, string AuthenticatorName, DateTimeOffset At) : StrategyEvent(At);
+
+    /// <summary>An authenticator attempted verification and the caller failed.</summary>
+    public sealed record CallerAuthenticationFailed(string AuthenticatorName, string Reason, DateTimeOffset At) : StrategyEvent(At);
+
+    /// <summary>An authenticator requires caller interaction to complete (OTP, biometric phrase, …).</summary>
+    public sealed record CallerAuthenticationChallenge(AuthenticationChallenge Challenge, DateTimeOffset At) : StrategyEvent(At);
+
+    /// <summary>The caller's strongest verification level changed.</summary>
+    public sealed record CallerVerificationLevelChanged(CallerVerificationLevel From, CallerVerificationLevel To, DateTimeOffset At) : StrategyEvent(At);
 
     /// <summary>
     /// Emitted by the session when the active edge dropped a directive whose kind
