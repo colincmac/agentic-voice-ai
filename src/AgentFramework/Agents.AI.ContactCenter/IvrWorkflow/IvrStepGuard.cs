@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+
 namespace Agents.AI.ContactCenter.IvrWorkflow;
 
 /// <summary>
@@ -174,86 +178,5 @@ public interface IIvrWorkflowStep
     /// Gets the prompt to show when the step needs to be retried.
     /// </summary>
     string GetRetryPrompt(int retryCount, string? lastError);
-
-}
-
-/// <summary>
-/// Base implementation of an IVR workflow step.
-/// </summary>
-public abstract class IvrWorkflowStepBase : IIvrWorkflowStep
-{
-    private readonly List<IIvrStepGuard> _guards = [];
-    private readonly List<IIvrStepValidator> _validators = [];
-
-    /// <inheritdoc />
-    public string Name { get; }
-    /// <summary>
-    /// Instructions for the voice agent when in this stage.
-    /// </summary>
-    public string VoiceAgentInstructions { get; }
-
-    /// <summary>
-    /// Instructions for the orchestrator on how to evaluate this stage.
-    /// </summary>
-    public string OrchestratorInstructions { get; }
-
-    /// <inheritdoc />
-    public virtual string DefaultFailureResponse { get; init; } = "I'm sorry, I couldn't process your request.";
-
-    /// <inheritdoc />
-    public IReadOnlyList<IIvrStepGuard> Guards => _guards.AsReadOnly();
-
-    /// <inheritdoc />
-    public IReadOnlyList<IIvrStepValidator> Validators => _validators.AsReadOnly();
-
-    /// <inheritdoc />
-    public int MaxRetries { get; init; } = 3;
-
-    /// <summary>
-    /// Maximum time to spend in this stage before escalating.
-    /// </summary>
-    public TimeSpan? MaxDuration { get; init; }
-
-
-    /// <summary>
-    /// Gets or sets the retry prompt template. Use {retryCount} and {error} placeholders.
-    /// </summary>
-    public string RetryPromptTemplate { get; init; } = "I didn't catch that. Let's try again. {error}";
-
-    /// <summary>
-    /// Whether authentication is required for this stage.
-    /// </summary>
-    public AuthenticationLevel RequiredAuthLevel { get; init; } = AuthenticationLevel.None;
-
-    protected IvrWorkflowStepBase(string name, string voiceAgentInstructions, string orchestratorInstructions)
-    {
-        Name = name;
-        VoiceAgentInstructions = voiceAgentInstructions;
-        OrchestratorInstructions = orchestratorInstructions;
-    }
-
-    /// <summary>
-    /// Adds a guard to this step.
-    /// </summary>
-    public void AddGuard(IIvrStepGuard guard) => _guards.Add(guard);
-
-    /// <summary>
-    /// Adds a validator to this step.
-    /// </summary>
-    public void AddValidator(IIvrStepValidator validator) => _validators.Add(validator);
-
-    /// <inheritdoc />
-    public abstract Task<IvrStepResult> ExecuteAsync(
-        IvrWorkflowState state,
-        string? userInput,
-        CancellationToken cancellationToken = default);
-
-    /// <inheritdoc />
-    public virtual string GetRetryPrompt(int retryCount, string? lastError)
-    {
-        return RetryPromptTemplate
-            .Replace("{retryCount}", retryCount.ToString())
-            .Replace("{error}", lastError ?? string.Empty);
-    }
 
 }

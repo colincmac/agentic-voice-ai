@@ -3,7 +3,6 @@ using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Messaging;
-using Agents.AI.ContactCenter.Models;
 using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -27,16 +26,6 @@ public class TestCallParticipant : IAudioConsumer, IAudioProducer, IMessageConsu
 
     public string ChannelId => "test";
     public bool IsConnected => true;
-
-    public ParticipantTransportMetadata Metadata => new()
-    {
-        RawIdentifier = "Test",
-        ChannelType = CommunicationChannelType.Unknown,
-        ContactId = ChannelId,
-        DisplayName = "Test Participant",
-        SupportsAudio = true,
-        SupportsMessaging = true
-    };
 
     public async Task WriteOutboundAsync(RawMediaStreamChannel audioOutput, MessageUpdateChannel messageOutput, CancellationToken cancellationToken = default)
     {
