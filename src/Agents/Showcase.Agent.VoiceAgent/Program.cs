@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
+using Agents.AI.ContactCenter.Azure;
 using Agents.AI.Hosting;
 using Agents.AI.ContactCenter.Authorization.IdentityVerification;
 using Agents.AI.ContactCenter.Calling;
@@ -73,9 +73,6 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 //builder.Services.AddOpenApi();
-//builder.Services.AddProblemDetails();
-
-// Add services to the container.
 
 
 builder.AddKeyedChatClient("chat")
@@ -93,7 +90,6 @@ builder.AddKeyedConversationClient("voicelive")
 // New Calling/Proposed shape: registers ICallSessionFactory + ICallSessionRegistry +
 // ICallQualityReporter, and wires the realtime voice strategy on top of the existing
 // AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
-builder.Services.Configure<CommunicationOptions>(builder.Configuration.GetSection(CommunicationOptions.SectionName));
 
 builder.Services.AddSingleton<ISpeechSynthesizer, AzureSpeechSynthesizer>(sp =>
 {
@@ -116,7 +112,7 @@ builder.Services.AddSingleton<CallerAuthStateRegistry>();
 // Demo NLU dependencies — keyword classifier + scripted recognizer keep the showcase
 // free of an Azure CLU / Speech-to-Text dependency while still exercising the NLU
 // strategy end-to-end. Replace with real implementations in production.
-builder.Services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
+builder.Services.AddSingleton<IIntentClassifier, StubKeywordIntentClassifier>();
 builder.Services.AddTransient<ISpeechRecognizer, StubSpeechRecognizer>();
 
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>

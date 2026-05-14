@@ -10,9 +10,9 @@ namespace Showcase.Agent.VoiceAgent.Authentication;
 /// strategy's contract end-to-end. Returns <see cref="IntentResult.None"/> when no
 /// keyword bucket matches and the utterance isn't a known transfer phrase.
 /// </summary>
-public sealed class KeywordIntentClassifier : IIntentClassifier
+public sealed class StubKeywordIntentClassifier : IIntentClassifier
 {
-    private readonly ILogger<KeywordIntentClassifier> _logger;
+    private readonly ILogger<StubKeywordIntentClassifier> _logger;
 
     /// <summary>
     /// Static keyword → intent mapping. Workflow authors add the intent name to a step's
@@ -30,9 +30,9 @@ public sealed class KeywordIntentClassifier : IIntentClassifier
         ["transfer"] = new[] { "agent", "supervisor", "manager" }
     };
 
-    public KeywordIntentClassifier(ILogger<KeywordIntentClassifier>? logger = null)
+    public StubKeywordIntentClassifier(ILogger<StubKeywordIntentClassifier>? logger = null)
     {
-        _logger = logger ?? NullLogger<KeywordIntentClassifier>.Instance;
+        _logger = logger ?? NullLogger<StubKeywordIntentClassifier>.Instance;
     }
 
     public ValueTask<IntentResult> ClassifyAsync(string utterance, IReadOnlyList<string> validIntents, CancellationToken cancellationToken = default)

@@ -17,6 +17,7 @@
 
     <!-- Azure Blob Storage -->
     <PackageReference Include="Azure.Storage.Blobs" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" />
 
     <!-- Azure Managed Redis (AMR)-->
     <PackageReference Include="StackExchange.Redis" />

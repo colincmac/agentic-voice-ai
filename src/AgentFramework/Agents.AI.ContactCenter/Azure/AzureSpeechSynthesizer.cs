@@ -8,7 +8,8 @@ using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Showcase.Agent.VoiceAgent;
+namespace Agents.AI.ContactCenter.Azure;
+
 
 /// <summary>
 /// Pool of pre-warmed <see cref="SpeechSynthesizer"/> instances. Creating a synthesizer
@@ -124,7 +125,7 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
             yield break;
         }
 
-        var ssml = inputFormat == SynthesizerInputFormat.SSML ? text : GenerateSsml(_locale, _gender, _speechConfig.SpeechSynthesisVoiceName, text) ;
+        var ssml = inputFormat == SynthesizerInputFormat.SSML ? text : GenerateSsml(_locale, _gender, _speechConfig.SpeechSynthesisVoiceName, text);
         var synthesizer = _pool.Get();
 
         void OnCanceled(object? sender, SpeechSynthesisEventArgs e)

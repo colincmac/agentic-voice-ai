@@ -62,6 +62,25 @@ public static class CallSessionContainerExtensions
         return builder.AddCallSessionContainerCore();
     }
 
+
+    /// <summary>
+    /// Registers the dedicated <see cref="CallingTelemetry"/> singleton for the
+    /// new Calling/Proposed stack and wires its <see cref="System.Diagnostics.ActivitySource"/>
+    /// / <see cref="System.Diagnostics.Metrics.Meter"/> into the host's
+    /// OpenTelemetry pipeline. Safe to call multiple times.
+    /// </summary>
+    public static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
+    {
+        builder.Services.TryAddSingleton<CallingTelemetry>();
+
+        builder.Services
+            .AddOpenTelemetry()
+            .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
+            .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
+
+        return builder;
+    }
+
     private static CallSessionContainerBuilder AddCallSessionContainerCore(this IHostApplicationBuilder builder)
     {
         var services = builder.Services;
@@ -86,24 +105,6 @@ public static class CallSessionContainerExtensions
         builder.AddCallSessionContainerTelemetry();
         return new CallSessionContainerBuilder(builder);
 
-    }
-
-    /// <summary>
-    /// Registers the dedicated <see cref="CallingTelemetry"/> singleton for the
-    /// new Calling/Proposed stack and wires its <see cref="System.Diagnostics.ActivitySource"/>
-    /// / <see cref="System.Diagnostics.Metrics.Meter"/> into the host's
-    /// OpenTelemetry pipeline. Safe to call multiple times.
-    /// </summary>
-    public static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
-    {
-        builder.Services.TryAddSingleton<CallingTelemetry>();
-
-        builder.Services
-            .AddOpenTelemetry()
-            .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
-            .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
-
-        return builder;
     }
 }
 
