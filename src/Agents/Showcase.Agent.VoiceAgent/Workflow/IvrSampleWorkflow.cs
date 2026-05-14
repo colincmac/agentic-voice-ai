@@ -1,7 +1,7 @@
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 
-namespace Showcase.Agent.VoiceAgent;
+namespace Showcase.Agent.VoiceAgent.Workflow;
 
 public static class IvrSampleWorkflow
 {

@@ -22,7 +22,6 @@ public sealed class CallingServices(
     [FromServices] ICallSessionRegistry sessionRegistry,
     [FromServices] CallAutomationClient callAutomationClient,
     [FromServices] RealtimeIvrWorkflowDefinition workflow,
-    [FromServices] IServiceProvider services,
     [FromServices] IOptions<CommunicationOptions> options,
     [FromServices] ILoggerFactory loggerFactory,
     [FromServices] ILogger<CallingServices> logger)
@@ -34,11 +33,4 @@ public sealed class CallingServices(
     public IOptions<CommunicationOptions> Options { get; } = options;
     public ILoggerFactory LoggerFactory { get; } = loggerFactory;
     public ILogger<CallingServices> Logger { get; } = logger;
-
-    /// <summary>
-    /// Resolve the workflow registered for <paramref name="tier"/> if one was registered as a
-    /// keyed service (key = tier name). Falls back to the unkeyed <see cref="Workflow"/>.
-    /// </summary>
-    public RealtimeIvrWorkflowDefinition WorkflowFor(AgentTier tier)
-        => services.GetKeyedService<RealtimeIvrWorkflowDefinition>(tier.ToString()) ?? Workflow;
 }

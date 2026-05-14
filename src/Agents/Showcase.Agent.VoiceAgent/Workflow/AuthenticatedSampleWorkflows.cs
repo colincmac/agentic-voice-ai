@@ -48,7 +48,7 @@ public static class AuthenticatedSampleWorkflows
                 .AddInstruction("Greet the caller, then route by digit.")
                 .ExitWhen("caller selects a menu option")
                 .WithDtmfMenu(menu => menu
-                    .WithPromptOverride("""
+                    .WithSsmlPromptOverride("""
                         <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
                           <voice name="en-US-Ava:DragonHDLatestNeural">
                             <prosody rate="-5%">
@@ -76,7 +76,7 @@ public static class AuthenticatedSampleWorkflows
                 .TransitionTo("balance_self_service", "PIN valid")
                 .TransitionTo("transfer_to_agent", "PIN invalid")
                 .WithDtmfMenu(menu => menu
-                    .WithPromptOverride("""
+                    .WithSsmlPromptOverride("""
                         <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
                           <voice name="en-US-Ava:DragonHDLatestNeural">
                             Please enter your four-digit PIN, followed by the pound key.

@@ -22,7 +22,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
 {
     private readonly WebSocket _webSocket;
     private readonly CallConnectionProperties _call;
-    private readonly CallAutomationClient? _callAutomationClient;
+    private readonly CallAutomationClient _callAutomationClient;
     private readonly ILogger<AcsCallerEdge> _logger;
     private readonly CancellationTokenSource _cts;
 
@@ -56,7 +56,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
         WebSocket webSocket,
         CallConnectionProperties callConnection,
         CancellationToken httpContextCancellation,
-        CallAutomationClient? callAutomationClient = null,
+        CallAutomationClient callAutomationClient,
 
         ILogger<AcsCallerEdge>? logger = null,
         CallingTelemetry? telemetry = null)
@@ -93,7 +93,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
 
     public EdgeCapabilities Capabilities => EdgeCapabilities.Streaming;
 
-    public bool CanControl => _callAutomationClient is not null;
+    public bool CanControl => true;
 
     public event Func<EdgeDisconnectedReason, ValueTask>? Disconnected;
 

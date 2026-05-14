@@ -15,7 +15,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
 {
     /// <summary>How long a prewarmed entry survives before being evicted if no
     /// <see cref="CreateAsync"/> claims it (e.g. caller hung up before WSS).</summary>
-    private static readonly TimeSpan PrewarmTtl = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan prewarmTtl = TimeSpan.FromSeconds(60);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IReadOnlyDictionary<AgentTier, IConversationStrategyFactory> _strategyFactories;
@@ -106,7 +106,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
         }
 
         // Schedule eviction so we don't leak open realtime connections if the call never lands.
-        _ = ScheduleEvictionAsync(request.CallId, PrewarmTtl);
+        _ = ScheduleEvictionAsync(request.CallId, prewarmTtl);
 
         // Surface prewarm failures in the log; CreateAsync will fall back to a fresh build.
         _ = strategyTask.ContinueWith(t =>

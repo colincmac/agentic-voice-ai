@@ -809,7 +809,7 @@ public sealed class DtmfMenuBuilder(
     /// <summary>
     /// Sets a prompt override for this DTMF step.
     /// </summary>
-    public DtmfMenuBuilder WithPromptOverride(string prompt)
+    public DtmfMenuBuilder WithSsmlPromptOverride(string prompt)
     {
         _promptOverride = prompt;
 
