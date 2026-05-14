@@ -2,14 +2,6 @@ name: Trigger auto deployment for wdg-voice-biometrics
 
 # When this action will be executed
 on:
-  # Automatically trigger it when detected changes in repo
-  push:
-    branches: 
-      [ main ]
-    paths:
-    - '**'
-    - '.github/workflows/wdg-voice-biometrics-AutoDeployTrigger-1782306d-93da-4b36-8800-2e4adae3a72d.yml'
-
   # Allow manual trigger 
   workflow_dispatch:      
 
