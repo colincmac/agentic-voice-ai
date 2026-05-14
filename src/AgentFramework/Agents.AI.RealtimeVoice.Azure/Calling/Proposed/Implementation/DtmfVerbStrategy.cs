@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -39,6 +40,8 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     private bool _prewarmed;
     private RealtimeIvrWorkflowStep? _prewarmedInitialStep;
     private List<OutboundDirective>? _prewarmedInitialDirectives;
+    private CallEdgeMetadata? _callerMetadata;
+    private string _callId = string.Empty;
 
     public DtmfVerbStrategy(
         RealtimeIvrWorkflowDefinition workflow,
@@ -71,6 +74,8 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
         {
             return Task.CompletedTask;
         }
+        _callId = context.CallId;
+        _callerMetadata = context.CallerMetadata;
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _runLoop = Task.Run(() => RunAsync(context, linked.Token), CancellationToken.None);
         return Task.CompletedTask;
@@ -149,6 +154,18 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
         try
         {
+            // Authenticate the caller before walking the workflow so transitions / validators
+            // that depend on WorkflowState.AuthLevel see the correct value.
+            await CallerAuthenticationRunner.RunAsync(
+                context.Services,
+                _callId,
+                _callerMetadata,
+                _events.Writer,
+                WorkflowState,
+                telemetry: null,
+                logger: _logger,
+                cancellationToken: ct).ConfigureAwait(false);
+
             if (_prewarmed && _prewarmedInitialDirectives is { Count: > 0 } buffered)
             {
                 foreach (var directive in buffered)

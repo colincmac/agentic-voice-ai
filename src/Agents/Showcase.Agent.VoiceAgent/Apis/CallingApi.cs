@@ -36,10 +36,11 @@ public static class CallingApi
         routeGroup.MapPost(HANDLE_INCOMING_PATH, async (
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
-            //[FromQuery] string? mode = "streaming",
+            [FromQuery] string? mode = "streaming",
+            [FromQuery] AgentTier? tier = AgentTier.RealtimeVoice,
             CancellationToken cancellationToken = default) =>
         {
-            var mode = "streaming";
+            var resolvedTier = tier ?? AgentTier.DtmfOnly;
             foreach (var evt in incomingEvents)
             {
                 if (!evt.TryGetSystemEventData(out var eventData))
@@ -101,6 +102,8 @@ public static class CallingApi
                     // connect / first-prompt TTS overlap with ACS opening the media channel.
                     // CreateAsync below will claim this prewarmed entry by callId.
                     var prewarmCallId = $"call_{callConnection.CallConnectionId}";
+                    var prewarmTier = resolvedTier;
+                    var prewarmWorkflow = services.WorkflowFor(prewarmTier);
                     _ = Task.Run(async () =>
                     {
                         try
@@ -108,8 +111,8 @@ public static class CallingApi
                             await services.SessionFactory.PrewarmAsync(new CallSessionPrewarmRequest
                             {
                                 CallId = prewarmCallId,
-                                Workflow = services.Workflow,
-                                PreferredTier = AgentTier.DtmfOnly
+                                Workflow = prewarmWorkflow,
+                                PreferredTier = prewarmTier
                             }, CancellationToken.None);
                         }
                         catch (Exception ex)
@@ -123,7 +126,7 @@ public static class CallingApi
                     if (mode == "verb")
                     {
                         // Verb-mode session is born here — no WS handshake will follow.
-                        await StartVerbSessionAsync(services, callConnection, incoming, cancellationToken);
+                        await StartVerbSessionAsync(services, callConnection, incoming, resolvedTier, cancellationToken);
                     }
                     // Streaming mode waits for the media WSS handler below to build the edge.
                 }
@@ -158,6 +161,7 @@ public static class CallingApi
             HttpContext httpContext,
             [AsParameters] CallingServices services,
             [FromRoute] string serverCallId,
+            [FromQuery] AgentTier? tier,
             [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId) =>
         {
             if (!httpContext.WebSockets.IsWebSocketRequest)
@@ -165,6 +169,9 @@ public static class CallingApi
                 httpContext.Response.StatusCode = 400;
                 return;
             }
+
+            var resolvedTier = tier ?? AgentTier.DtmfOnly;
+            var workflow = services.WorkflowFor(resolvedTier);
 
             var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
             var logger = loggerFactory.CreateLogger("CallAutomation.WebSocket");
@@ -174,8 +181,8 @@ public static class CallingApi
             {
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
-                    "Media WebSocket established for ServerCallId={ServerCallId}, CallConnectionId={CallConnectionId}",
-                    serverCallId, callConnectionId);
+                    "Media WebSocket established for ServerCallId={ServerCallId}, CallConnectionId={CallConnectionId}, Tier={Tier}",
+                    serverCallId, callConnectionId, resolvedTier);
 
                 var callConnection = services.CallAutomationClient.GetCallConnection(callConnectionId);
                 var callProperties = (await callConnection.GetCallConnectionPropertiesAsync(httpContext.RequestAborted)).Value;
@@ -193,12 +200,12 @@ public static class CallingApi
                 {
                     CallId = callId,
                     CallerEdge = edge,
-                    Workflow = services.Workflow,
-                    PreferredTier = AgentTier.DtmfOnly
+                    Workflow = workflow,
+                    PreferredTier = resolvedTier
                 }, httpContext.RequestAborted);
 
                 await session.StartAsync(httpContext.RequestAborted);
-                logger.LogInformation("Streaming call session {CallId} started", callId);
+                logger.LogInformation("Streaming call session {CallId} started ({Tier})", callId, resolvedTier);
 
                 await WaitForCallEndAsync(session, httpContext.RequestAborted);
             }
@@ -226,6 +233,7 @@ public static class CallingApi
         CallingServices services,
         CallConnection callConnection,
         AcsIncomingCallEventData incoming,
+        AgentTier tier,
         CancellationToken cancellationToken)
     {
         // Recognize verbs target the calling participant.
@@ -255,12 +263,12 @@ public static class CallingApi
         {
             CallId = callId,
             CallerEdge = edge,
-            Workflow = services.Workflow,
-            PreferredTier = AgentTier.DtmfOnly,
+            Workflow = services.WorkflowFor(tier),
+            PreferredTier = tier,
         }, cancellationToken);
 
         await session.StartAsync(cancellationToken);
-        services.Logger.LogInformation("Verb-mode call session {CallId} started", callId);
+        services.Logger.LogInformation("Verb-mode call session {CallId} started ({Tier})", callId, tier);
     }
 
     private static void DispatchToVerbEdge(AcsCallAutomationEdge edge, CallAutomationEventBase evt)

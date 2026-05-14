@@ -5,6 +5,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.Hosting;
 using Agents.AI.RealtimeVoice.Azure.Authorization.IdentityVerification;
 using Agents.AI.RealtimeVoice.Azure.Calling.Proposed;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
@@ -17,6 +18,7 @@ using Microsoft.Extensions.Azure;
 using OpenTelemetry.Resources;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
+using Showcase.Agent.VoiceAgent.Authentication;
 using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
@@ -112,7 +114,29 @@ var callerIntentWorkflow = ConversationWorkflowFactory.CreateCallerIntentWorkflo
 var dtmfWorkflow = ConversationWorkflowFactory.CreateDtmfWorkflow(sessionId: "default");
 
 var dtmf2 = IvrSampleWorkflow.DtmfOnly();
-builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp => dtmf2);
+
+// E2E showcase: register the auth-aware DTMF workflow as the default and the realtime
+// equivalent under a tier-keyed slot, so the CallingApi can pick either via ?tier=.
+builder.Services.AddSingleton<InMemoryCallerDirectory>();
+builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
+builder.Services.AddSingleton<CallerAuthStateRegistry>();
+
+builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
+    AuthenticatedSampleWorkflows.BuildAuthenticatedDtmfWorkflow(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()));
+
+builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
+    nameof(AgentTier.DtmfOnly),
+    (sp, _) => AuthenticatedSampleWorkflows.BuildAuthenticatedDtmfWorkflow(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()));
+
+builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
+    nameof(AgentTier.RealtimeVoice),
+    (sp, _) => AuthenticatedSampleWorkflows.BuildAuthenticatedRealtimeWorkflow(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()));
 
 // The realtime agent that the new realtime backend wraps. Reads its config from
 // Agents:TriageAgent and uses the "voicelive" conversation client registered above.
@@ -125,7 +149,14 @@ builder.AddCallSessionContainer()
     .AddAcsCallAutomation()
     .AddDtmfStrategy()
     .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
-    .AddCallControlTools();
+    .AddCallControlTools()
+    // Caller authentication: ANI lookup against the in-memory directory plus the
+    // anonymous fallback so unknown callers still walk the workflow as guests.
+    .AddCallerAuthentication()
+    .AddCallerAuthenticator<AniIdentityLookupAuthenticator>();
+
+// Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
+builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
 // TEAMS
 builder.AddAgentApplicationOptions();
@@ -168,6 +199,7 @@ app.MapWellKnownDidDocument();
 
 app.MapCallAutomation();
 app.MapOperatorCalls();
+app.MapAuthDiagnostics();
 // app.MapOperatorDashboardHub();
 
 //app.MapAgentDiscovery("/agents");

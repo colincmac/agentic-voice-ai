@@ -136,14 +136,22 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         // Authenticate the caller (if any authenticators are registered) before the first
         // prompt push so the navigator's prompt can include the resolved identity.
-        var conversationContext = await RunAuthenticationAsync(services, cancellationToken).ConfigureAwait(false);
+        var conversationContext = await CallerAuthenticationRunner.RunAsync(
+            services,
+            _callId,
+            _callerMetadata,
+            _events.Writer,
+            WorkflowState,
+            _telemetry,
+            _logger,
+            cancellationToken).ConfigureAwait(false);
 
         // Seed the agent with the system prompt for the current workflow step.
         var step = _navigator.EnterInitialStep();
 
         // Push the step's tool surface, wrapped with the step's guards so any tool
         // invocation by the realtime model is gated by the navigator's live state.
-        var initialTools = _navigator.WrapToolsWithCurrentGuards(step.AvailableTools ?? Array.Empty<AITool>());
+        var initialTools = _navigator.WrapToolsWithCurrentGuards(step.AvailableTools ?? []);
         await _backend.UpdateToolsAsync(initialTools, cancellationToken).ConfigureAwait(false);
 
         var prompt = _navigator.BuildCurrentStepPrompt(conversationContext);
@@ -157,102 +165,6 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             new StrategyEvent.AgentSpeakingChanged(_backend.AgentId, _backend.AgentDisplayName, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
     }
-
-    private async Task<ConversationContext?> RunAuthenticationAsync(IServiceProvider services, CancellationToken cancellationToken)
-    {
-        var orchestrator = services.GetService<IAuthenticationOrchestrator>();
-        var state = services.GetService<CallerAuthenticationState>();
-        if (orchestrator is null || state is null)
-        {
-            return services.GetService<ConversationContext>();
-        }
-
-        if (_callerMetadata is null)
-        {
-            _logger.LogDebug("Skipping caller authentication: strategy started without caller metadata for call {CallId}", _callId);
-            return services.GetService<ConversationContext>();
-        }
-
-        using var authSpan = _telemetry.StartChildActivity("contact_center.strategy.authenticate", _callId);
-
-        var previousLevel = state.Identity.VerificationLevel;
-        var context = new AuthenticationContext(
-            CallId: _callId,
-            CallerMetadata: _callerMetadata,
-            CurrentIdentity: state.Identity,
-            Services: services);
-
-        AuthenticationRunResult result;
-        try
-        {
-            result = await orchestrator.AuthenticateAsync(context, state, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            CallingActivitySource.SetError(authSpan, ex);
-            _logger.LogWarning(ex, "Caller authentication threw for call {CallId}", _callId);
-            await _events.Writer.WriteAsync(
-                new StrategyEvent.CallerAuthenticationFailed("(orchestrator)", ex.Message, DateTimeOffset.UtcNow),
-                cancellationToken).ConfigureAwait(false);
-            return services.GetService<ConversationContext>();
-        }
-
-        foreach (var step in result.Steps)
-        {
-            switch (step.Outcome)
-            {
-                case AuthenticationOutcome.Authenticated authenticated:
-                    await _events.Writer.WriteAsync(
-                        new StrategyEvent.CallerIdentified(authenticated.Identity, step.AuthenticatorName, step.At),
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-                case AuthenticationOutcome.Failed failed:
-                    await _events.Writer.WriteAsync(
-                        new StrategyEvent.CallerAuthenticationFailed(step.AuthenticatorName, failed.Reason, step.At),
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-                case AuthenticationOutcome.NeedsChallenge challenge:
-                    await _events.Writer.WriteAsync(
-                        new StrategyEvent.CallerAuthenticationChallenge(challenge.Challenge, step.At),
-                        cancellationToken).ConfigureAwait(false);
-                    break;
-            }
-        }
-
-        if (state.Identity.VerificationLevel != previousLevel)
-        {
-            await _events.Writer.WriteAsync(
-                new StrategyEvent.CallerVerificationLevelChanged(previousLevel, state.Identity.VerificationLevel, DateTimeOffset.UtcNow),
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        authSpan?.SetTag("caller.verification_level", state.Identity.VerificationLevel.ToString());
-        authSpan?.SetTag("caller.user_id", state.Identity.UserId);
-
-        return BuildConversationContext(services, state.Identity);
-    }
-
-    private static ConversationContext BuildConversationContext(IServiceProvider services, CallerIdentity identity)
-    {
-        var context = services.GetService<ConversationContext>() ?? new ConversationContext();
-        context.CallerName = identity.DisplayName;
-        context.CallerId = identity.UserId;
-        context.AuthLevel = MapAuthLevel(identity.VerificationLevel);
-        return context;
-    }
-
-    private static AuthenticationLevel MapAuthLevel(CallerVerificationLevel level) => level switch
-    {
-        CallerVerificationLevel.None => AuthenticationLevel.None,
-        CallerVerificationLevel.AniMatch => AuthenticationLevel.PhoneRecognized,
-        CallerVerificationLevel.KnowledgeBased => AuthenticationLevel.SecurityQuestionPassed,
-        CallerVerificationLevel.MultiFactor => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.VoiceBiometric => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.EntraVerifiedId => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.Strong => AuthenticationLevel.FullyAuthenticated,
-        _ => AuthenticationLevel.None
-    };
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {

@@ -2,6 +2,8 @@ using System.Text;
 using System.Threading.Channels;
 using Agents.AI.Extensions.LiveVoice.IvrWorkflow;
 using Agents.AI.Extensions.LiveVoice.Media.Audio;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Authentication;
+using Agents.AI.RealtimeVoice.Azure.Calling.Proposed.Monitoring;
 using Agents.AI.RealtimeVoice.Azure.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,6 +47,8 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
     private int _interDigitTimeoutMs = 5000;
     private readonly char _terminationDigitChar = '#';
     private readonly Lock _stateLock = new();
+    private CallEdgeMetadata? _callerMetadata;
+    private string _callId = string.Empty;
 
     public DtmfStreamingStrategy(
         RealtimeIvrWorkflowDefinition workflow,
@@ -78,6 +82,9 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
         {
             return Task.CompletedTask;
         }
+
+        _callId = context.CallId;
+        _callerMetadata = context.CallerMetadata;
 
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _runLoop = Task.Run(() => RunAsync(context, linked.Token), CancellationToken.None);
@@ -161,6 +168,19 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
         try
         {
+            // Authenticate the caller (if any authenticators are registered) before running the
+            // workflow so step guards / validators can read WorkflowState.AuthLevel and observers
+            // see the CallerIdentified event before the first DtmfRecognized.
+            await CallerAuthenticationRunner.RunAsync(
+                context.Services,
+                _callId,
+                _callerMetadata,
+                _events.Writer,
+                WorkflowState,
+                telemetry: null,
+                logger: _logger,
+                cancellationToken: ct).ConfigureAwait(false);
+
             if (_prewarmed && _prewarmedInitialStep is not null)
             {
                 // Replay buffered prompt audio/directives — no TTS round-trip on the call's critical path.
