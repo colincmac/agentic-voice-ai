@@ -36,6 +36,18 @@ public abstract record DtmfActionResult
     public sealed record Escalate(string Reason) : DtmfActionResult;
 
     /// <summary>
+    /// Transfer the call to <paramref name="TargetIdentifier"/>. The DTMF strategy
+    /// surfaces this as an <c>OutboundDirective.TransferCall</c> on the active edge
+    /// (which must support the <c>TransferCall</c> capability) and then completes the
+    /// workflow. Use this for self-service "press 0 for an agent" or "press 9 to be
+    /// connected to fraud" routes.
+    /// </summary>
+    public sealed record Transfer(
+        string TargetIdentifier,
+        TransferKindHint Kind = TransferKindHint.PhoneNumber,
+        string? Reason = null) : DtmfActionResult;
+
+    /// <summary>
     /// The call is being hung up. The side-effect is expected to have been performed
     /// by the invoked tool (e.g. <c>CallControlTools.HangUpCallAsync</c>); this result
     /// tells the strategy not to drive further audio or transitions.
@@ -44,4 +56,16 @@ public abstract record DtmfActionResult
 
     /// <summary>Mark the workflow complete and end driving the conversation.</summary>
     public sealed record Complete(string? Message = null) : DtmfActionResult;
+}
+
+/// <summary>
+/// Tier-3 hint of how the dispatching edge should interpret the transfer target. Mirrors
+/// (but doesn't depend on) the <c>TransferKind</c> enum used by the calling layer so that
+/// this extension stays free of a circular reference.
+/// </summary>
+public enum TransferKindHint
+{
+    PhoneNumber,
+    TeamsUser,
+    Consultative
 }

@@ -121,6 +121,12 @@ builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
 
+// Demo NLU dependencies — keyword classifier + scripted recognizer keep the showcase
+// free of an Azure CLU / Speech-to-Text dependency while still exercising the NLU
+// strategy end-to-end. Replace with real implementations in production.
+builder.Services.AddSingleton<IIntentClassifier, KeywordIntentClassifier>();
+builder.Services.AddTransient<ISpeechRecognizer, StubSpeechRecognizer>();
+
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
     AuthenticatedSampleWorkflows.BuildAuthenticatedDtmfWorkflow(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
@@ -138,6 +144,12 @@ builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()));
 
+builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
+    nameof(AgentTier.IntentNlu),
+    (sp, _) => AuthenticatedSampleWorkflows.BuildAuthenticatedRealtimeWorkflow(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()));
+
 // The realtime agent that the new realtime backend wraps. Reads its config from
 // Agents:TriageAgent and uses the "voicelive" conversation client registered above.
 builder.AddRealtimeAIAgent(
@@ -147,13 +159,29 @@ builder.AddRealtimeAIAgent(
 
 builder.AddCallSessionContainer()
     .AddAcsCallAutomation()
-    .AddDtmfStrategy()
+    // Inner factories — the composite below shadows the top tier and reuses these
+    // through DI. Order matters: register the inner tiers BEFORE the composite so
+    // the composite's lookup finds them.
     .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddNluStrategy()
+    .AddDtmfStrategy()
     .AddCallControlTools()
     // Caller authentication: ANI lookup against the in-memory directory plus the
     // anonymous fallback so unknown callers still walk the workflow as guests.
     .AddCallerAuthentication()
-    .AddCallerAuthenticator<AniIdentityLookupAuthenticator>();
+    .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
+    // Where the composite (and any DTMF "press 0 for agent" tool) sends escalations.
+    .AddTransferEscalationTarget(AuthenticatedSampleWorkflows.DefaultEscalationNumber)
+    // Composite chain: RealtimeVoice → IntentNlu → DtmfOnly. The composite registers as a
+    // Tier 0 (RealtimeVoice) factory, shadowing the inner Realtime factory above thanks to
+    // last-wins resolution in CallSessionFactory. Per-call IvrWorkflowState (workflow step,
+    // collected data, transcript) and CallerAuthenticationState are preserved across each
+    // mid-call swap so the caller doesn't have to re-authenticate when the tier degrades.
+    .AddCompositeFallbackStrategy(
+        topTier: AgentTier.RealtimeVoice,
+        AgentTier.RealtimeVoice,
+        AgentTier.IntentNlu,
+        AgentTier.DtmfOnly);
 
 // Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();

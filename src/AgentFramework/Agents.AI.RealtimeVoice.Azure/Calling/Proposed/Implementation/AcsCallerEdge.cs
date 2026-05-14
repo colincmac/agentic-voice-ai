@@ -91,7 +91,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
 
     public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
 
-    public EdgeCapabilities Capabilities => EdgeCapabilities.Streaming;
+    public EdgeCapabilities Capabilities => EdgeCapabilities.Streaming | EdgeCapabilities.TransferCall;
 
     public bool CanControl => true;
 
@@ -158,6 +158,19 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
                             endOfMessage: true,
                             cancellationToken).ConfigureAwait(false);
                     }
+                    break;
+
+                case OutboundDirective.TransferCall transfer:
+                    _logger.LogInformation(
+                        "Edge {EdgeId} transferring call to {Target} ({Kind}); reason: {Reason}",
+                        EdgeId, transfer.TargetIdentifier, transfer.Kind, transfer.Reason ?? "(none)");
+                    var transferRequest = new TransferRequest(
+                        transfer.TargetIdentifier,
+                        transfer.Kind,
+                        transfer.Reason is { Length: > 0 }
+                            ? new Dictionary<string, string> { ["reason"] = transfer.Reason }
+                            : null);
+                    await TransferAsync(transferRequest, cancellationToken).ConfigureAwait(false);
                     break;
 
                 default:

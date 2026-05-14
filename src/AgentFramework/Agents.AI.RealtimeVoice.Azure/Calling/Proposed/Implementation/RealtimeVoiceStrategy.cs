@@ -222,6 +222,26 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         }
     }
 
+    //private async Task PumpInboundDtmfAsync(StrategyStartContext context, CancellationToken ct)
+    //{
+    //    try
+    //    {
+    //        await foreach (var frame in context.InboundDtmf.ReadAllAsync(ct).ConfigureAwait(false))
+    //        {
+    //            if (_suspended)
+    //            {
+    //                continue;
+    //            }
+    //            await _backend.SendDtmfAsync(frame, ct).ConfigureAwait(false);
+    //        }
+    //    }
+    //    catch (OperationCanceledException) { /* shutdown */ }
+    //    catch (Exception ex)
+    //    {
+    //        _logger.LogWarning(ex, "Realtime inbound audio pump terminated");
+    //    }
+    //}
+
     private async Task RunAgentLoopAsync(CancellationToken ct)
     {
         try

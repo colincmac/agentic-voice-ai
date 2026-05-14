@@ -199,4 +199,58 @@ public sealed class CallSessionContainerBuilder
         Services.AddScoped<IAIToolCollection, CallControlTools>();
         return this;
     }
+
+    /// <summary>
+    /// Registers the Tier 3 NLU strategy (<see cref="NluConversationStrategy"/>). Requires an
+    /// <see cref="Agents.AI.Extensions.LiveVoice.Media.Audio.ISpeechRecognizer"/>,
+    /// <see cref="Agents.AI.Extensions.LiveVoice.Media.Audio.ISpeechSynthesizer"/>, and
+    /// <see cref="Agents.AI.Extensions.LiveVoice.IvrWorkflow.IIntentClassifier"/> to be registered separately.
+    /// </summary>
+    public CallSessionContainerBuilder AddNluStrategy()
+    {
+        Services.AddSingleton<IConversationStrategyFactory, NluConversationStrategyFactory>();
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a transfer escalation target so strategies that emit
+    /// <see cref="OutboundDirective.TransferCall"/> have a default destination
+    /// (e.g. NLU's <c>transfer_to_agent</c> intent, or DTMF "press 0 for agent").
+    /// </summary>
+    public CallSessionContainerBuilder AddTransferEscalationTarget(string targetIdentifier, TransferKind kind = TransferKind.BlindToPhoneNumber)
+    {
+        Services.AddSingleton(new TransferEscalationTarget(targetIdentifier, kind));
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a <see cref="CompositeFallbackStrategy"/> at <paramref name="topTier"/>. The composite
+    /// shadows any individual factory at the top tier (last-registered wins) and walks the
+    /// <paramref name="orderedTiers"/> chain on each inner strategy fault, preserving
+    /// <see cref="IvrWorkflowState"/> via <c>restoreFrom</c>. Per-call scoped services
+    /// (e.g. <c>CallerAuthenticationState</c>) are shared across every tier in the chain.
+    /// </summary>
+    /// <param name="topTier">
+    /// The tier the call session factory will look up. Must be the first entry of
+    /// <paramref name="orderedTiers"/>.
+    /// </param>
+    /// <param name="orderedTiers">
+    /// Ordered fallback chain — first tier is the primary; subsequent tiers are tried in order
+    /// when the active inner faults.
+    /// </param>
+    /// <remarks>
+    /// Register the inner factories (e.g. <see cref="AddRealtimeVoiceStrategy"/>,
+    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStrategy"/>) BEFORE calling this
+    /// method so the composite can resolve them at call-create time.
+    /// </remarks>
+    public CallSessionContainerBuilder AddCompositeFallbackStrategy(AgentTier topTier, params AgentTier[] orderedTiers)
+    {
+        if (orderedTiers is null || orderedTiers.Length == 0)
+        {
+            throw new ArgumentException("Provide at least one tier in the fallback chain.", nameof(orderedTiers));
+        }
+        Services.AddSingleton<IConversationStrategyFactory>(_ =>
+            new CompositeFallbackStrategyFactory(topTier, orderedTiers));
+        return this;
+    }
 }

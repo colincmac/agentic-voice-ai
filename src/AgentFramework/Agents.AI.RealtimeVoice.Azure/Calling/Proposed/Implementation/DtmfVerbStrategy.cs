@@ -328,12 +328,34 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                 }
                 break;
 
+            case DtmfActionResult.Transfer transfer:
+                await _events.Writer.WriteAsync(
+                    new StrategyEvent.EscalationRequested(transfer.Reason ?? "Transfer requested", DateTimeOffset.UtcNow),
+                    ct).ConfigureAwait(false);
+                await _outbound.Writer.WriteAsync(
+                    new OutboundDirective.TransferCall(
+                        transfer.TargetIdentifier,
+                        MapTransferKind(transfer.Kind),
+                        DateTimeOffset.UtcNow,
+                        transfer.Reason),
+                    ct).ConfigureAwait(false);
+                _navigator!.Complete();
+                break;
+
             case DtmfActionResult.HangUp:
             case DtmfActionResult.Complete:
                 _navigator!.Complete();
                 break;
         }
     }
+
+    private static TransferKind MapTransferKind(TransferKindHint hint) => hint switch
+    {
+        TransferKindHint.PhoneNumber => TransferKind.BlindToPhoneNumber,
+        TransferKindHint.TeamsUser => TransferKind.BlindToTeamsUser,
+        TransferKindHint.Consultative => TransferKind.Consultative,
+        _ => TransferKind.BlindToPhoneNumber
+    };
 
     private async Task EnterStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
     {

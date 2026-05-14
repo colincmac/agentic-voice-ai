@@ -37,7 +37,9 @@ public sealed class CallSessionFactory : ICallSessionFactory
         CallingTelemetry? telemetry = null)
     {
         _scopeFactory = scopeFactory;
-        _strategyFactories = strategyFactories.ToDictionary(f => f.Tier, f => f);
+        _strategyFactories = strategyFactories
+            .GroupBy(f => f.Tier)
+            .ToDictionary(g => g.Key, g => g.Last());
         _registry = (CallSessionRegistry)registry;
         _quality = quality;
         _telemetry = telemetry ?? CallingTelemetry.Default;

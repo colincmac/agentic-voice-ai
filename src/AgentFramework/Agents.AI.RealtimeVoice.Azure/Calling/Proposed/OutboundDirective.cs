@@ -56,4 +56,21 @@ public abstract record OutboundDirective(DateTimeOffset At)
         TimeSpan? InterToneTimeout = null,
         TimeSpan? InitialSilenceTimeout = null,
         string? OperationContext = null) : OutboundDirective(At);
+
+    /// <summary>
+    /// Escalate the call by transferring it to <paramref name="TargetIdentifier"/>.
+    /// Dispatched by the edge through its <see cref="ICallControl.TransferAsync"/>
+    /// surface; ignored by edges that do not implement <see cref="ICallControl"/>.
+    /// </summary>
+    /// <remarks>
+    /// Strategies emit this directive when the workflow reaches an explicit transfer step
+    /// (e.g. caller pressed "0 for agent" in DTMF, or the realtime model classified the
+    /// utterance as <c>transfer_to_agent</c>). The session ends shortly after the platform
+    /// confirms the transfer via its disconnect callback.
+    /// </remarks>
+    public sealed record TransferCall(
+        string TargetIdentifier,
+        TransferKind Kind,
+        DateTimeOffset At,
+        string? Reason = null) : OutboundDirective(At);
 }

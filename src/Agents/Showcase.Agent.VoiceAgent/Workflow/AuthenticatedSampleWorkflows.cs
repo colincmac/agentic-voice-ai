@@ -31,11 +31,15 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 /// </summary>
 public static class AuthenticatedSampleWorkflows
 {
+    public const string DefaultEscalationNumber = "+15555550199";
+
     public static RealtimeIvrWorkflowDefinition BuildAuthenticatedDtmfWorkflow(
         InMemoryCallerDirectory directory,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        string escalationNumber = DefaultEscalationNumber)
     {
         var validator = PinValidationTools.ValidatePinTool(directory, loggerFactory);
+        var transferTool = TransferTools.BuildTransferToAgentTool(escalationNumber);
 
         return RealtimeIvrWorkflowBuilder.Create("authenticated-dtmf")
             .WithBasePrompt(prompt => prompt
@@ -46,6 +50,7 @@ public static class AuthenticatedSampleWorkflows
                 .WithGoal("Greet the caller and present main menu")
                 .WithDescription("Welcome to ACME Bank.")
                 .AddInstruction("Greet the caller, then route by digit.")
+                .WithTool(transferTool)
                 .ExitWhen("caller selects a menu option")
                 .WithDtmfMenu(menu => menu
                     .WithSsmlPromptOverride("""
@@ -65,7 +70,10 @@ public static class AuthenticatedSampleWorkflows
                         """)
                     .Option('1', "balance", "auth_pin")
                     .Option('2', "billing", "auth_pin")
-                    .Option('0', "agent", "transfer_to_agent")))
+                    .Option(
+                        digit: '0',
+                        label: "agent",
+                        actionToolName: "transfer_to_agent")))
             .AddStep(step => step
                 .WithId("auth_pin")
                 .WithGoal("Collect and validate the caller's PIN")
@@ -109,7 +117,8 @@ public static class AuthenticatedSampleWorkflows
 
     public static RealtimeIvrWorkflowDefinition BuildAuthenticatedRealtimeWorkflow(
         InMemoryCallerDirectory directory,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        string escalationNumber = DefaultEscalationNumber)
     {
         var confirmIdentity = PinValidationTools.ConfirmIdentityTool(directory, loggerFactory);
 
@@ -128,7 +137,27 @@ public static class AuthenticatedSampleWorkflows
                     .AddInstruction("Listen for the caller's intent: balance, billing, or agent transfer.")
                     .ExitWhen("Caller has stated their primary intent")
                     .TransitionTo("verify", "Caller wants account-specific information")
-                    .TransitionTo("transfer", "Caller asked for an agent"))
+                    .TransitionTo("transfer", "Caller asked for an agent")
+                    .WithDtmfMenu(menu => menu
+                        .WithSsmlPromptOverride("""
+                        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+                          <voice name="en-US-Ava:DragonHDLatestNeural">
+                            <prosody rate="-5%">
+                              Welcome to ACME Bank.
+                              <break time="300ms"/>
+                              For account balance, press 1.
+                              <break time="200ms"/>
+                              For billing, press 2.
+                              <break time="200ms"/>
+                              To speak with an agent, press 0.
+                            </prosody>
+                          </voice>
+                        </speak>
+                        """)
+                    .Option('1', "balance", "auth_pin")
+                    .Option('2', "billing", "auth_pin")
+                    .Option('0', "agent", "transfer_to_agent"))
+             )
             .AddStep(step => step
                 .WithId("verify")
                 .WithGoal("Confirm the caller's identity via PIN before sharing account info")
@@ -153,6 +182,7 @@ public static class AuthenticatedSampleWorkflows
                 .WithGoal("Transfer the caller to a live agent")
                 .WithDescription("Agent transfer")
                 .AddInstruction("Acknowledge the request, set expectations on wait time, and complete the transfer.")
+                .AddInstruction($"Use the transfer_call tool with targetIdentifier='{escalationNumber}' and transferKind='phone'.")
                 .ExitWhen("Transfer initiated"))
             .WithClosing(
                 "Thanks for calling ACME Bank. Goodbye.",

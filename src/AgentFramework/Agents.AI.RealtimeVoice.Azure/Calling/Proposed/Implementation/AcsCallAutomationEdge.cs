@@ -71,7 +71,7 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
 
     public ChannelReader<SessionSignal> InboundSignals => _inboundSignals.Reader;
 
-    public EdgeCapabilities Capabilities => EdgeCapabilities.Verb;
+    public EdgeCapabilities Capabilities => EdgeCapabilities.Verb | (_control is null ? EdgeCapabilities.None : EdgeCapabilities.TransferCall);
 
     public bool CanControl => _control is not null;
 
@@ -136,6 +136,20 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
                         recognize.InitialSilenceTimeout,
                         recognize.OperationContext,
                         cancellationToken).ConfigureAwait(false);
+                    _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
+                    break;
+
+                case OutboundDirective.TransferCall transfer:
+                    _logger.LogInformation(
+                        "Verb edge {EdgeId} transferring call to {Target} ({Kind}); reason: {Reason}",
+                        EdgeId, transfer.TargetIdentifier, transfer.Kind, transfer.Reason ?? "(none)");
+                    var transferRequest = new TransferRequest(
+                        transfer.TargetIdentifier,
+                        transfer.Kind,
+                        transfer.Reason is { Length: > 0 }
+                            ? new Dictionary<string, string> { ["reason"] = transfer.Reason }
+                            : null);
+                    await TransferAsync(transferRequest, cancellationToken).ConfigureAwait(false);
                     _telemetry.DirectiveDispatched(EdgeId, directiveKind, Stopwatch.GetElapsedTime(dispatchStart));
                     break;
 
