@@ -1,7 +1,7 @@
 # ADR-0004 — Distributed coordination plane in Redis keyed by `callConnectionId`; stateless pods; webhook idempotency via `(callConnectionId, sequenceNumber)`
 
 - **Status:** Accepted
-- **Date:** initial deployment; revised 2026-05-15 for hyperscale (330k+ concurrent across active-active clusters per [ADR-0010](0010-active-active-multi-cluster-topology.md))
+- **Date:** initial deployment; revised 2026-05-15 for hyperscale (hyperscale reqs across active-active clusters per [ADR-0010](0010-active-active-multi-cluster-topology.md))
 
 ## Context
 
@@ -17,7 +17,7 @@ For each in-flight call the app needs to remember:
 
 In-process state is unsafe because the next callback may land on a different pod; sticky sessions are not guaranteed (Event Grid and Call Automation deliver to whichever replica the load balancer picks). Equally, callbacks may be **duplicated** by retries — applying a `RecognizeCompleted` twice would advance the menu past where the caller actually is.
 
-The earlier revision of this ADR conflated four different concerns into one `callConnectionId`-keyed hash: dialog state, dedup, the active tier, and (implicitly) any cross-call coordination. At 330k concurrent across active-active clusters those concerns have **different access patterns, different TTLs, different hot-key risk, and different sharding requirements**, and must be split.
+The earlier revision of this ADR conflated four different concerns into one `callConnectionId`-keyed hash: dialog state, dedup, the active tier, and (implicitly) any cross-call coordination. In hyperscale scenarios, across active-active clusters those concerns have **different access patterns, different TTLs, different hot-key risk, and different sharding requirements**, and must be split.
 
 ## Decision
 

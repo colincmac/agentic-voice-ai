@@ -5,6 +5,7 @@ using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
 using Agents.AI.ContactCenter.AITools;
 using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication.CallAutomation;
@@ -84,6 +85,8 @@ public static class CallSessionContainerExtensions
     private static CallSessionContainerBuilder AddCallSessionContainerCore(this IHostApplicationBuilder builder)
     {
         var services = builder.Services;
+
+        builder.AddClusterIdentity();
 
         services.TryAddSingleton(sp =>
         {

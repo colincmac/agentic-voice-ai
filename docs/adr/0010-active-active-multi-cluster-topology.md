@@ -1,27 +1,27 @@
-# ADR-0010 — Active-active multi-cluster topology for hyperscale (330k+ concurrent callers)
+# ADR-0010 — Active-active multi-cluster topology for hyperscale (100k+ concurrent callers)
 
 - **Status:** Accepted
 - **Date:** 2026-05-15
 
 ## Context
 
-The platform's stated capacity target is **330,000 concurrent callers** sustained, with regional resilience. The earlier ADRs ([ADR-0002](0002-acs-call-automation-as-control-plane.md), [ADR-0003](0003-incomingcall-delivery-via-event-grid.md), [ADR-0004](0004-call-state-in-redis-by-callconnectionid.md), [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md)) implicitly assumed a single AKS cluster behind a single Redis instance. That topology does not survive an Azure region event and does not scale linearly past the limits of a single AKS control plane / single Redis shard.
+For contact centers we'll need to target hyperscale level requirements, with regional resilience. The earlier ADRs ([ADR-0002](0002-acs-call-automation-as-control-plane.md), [ADR-0003](0003-incomingcall-delivery-via-event-grid.md), [ADR-0004](0004-call-state-in-redis-by-callconnectionid.md), [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md)) implicitly assumed a single AKS cluster behind a single Redis instance. That topology does not survive an Azure region event and does not scale linearly past the limits of a single AKS control plane / single Redis shard.
 
 The constraints that drive the topology decision are:
 
-- **ACS Call Automation per-resource throughput.** A single ACS resource has documented limits on concurrent calls and per-second event publication. At 330k concurrent the platform is comfortably past the safe ceiling of any one ACS resource and any one Event Grid system topic.
+- **ACS Call Automation per-resource throughput.** A single ACS resource has documented limits on concurrent calls and per-second event publication. At hyperscale level the platform is comfortably past the safe ceiling of any one ACS resource and any one Event Grid system topic.
 - **Event Grid webhook delivery rate.** A single webhook endpoint per cluster will absorb the answer-path event rate (`IncomingCall`) plus the much larger mid-call event rate (`Recognize*`, `Play*`, `CallTransfer*`, `CallDisconnected`, …). At hyperscale this is hundreds of events per second per cluster sustained, with bursts during incidents.
-- **Realtime AI session ceilings ([ADR-0006](0006-realtime-ai-voicelive-vs-gpt-realtime.md)).** Realtime model providers cap concurrent sessions per region/subscription. 330k concurrent realtime is not achievable in any single region and should not be the design target — graceful degradation per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) supplies the rest of the capacity.
+- **Realtime AI session ceilings ([ADR-0006](0006-realtime-ai-voicelive-vs-gpt-realtime.md)).** Realtime model providers cap concurrent sessions per region/subscription. Hyperscale concurrent realtime is not achievable in any single region and should not be the design target — graceful degradation per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) supplies the rest of the capacity.
 - **Bi-di WebSocket pinning ([ADR-0007](0007-dtmf-bidirectional-websocket-vs-callback-api.md)).** Streaming-mode calls are anchored to the AKS pod that holds the WS. A whole-region failure must not strand half of those calls invisibly.
 - **Stateless-pod contract ([ADR-0004](0004-call-state-in-redis-by-callconnectionid.md)).** Mid-call callbacks may land on any pod. At a multi-cluster scale "any pod" must include "any pod in any cluster", subject to the pod-affinity rules in [ADR-0011](0011-pod-ownership-and-lease-model.md).
 
-Single-cluster scaling (one AKS, one Redis, one ACS resource) is not a credible path to 330k concurrent and is rejected without further analysis.
+Single-cluster scaling (one AKS, one Redis, one ACS resource) is not a credible path to hyperscale scenarios and is rejected without further analysis.
 
 ## Decision
 
 ### Topology
 
-- **Two or more active-active AKS clusters** in different Azure regions. Each cluster is sized for **~60–65 % of the total target** so that a single-cluster outage can be absorbed by the survivors with documented degradation per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md). For the 330k target, that is two clusters at ~200k each, or three clusters at ~135k each.
+- **Two or more active-active AKS clusters** in different Azure regions. Each cluster is sized for **~60–65 % of the total target** so that a single-cluster outage can be absorbed by the survivors with documented degradation per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md). For the hyperscale level, that is two clusters at ~200k each, or three clusters at ~135k each.
 - **One ACS resource per cluster** (co-located in the cluster's region), each with its own Event Grid system topic and its own webhook endpoint inside the cluster. ACS resources are not shared between clusters.
 - **Front Door** (or Traffic Manager — Front Door is the default) fronts the answer-path webhooks for *outbound dial-out, dashboard, supervisor, and admin* surfaces. The `IncomingCall` Event Grid subscription on each ACS resource targets its **own cluster's webhook directly**, not Front Door — Event Grid → Front Door → cluster adds a hop and a TLS termination on the answer path that ADR-0003 explicitly budgets against.
 - **Calls do not migrate between clusters mid-call.** Once a call has been answered in a cluster, it lives and dies in that cluster. Cross-cluster failover applies only to *new* calls. Mid-call cluster failure is handled by [ADR-0011](0011-pod-ownership-and-lease-model.md)'s reaper, which performs a polite, audible hangup or external-PSTN re-route — never a silent drop and never a cross-cluster session migration.
@@ -55,7 +55,7 @@ Single-cluster scaling (one AKS, one Redis, one ACS resource) is not a credible 
 
 ## Alternatives considered
 
-- **Single AKS cluster with per-zone autoscaling.** Rejected. Single point of failure for an Azure region event; single ACS resource limit; single Event Grid topic limit. Workable up to maybe 50–75k concurrent on aggressive sizing; not 330k.
+- **Single AKS cluster with per-zone autoscaling.** Rejected. Single point of failure for an Azure region event; single ACS resource limit; single Event Grid topic limit. Workable up to maybe 50–75k concurrent on aggressive sizing; not 100k+.
 - **Active-passive across regions.** Rejected. The passive cluster is a cost center that, by design, is unproven on the day it is needed. Active-active continuously exercises the coordination plane and the failover path.
 - **N>2 small clusters (e.g., five at 65k each).** Acceptable and supported by this ADR. Operational overhead (separate Helm releases, separate ACS resources, separate Cognitive Services links per cluster) grows linearly; only adopt if a per-cluster ceiling forces it. The default is **two**.
 - **Cross-cluster session migration mid-call.** Rejected. Requires WS state transfer, ACS call re-attachment, and is incompatible with [ADR-0007](0007-dtmf-bidirectional-websocket-vs-callback-api.md)'s bi-di pinning. Audible re-route per [ADR-0011](0011-pod-ownership-and-lease-model.md) is the supported behavior on cluster loss.
