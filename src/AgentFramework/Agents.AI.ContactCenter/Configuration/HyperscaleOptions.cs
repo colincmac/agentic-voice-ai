@@ -29,6 +29,13 @@ public sealed class HyperscaleOptions
     /// (ADR-0011).
     /// </summary>
     public CallOwnershipOptions CallOwnership { get; set; } = new();
+
+    /// <summary>
+    /// Per-cluster tier-ceiling policy used by
+    /// <see cref="Agents.AI.ContactCenter.Coordination.ITierCeilingProvider"/>
+    /// to broadcast and cache the active degradation ceiling (ADR-0008).
+    /// </summary>
+    public TierCeilingOptions TierCeiling { get; set; } = new();
 }
 
 /// <summary>
@@ -91,4 +98,18 @@ public sealed class CallOwnershipOptions
     /// the lease window in ADR-0011.
     /// </summary>
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(90);
+}
+
+/// <summary>
+/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.ITierCeilingProvider"/>.
+/// </summary>
+public sealed class TierCeilingOptions
+{
+    /// <summary>
+    /// Ceiling assumed at process start before the first read from Redis (or
+    /// when no value has ever been set for the cluster). Default
+    /// <see cref="AgentTier.RealtimeVoice"/> means "no degradation" — admit
+    /// calls at the highest tier the per-tier capacity counter allows.
+    /// </summary>
+    public AgentTier DefaultCeiling { get; set; } = AgentTier.RealtimeVoice;
 }

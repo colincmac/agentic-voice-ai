@@ -90,4 +90,36 @@ public static class CoordinationServiceCollectionExtensions
         builder.Services.TryAddSingleton<ICallOwnershipDirectory, RedisCallOwnershipDirectory>();
         return builder;
     }
+
+    /// <summary>
+    /// Registers the in-process <see cref="ITierCeilingProvider"/>
+    /// (<see cref="InMemoryTierCeilingProvider"/>). Suitable for dev / Aspire
+    /// and for the per-pod fallback in ADR-0004's degraded-mode admission
+    /// contract; no Pub/Sub fan-out.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryTierCeilingProvider(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<ITierCeilingProvider, InMemoryTierCeilingProvider>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the Redis-backed <see cref="ITierCeilingProvider"/>
+    /// (<see cref="RedisTierCeilingProvider"/>) per ADR-0008. The caller is
+    /// responsible for registering an
+    /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> (typically via
+    /// Aspire's <c>AddRedisClient</c>). The same singleton is wired as both
+    /// <see cref="ITierCeilingProvider"/> and an
+    /// <see cref="IHostedService"/> so the Pub/Sub subscription is established
+    /// before the first <c>IncomingCall</c>.
+    /// </summary>
+    public static IHostApplicationBuilder AddRedisTierCeilingProvider(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<RedisTierCeilingProvider>();
+        builder.Services.TryAddSingleton<ITierCeilingProvider>(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
+        return builder;
+    }
 }

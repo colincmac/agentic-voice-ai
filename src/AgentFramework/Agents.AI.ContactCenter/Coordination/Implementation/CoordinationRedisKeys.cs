@@ -23,4 +23,13 @@ internal static class CoordinationRedisKeys
     /// </summary>
     public static string Ownership(string callConnectionId)
         => $"owner:{{{callConnectionId}}}";
+
+    /// <summary>
+    /// <c>ceiling:cluster:{clusterId}</c> — active tier ceiling for the cluster
+    /// per ADR-0008. Used both as the string key (<c>SET</c> / <c>GET</c>) and
+    /// as the Pub/Sub channel name; the published message body is the
+    /// <c>(int)</c>-coded <see cref="Configuration.AgentTier"/>.
+    /// </summary>
+    public static string ClusterTierCeiling(string clusterId)
+        => $"ceiling:cluster:{{{clusterId}}}";
 }
