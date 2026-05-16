@@ -1,5 +1,6 @@
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Coordination;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,6 +26,8 @@ public sealed class CallSessionFactory : ICallSessionFactory
     private readonly IEnumerable<ICallObserver> _defaultObservers;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
+    private readonly ICallOwnershipDirectory? _ownership;
+    private readonly IPodHeartbeat? _heartbeat;
     private readonly ConcurrentDictionary<string, PrewarmedEntry> _prewarmed = new();
 
     public CallSessionFactory(
@@ -34,7 +37,9 @@ public sealed class CallSessionFactory : ICallSessionFactory
         ICallQualityReporter quality,
         IEnumerable<ICallObserver>? defaultObservers = null,
         ILoggerFactory? loggerFactory = null,
-        CallingTelemetry? telemetry = null)
+        CallingTelemetry? telemetry = null,
+        ICallOwnershipDirectory? ownership = null,
+        IPodHeartbeat? heartbeat = null)
     {
         _scopeFactory = scopeFactory;
         _strategyFactories = strategyFactories
@@ -46,6 +51,8 @@ public sealed class CallSessionFactory : ICallSessionFactory
         _defaultObservers = defaultObservers ?? [];
         _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<CallSessionFactory>() ?? NullLogger<CallSessionFactory>.Instance;
+        _ownership = ownership;
+        _heartbeat = heartbeat;
     }
 
     public Task PrewarmAsync(CallSessionPrewarmRequest request, CancellationToken cancellationToken = default)
@@ -187,7 +194,9 @@ public sealed class CallSessionFactory : ICallSessionFactory
             scope,
             _registry,
             _loggerFactory?.CreateLogger<CallSession>(),
-            _telemetry);
+            _telemetry,
+            _ownership,
+            _heartbeat);
 
         // Bind the per-call scoped accessor so AI tool collections resolved
         // from this scope can reach the live session.
@@ -195,6 +204,30 @@ public sealed class CallSessionFactory : ICallSessionFactory
         accessor?.Set(session);
 
         _registry.Add(session);
+
+        if (_ownership is not null)
+        {
+            // Safe default: pin every call to this pod. Verb-only strategies
+            // could tolerate cross-pod callbacks, but over-pinning is correct
+            // (forwarding hop) while under-pinning risks dual-state.
+            const CallOwnershipKind kind = CallOwnershipKind.Streaming;
+            var acquire = await _ownership.TryAcquireAsync(request.CallId, kind, cancellationToken).ConfigureAwait(false);
+            if (!acquire.Acquired)
+            {
+                _logger.LogInformation(
+                    "Call {CallId} is owned by cluster={OwnerCluster} pod={OwnerPod}; refusing local create",
+                    request.CallId, acquire.Owner.ClusterId, acquire.Owner.PodId);
+                createSpan?.SetTag("call.ownership.acquired", false);
+                await _registry.RemoveAsync(request.CallId, cancellationToken).ConfigureAwait(false);
+                try { await session.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Session dispose after ownership conflict failed for call {CallId}", request.CallId); }
+                throw new CallOwnershipConflictException(request.CallId, acquire.Owner);
+            }
+
+            createSpan?.SetTag("call.ownership.acquired", true);
+            _heartbeat?.TrackOwnedCall(request.CallId, kind);
+        }
+
         return session;
     }
 

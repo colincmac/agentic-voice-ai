@@ -44,6 +44,14 @@ public sealed class HyperscaleOptions
     /// sweep orphaned <c>owner:*</c> entries (ADR-0011).
     /// </summary>
     public PodHeartbeatOptions PodHeartbeat { get; set; } = new();
+
+    /// <summary>
+    /// Cross-pod webhook forwarder transport per ADR-0011. Drives the URL
+    /// shape used by
+    /// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookForwarder"/>
+    /// when a streaming-mode mid-call event lands on a non-owning pod.
+    /// </summary>
+    public WebhookForwarderOptions WebhookForwarder { get; set; } = new();
 }
 
 /// <summary>
@@ -158,4 +166,72 @@ public sealed class PodHeartbeatOptions
     /// reaper behavior without unmounting the heartbeat.
     /// </summary>
     public bool ReaperEnabled { get; set; } = true;
+}
+
+/// <summary>
+/// Configuration for
+/// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookForwarder"/> per
+/// ADR-0011. Forwarding only happens inside one cluster (cross-cluster
+/// forwards are blocked by design), so the URL template targets the
+/// Kubernetes headless service that fronts the pods of the owning workload.
+/// </summary>
+public sealed class WebhookForwarderOptions
+{
+    /// <summary>
+    /// Headless Kubernetes <c>Service</c> name that resolves a per-pod DNS
+    /// entry of the form
+    /// <c>{podId}.{HeadlessServiceName}.{Namespace}.svc.cluster.local</c>.
+    /// Must be set to a non-empty value for the HTTP forwarder to run.
+    /// </summary>
+    public string HeadlessServiceName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Kubernetes namespace the headless service lives in. Must be set to
+    /// a non-empty value for the HTTP forwarder to run.
+    /// </summary>
+    public string Namespace { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cluster-DNS suffix appended after <see cref="Namespace"/>. Defaults
+    /// to the AKS / kubeadm default and rarely needs to change.
+    /// </summary>
+    public string ClusterDomain { get; set; } = "svc.cluster.local";
+
+    /// <summary>
+    /// URL scheme used to reach peer pods. Stays <c>http</c> in-cluster
+    /// because the cluster network is the trust boundary; switch to
+    /// <c>https</c> only when a service mesh terminates TLS at the pod.
+    /// </summary>
+    public string Scheme { get; set; } = "http";
+
+    /// <summary>
+    /// TCP port the peer pod exposes the callback API on.
+    /// </summary>
+    public int Port { get; set; } = 8080;
+
+    /// <summary>
+    /// Path on the peer pod that accepts forwarded callbacks. Must match
+    /// the endpoint mapped by the application; defaults to the path named
+    /// in ADR-0011.
+    /// </summary>
+    public string ForwardPath { get; set; } = "/automation/callbacks/forward";
+
+    /// <summary>
+    /// Per-attempt timeout for the forwarded HTTP request. Should comfortably
+    /// fit under the answer-window SLA in ADR-0003.
+    /// </summary>
+    public TimeSpan AttemptTimeout { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Number of additional retry attempts after the first failed attempt.
+    /// Total HTTP attempts = 1 + <see cref="MaxRetryAttempts"/>.
+    /// </summary>
+    public int MaxRetryAttempts { get; set; } = 2;
+
+    /// <summary>
+    /// Fixed delay between retry attempts. The retry budget is small enough
+    /// that exponential backoff is not warranted; the answer-window SLA is
+    /// the limiting factor.
+    /// </summary>
+    public TimeSpan RetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 }

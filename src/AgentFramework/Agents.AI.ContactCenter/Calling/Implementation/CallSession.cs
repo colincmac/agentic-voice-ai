@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -27,6 +28,8 @@ public sealed class CallSession : ICallSession
     private readonly ICallQualityReporter _quality;
     private readonly CallingTelemetry _telemetry;
     private readonly ILogger<CallSession> _logger;
+    private readonly ICallOwnershipDirectory? _ownership;
+    private readonly IPodHeartbeat? _heartbeat;
     private readonly CancellationTokenSource _cts = new();
     private Activity? _callActivity;
     private DateTimeOffset _lastStateChangeAt = DateTimeOffset.UtcNow;
@@ -69,7 +72,9 @@ public sealed class CallSession : ICallSession
         IServiceScope scope,
         ICallSessionRegistry registry,
         ILogger<CallSession>? logger = null,
-        CallingTelemetry? telemetry = null)
+        CallingTelemetry? telemetry = null,
+        ICallOwnershipDirectory? ownership = null,
+        IPodHeartbeat? heartbeat = null)
     {
         CallId = callId;
         CallerEdge = callerEdge;
@@ -80,6 +85,8 @@ public sealed class CallSession : ICallSession
         _registry = registry;
         _telemetry = telemetry ?? CallingTelemetry.Default;
         _logger = logger ?? NullLogger<CallSession>.Instance;
+        _ownership = ownership;
+        _heartbeat = heartbeat;
         StartedAt = DateTimeOffset.UtcNow;
         _lastStateChangeAt = StartedAt;
     }
@@ -444,6 +451,13 @@ public sealed class CallSession : ICallSession
 
         await TransitionAsync(CallSessionState.Ended).ConfigureAwait(false);
         await _registry.RemoveAsync(CallId, cancellationToken).ConfigureAwait(false);
+
+        if (_ownership is not null)
+        {
+            try { await _ownership.ReleaseAsync(CallId, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Ownership release failed for call {CallId}", CallId); }
+        }
+        _heartbeat?.UntrackOwnedCall(CallId);
 
         var duration = DateTimeOffset.UtcNow - StartedAt;
         _telemetry.CallEnded(CallId, _strategy.Tier, _state, reason, duration);

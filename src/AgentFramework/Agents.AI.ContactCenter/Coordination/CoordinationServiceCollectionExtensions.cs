@@ -211,4 +211,38 @@ public static class CoordinationServiceCollectionExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<PodHeartbeatService>());
         return builder;
     }
+
+    /// <summary>
+    /// Registers the no-op <see cref="IWebhookForwarder"/>
+    /// (<see cref="NullWebhookForwarder"/>). Suitable for dev / Aspire
+    /// where every callback is processed by the single local pod; the
+    /// returned <see cref="WebhookForwardResult"/> tells callers to handle
+    /// the request locally (<see cref="WebhookForwardOutcome.LocalOwner"/>)
+    /// or drop to the reaper path
+    /// (<see cref="WebhookForwardOutcome.OwnerUnreachable"/>) without
+    /// attempting any HTTP transport.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryWebhookForwarder(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IWebhookForwarder, NullWebhookForwarder>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the HTTP-based <see cref="IWebhookForwarder"/>
+    /// (<see cref="HttpWebhookForwarder"/>) per ADR-0011. The forwarder
+    /// targets peer pods via the headless-service DNS template configured
+    /// in <see cref="WebhookForwarderOptions"/>. A dedicated typed
+    /// <see cref="HttpClient"/> is registered for the forwarder so its
+    /// timeout / retry policy is isolated from the application's other
+    /// HTTP clients.
+    /// </summary>
+    public static IHostApplicationBuilder AddHttpWebhookForwarder(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.AddHttpClient<HttpWebhookForwarder>();
+        builder.Services.TryAddSingleton<IWebhookForwarder>(sp => sp.GetRequiredService<HttpWebhookForwarder>());
+        return builder;
+    }
 }
