@@ -98,6 +98,7 @@ builder.Services.AddSingleton<ISpeechSynthesizer, AzureSpeechSynthesizer>(sp =>
 
     return new AzureSpeechSynthesizer(new Uri(endpoint));
 });
+
 var callerIntentWorkflow = ConversationWorkflowFactory.CreateCallerIntentWorkflow(sessionId: "default");
 var dtmfWorkflow = ConversationWorkflowFactory.CreateDtmfWorkflow(sessionId: "default");
 

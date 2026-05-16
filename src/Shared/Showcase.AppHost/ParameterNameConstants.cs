@@ -22,6 +22,10 @@ public static class ParameterNameConstants
     public const string OpenAIEmbeddingModelVersion = "openAIEmbeddingModelVersion";
     public const string ApplicationInsights  = "applicationInsightsName";
     public const string ContainerAppEnvironment  = "containerAppEnvironmentName";
+    public const string ContainerAppGpuEnvironment = "containerAppGpuEnvironmentName";
+    public const string FoundryName = "foundryName";
+
+
     public const string ContainerRegistry  = "containerRegistryName";
     public const string AppConfig = "appConfigName";
     public const string FoundryResourceName = "foundryResourceName";

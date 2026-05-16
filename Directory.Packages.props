@@ -9,7 +9,7 @@
     <MicrosoftExtensionsVersionAI>10.5.0</MicrosoftExtensionsVersionAI>
 
     <MicrosoftAgentsFrameworkVersion>1.2.0</MicrosoftAgentsFrameworkVersion>
-    <AspireVersion>13.2.3</AspireVersion>
+    <AspireVersion>13.3.2</AspireVersion>
     <DaprVersion>1.16.1</DaprVersion>
     <NoWarn>1.16.1</NoWarn>
     
@@ -19,9 +19,8 @@
     <PackageVersion Include="A2A.AspNetCore" Version="0.3.4-preview" />
     <!-- Aspire -->
 
-    <PackageVersion Include="Aspire.Azure.AI.OpenAI" Version="13.2.3-preview.1.26217.6" />
+    <PackageVersion Include="Aspire.Azure.AI.OpenAI" Version="13.3.2-preview.1.26263.11" />
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="$(AspireVersion)" />
-    <PackageVersion Include="Aspire.Hosting.Azure.AIFoundry" Version="13.1.0-preview.1.25616.3" />
     <PackageVersion Include="Aspire.Hosting.Azure.AppConfiguration" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.ApplicationInsights" Version="$(AspireVersion)" />
@@ -30,6 +29,7 @@
     <PackageVersion Include="Aspire.Hosting.Azure.Redis" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Azure.SignalR" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
+    <PackageVersion Include="Aspire.Hosting.Foundry" Version="13.3.2-preview.1.26263.11" />
     <PackageVersion Include="Aspire.Hosting.OpenAI" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Python" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="$(AspireVersion)" />

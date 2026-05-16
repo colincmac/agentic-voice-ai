@@ -6,9 +6,11 @@ using Azure.Provisioning.AppContainers;
 using Azure.Provisioning.Authorization;
 using Azure.Provisioning.CosmosDB;
 using Showcase.AppHost;
-
+using Aspire.Hosting.Foundry;
+using Microsoft.Extensions.Configuration;
 var builder = DistributedApplication.CreateBuilder(args);
 
+var deployEnvironmentParam = builder.AddParameter(ParameterNameConstants.EnvironmentName);
 
 var defaultResourceGroupParam = builder.AddParameter(ParameterNameConstants.ResourceGroupName);
 
@@ -18,6 +20,7 @@ var lawParam = builder.AddParameter(ParameterNameConstants.LogAnalyticsWorkspace
 var lawRgParam = builder.AddParameter(ParameterNameConstants.LogAnalyticsWorkspaceRg);
 
 var containerAppParam = builder.AddParameter(ParameterNameConstants.ContainerAppEnvironment);
+var containerAppGpuParam = builder.AddParameter(ParameterNameConstants.ContainerAppGpuEnvironment);
 var containerRegistryParam = builder.AddParameter(ParameterNameConstants.ContainerRegistry);
 var keyVaultParam = builder.AddParameter(ParameterNameConstants.KeyVault);
 var appConfigParam = builder.AddParameter(ParameterNameConstants.AppConfig);
@@ -59,23 +62,29 @@ var registry = builder.AddAzureContainerRegistry("acr")
 
 var acaEnvironment = builder.AddAzureContainerAppEnvironment("aca-env")
     .AsExisting(containerAppParam, defaultResourceGroupParam)
-    .WithDashboard()
-    .ConfigureInfrastructure(config =>
-    {
-        var resources = config.GetProvisionableResources();
-        var containerEnvironment = resources.OfType<ContainerAppManagedEnvironment>().FirstOrDefault();
-        //containerEnvironment?.AppLogsConfiguration = new ContainerAppLogsConfiguration();
+    .WithContainerRegistry(registry)
+    .WithDashboard();
 
-
-    });
+var acaGpuEnvironment = builder.AddAzureContainerAppEnvironment("aca-gpu-env")
+    .AsExisting(containerAppGpuParam, defaultResourceGroupParam)
+    .WithContainerRegistry(registry)
+    .WithDashboard();
 
 /**
  * OpenAI Deployments
  */
+
+//var foundry = builder.AddFoundry("foundry");
+//var project = foundry.AddProject("my-project");
+
+//var chat = foundry.AddDeployment("realtime", FoundryModel.OpenAI.GptRealtime);
+
 var embedding = builder.AddConnectionString("embedding"); //openai.AddDeployment(name: "embedding", modelName: "text-embedding-3-large", modelVersion: "1");
 var chat = builder.AddConnectionString("chat");//openai.AddDeployment(name: "chat", modelName: "gpt-5.1-chat", modelVersion: "2025-11-13");
 var realtime = builder.AddConnectionString("realtime");//openai.AddDeployment(name: "realtime", modelName: "gpt-realtime", modelVersion: "2025-06-03");
 var voicelive = builder.AddConnectionString("voicelive");//openai.AddDeployment(name: "voicelive", modelName: "gpt-realtime", modelVersion: "2025-06-03");
+var azurespeech = builder.AddConnectionString("azurespeech");//openai.AddDeployment(name: "voicelive", modelName: "gpt-realtime", modelVersion: "2025-06-03");
+var voicebiometrics = builder.AddConnectionString("voicebiometrics");//openai.AddDeployment(name: "voicelive", modelName: "gpt-realtime", modelVersion: "2025-06-03");
 
 /**
  * Database and Storage Resources
@@ -83,23 +92,18 @@ var voicelive = builder.AddConnectionString("voicelive");//openai.AddDeployment(
 
 var cosmos = builder.AddAzureCosmosDB("cosmosdb")
     .AsExisting(cosmosAccountParam, defaultResourceGroupParam)
-    .PublishAsConnectionString()
-    .RunAsPreviewEmulator(emulator =>
-    {
-        emulator.WithDataVolume();
-        emulator.WithDataExplorer();
-    });
+    .PublishAsConnectionString();
 
 var voiceAgentDb = cosmos.AddCosmosDatabase("ContactCenter", "ContactCenter");
 
-var temp2 = builder.AddParameter("redistemprg");
-var temp1 = builder.AddParameter("redistemp");
+//var temp2 = builder.AddParameter("redistemprg");
+//var temp1 = builder.AddParameter("redistemp");
 var redis = builder.AddAzureManagedRedis("redis")
-    .AsExisting(temp1, temp2).PublishAsConnectionString();
+    .AsExisting(redisParam, defaultResourceGroupParam);
 
-//var appConfig =
-//    builder.AddAzureAppConfiguration("appconfig")
-//    .AsExisting(appConfigParam, defaultResourceGroupParam).ExcludeFromManifest();
+var appConfig =
+    builder.AddAzureAppConfiguration("appconfig")
+    .AsExisting(appConfigParam, defaultResourceGroupParam);
 
 var keyVault = builder.AddAzureKeyVault("secrets")
     .AsExisting(keyVaultParam, defaultResourceGroupParam);
@@ -110,7 +114,7 @@ var keyVault = builder.AddAzureKeyVault("secrets")
 #region Projects
 
 //var biometricsApi = builder.AddPythonApp(
-//    name: "python-biometrics-grpc-api",
+//    name: "voice-biometrics-api",
 //    appDirectory: "../../python-services/voice-biometrics",
 //    scriptPath: "server.py")
 //    .WithHttpEndpoint(targetPort: 51001, name: "grpc")
@@ -122,7 +126,8 @@ var keyVault = builder.AddAzureKeyVault("secrets")
 //    .WithReference(appinsights)
 //    .WithReference(keyVault)
 //    .WithReference(appConfig)
-//    .WithComputeEnvironment(acaEnvironment)
+//    .WithComputeEnvironment(acaGpuEnvironment)
+//    .Publi
 //    .WithUv();
 
 var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceagent")
@@ -134,19 +139,21 @@ var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceag
     .WithReference(embedding)
     .WithReference(realtime)
     .WithReference(voicelive)
+    .WithReference(azurespeech)
     // Azure Resources
     .WithReference(voiceAgentDb, "cosmos")
     .WithReference(appinsights)
     .WithReference(keyVault)
-    //.WithReference(appConfig)
+    .WithReference(appConfig)
     .WithReference(redis)
+    .WithReference(voicebiometrics)
+    .WithComputeEnvironment(acaEnvironment)
     //.WithAzureUserAssignedIdentity(sharedMi)
-    //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{biometricsApi.GetEndpoint("grpc")}")
+    //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{builder.Configuration.GetConnectionString("voicebiometrics")}")
     .WithExternalHttpEndpoints();
 
-//.WaitFor(biometricsApi);
 
-builder.AddProject<Projects.Showcase_Agent_IntentAgent>("showcase-agent-intentagent");
+//builder.AddProject<Projects.Showcase_Agent_IntentAgent>("showcase-agent-intentagent");
 
 #endregion
 

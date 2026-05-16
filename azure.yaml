@@ -1,8 +1,16 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
-
-name: citi-hackathon
-services:  
+name: contact-center
+services:
   app:
     language: dotnet
     project: ./src/Shared/Showcase.AppHost/Showcase.AppHost.csproj
     host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+  voice-biometrics-api:
+    project: ./src/python-services/voice-biometrics
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
