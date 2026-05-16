@@ -41,4 +41,8 @@
     <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
     <ProjectReference Include="..\Agents.AI\Agents.AI.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Agents.AI.ContactCenter.Tests" />
+  </ItemGroup>
 </Project>

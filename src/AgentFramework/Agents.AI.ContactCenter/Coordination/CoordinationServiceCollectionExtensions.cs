@@ -33,7 +33,34 @@ public static class CoordinationServiceCollectionExtensions
     public static IHostApplicationBuilder AddClusterIdentity(this IHostApplicationBuilder builder, IConfigurationSection hyperscaleSection)
     {
         builder.Services.Configure<HyperscaleOptions>(hyperscaleSection);
+        builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton<IClusterIdentity, HostClusterIdentity>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the in-process <see cref="IWebhookIdempotencyStore"/>
+    /// (<see cref="InMemoryWebhookIdempotencyStore"/>). Suitable for dev /
+    /// Aspire and for the per-pod fallback in ADR-0004's degraded-mode
+    /// admission contract.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryWebhookIdempotencyStore(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IWebhookIdempotencyStore, InMemoryWebhookIdempotencyStore>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the Redis-backed <see cref="IWebhookIdempotencyStore"/>
+    /// (<see cref="RedisWebhookIdempotencyStore"/>). The caller is responsible
+    /// for registering an <see cref="StackExchange.Redis.IConnectionMultiplexer"/>
+    /// (typically via Aspire's <c>AddRedisClient</c>).
+    /// </summary>
+    public static IHostApplicationBuilder AddRedisWebhookIdempotencyStore(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IWebhookIdempotencyStore, RedisWebhookIdempotencyStore>();
         return builder;
     }
 }

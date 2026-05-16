@@ -14,6 +14,13 @@ public sealed class HyperscaleOptions
     /// leases, capacity coordination, and telemetry tagging.
     /// </summary>
     public ClusterIdentityOptions ClusterIdentity { get; set; } = new();
+
+    /// <summary>
+    /// Webhook dedup token policy. Used by
+    /// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookIdempotencyStore"/>
+    /// to short-circuit duplicate at-least-once mid-call callbacks per ADR-0004.
+    /// </summary>
+    public WebhookIdempotencyOptions WebhookIdempotency { get; set; } = new();
 }
 
 /// <summary>
@@ -48,4 +55,17 @@ public sealed class ClusterIdentityOptions
     /// (Kubernetes default), then <see cref="System.Environment.MachineName"/>.
     /// </summary>
     public string? PodId { get; set; }
+}
+
+/// <summary>
+/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.IWebhookIdempotencyStore"/>.
+/// </summary>
+public sealed class WebhookIdempotencyOptions
+{
+    /// <summary>
+    /// How long a dedup token persists. Must be at least the longest plausible
+    /// retry window of the at-least-once webhook publisher. Default 30 minutes
+    /// matches ADR-0004 for ACS Call Automation callbacks.
+    /// </summary>
+    public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromMinutes(30);
 }
