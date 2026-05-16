@@ -275,7 +275,81 @@ public class DistributedAgentTierResolverTests
         Assert.Equal(AgentTier.DtmfOnly, tier);
     }
 
-    private static (IAgentTierResolver Resolver, IDistributedCapacityTracker Tracker, ITierCeilingProvider Ceiling) CreateResolver(AgentTierOptions? options = null)
+    [Fact]
+    public async Task ResolveAsync_ClusterShare_Half_Halves_The_PerCluster_Cap()
+    {
+        var opts = DefaultOptions();
+        opts.Tiers[AgentTier.RealtimeVoice].MaxConcurrent = 10;
+        var (resolver, tracker, _) = CreateResolver(opts, clusterShare: 0.5);
+
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal(AgentTier.RealtimeVoice, await resolver.ResolveAsync());
+        }
+        var sixth = await resolver.ResolveAsync();
+
+        Assert.Equal(AgentTier.ChatCompletionTts, sixth);
+        Assert.Equal(5, await tracker.GetCountAsync(AgentTier.RealtimeVoice));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ClusterShare_Floors_Fractional_Cap()
+    {
+        var opts = DefaultOptions();
+        opts.Tiers[AgentTier.RealtimeVoice].MaxConcurrent = 100;
+        var (resolver, tracker, _) = CreateResolver(opts, clusterShare: 0.333);
+
+        for (var i = 0; i < 33; i++)
+        {
+            Assert.Equal(AgentTier.RealtimeVoice, await resolver.ResolveAsync());
+        }
+        var thirtyFourth = await resolver.ResolveAsync();
+
+        Assert.Equal(AgentTier.ChatCompletionTts, thirtyFourth);
+        Assert.Equal(33, await tracker.GetCountAsync(AgentTier.RealtimeVoice));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ClusterShare_One_Leaves_Cap_Unchanged()
+    {
+        var opts = DefaultOptions();
+        opts.Tiers[AgentTier.RealtimeVoice].MaxConcurrent = 2;
+        var (resolver, tracker, _) = CreateResolver(opts, clusterShare: 1.0);
+
+        Assert.Equal(AgentTier.RealtimeVoice, await resolver.ResolveAsync());
+        Assert.Equal(AgentTier.RealtimeVoice, await resolver.ResolveAsync());
+        Assert.Equal(AgentTier.ChatCompletionTts, await resolver.ResolveAsync());
+        Assert.Equal(2, await tracker.GetCountAsync(AgentTier.RealtimeVoice));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ClusterShare_NonPositive_Throws_When_All_Caps_Bounded()
+    {
+        var opts = DefaultOptions();
+        var (resolver, tracker, _) = CreateResolver(opts, clusterShare: 0.0);
+
+        await Assert.ThrowsAsync<CapacityExhaustedException>(() => resolver.ResolveAsync().AsTask());
+        Assert.Equal(0, await tracker.GetCountAsync(AgentTier.RealtimeVoice));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ClusterShare_PassesThrough_Unbounded_Cap()
+    {
+        var opts = DefaultOptions();
+        opts.Tiers[AgentTier.RealtimeVoice].MaxConcurrent = null;
+        var (resolver, tracker, _) = CreateResolver(opts, clusterShare: 0.5);
+
+        for (var i = 0; i < 50; i++)
+        {
+            Assert.Equal(AgentTier.RealtimeVoice, await resolver.ResolveAsync());
+        }
+
+        Assert.Equal(50, await tracker.GetCountAsync(AgentTier.RealtimeVoice));
+    }
+
+    private static (IAgentTierResolver Resolver, IDistributedCapacityTracker Tracker, ITierCeilingProvider Ceiling) CreateResolver(
+        AgentTierOptions? options = null,
+        double? clusterShare = null)
     {
         var opts = options ?? DefaultOptions();
         var monitor = new TestOptionsMonitor<AgentTierOptions>(opts);
@@ -284,11 +358,18 @@ public class DistributedAgentTierResolverTests
             TierCeiling = new TierCeilingOptions { DefaultCeiling = AgentTier.RealtimeVoice },
         }));
         var tracker = new InMemoryDistributedCapacityTracker();
+        var hyperscale = clusterShare is { } share
+            ? new TestOptionsMonitor<HyperscaleOptions>(new HyperscaleOptions
+            {
+                CapacityCoordination = new CapacityCoordinationOptions { ClusterShare = share },
+            })
+            : null;
         var resolver = new DistributedAgentTierResolver(
             monitor,
             ceiling,
             tracker,
-            NullLogger<DistributedAgentTierResolver>.Instance);
+            NullLogger<DistributedAgentTierResolver>.Instance,
+            hyperscale);
         return (resolver, tracker, ceiling);
     }
 

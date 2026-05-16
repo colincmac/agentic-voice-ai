@@ -34,17 +34,20 @@ public sealed class DistributedAgentTierResolver : IAgentTierResolver
     private readonly ITierCeilingProvider _ceilingProvider;
     private readonly IDistributedCapacityTracker _capacityTracker;
     private readonly ILogger<DistributedAgentTierResolver> _logger;
+    private readonly IOptionsMonitor<HyperscaleOptions>? _hyperscaleOptions;
 
     public DistributedAgentTierResolver(
         IOptionsMonitor<AgentTierOptions> options,
         ITierCeilingProvider ceilingProvider,
         IDistributedCapacityTracker capacityTracker,
-        ILogger<DistributedAgentTierResolver> logger)
+        ILogger<DistributedAgentTierResolver> logger,
+        IOptionsMonitor<HyperscaleOptions>? hyperscaleOptions = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _ceilingProvider = ceilingProvider ?? throw new ArgumentNullException(nameof(ceilingProvider));
         _capacityTracker = capacityTracker ?? throw new ArgumentNullException(nameof(capacityTracker));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _hyperscaleOptions = hyperscaleOptions;
     }
 
     public async ValueTask<AgentTier> ResolveAsync(AgentTier? preferredTier = null, CancellationToken cancellationToken = default)
@@ -111,7 +114,8 @@ public sealed class DistributedAgentTierResolver : IAgentTierResolver
             return null;
         }
 
-        var cap = cfg.MaxConcurrent is { } m ? m : long.MaxValue;
+        var rawCap = cfg.MaxConcurrent is { } m ? m : long.MaxValue;
+        var cap = ApplyClusterShare(rawCap);
         if (cap <= 0)
         {
             return null;
@@ -130,6 +134,35 @@ public sealed class DistributedAgentTierResolver : IAgentTierResolver
 
         _logger.LogDebug("Admitted to tier {Tier} at count {Count}/{Cap}.", tier, result.Count, cap);
         return tier;
+    }
+
+    /// <summary>
+    /// Scales <paramref name="rawCap"/> by the configured
+    /// <see cref="CapacityCoordinationOptions.ClusterShare"/> per ADR-0010.
+    /// Floors fractional results so the cluster under-admits rather than
+    /// over-admits at the boundary; clamps an out-of-range share to
+    /// <c>(0, 1]</c> for the same reason. Pass-through when no
+    /// <see cref="HyperscaleOptions"/> monitor is registered, when share is
+    /// at the ceiling, or when the cap is unbounded.
+    /// </summary>
+    private long ApplyClusterShare(long rawCap)
+    {
+        if (_hyperscaleOptions is null || rawCap == long.MaxValue)
+        {
+            return rawCap;
+        }
+
+        var share = _hyperscaleOptions.CurrentValue.CapacityCoordination.ClusterShare;
+        if (double.IsNaN(share) || share <= 0)
+        {
+            return 0;
+        }
+        if (share >= 1.0)
+        {
+            return rawCap;
+        }
+
+        return (long)Math.Floor(rawCap * share);
     }
 
     private static AgentTierConfig ResolveConfig(AgentTierOptions opts, AgentTier tier)

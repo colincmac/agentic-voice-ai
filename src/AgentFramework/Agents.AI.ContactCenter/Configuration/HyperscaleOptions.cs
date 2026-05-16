@@ -52,6 +52,14 @@ public sealed class HyperscaleOptions
     /// when a streaming-mode mid-call event lands on a non-owning pod.
     /// </summary>
     public WebhookForwarderOptions WebhookForwarder { get; set; } = new();
+
+    /// <summary>
+    /// Per-cluster capacity coordination policy used by
+    /// <see cref="Agents.AI.ContactCenter.Calling.Implementation.DistributedAgentTierResolver"/>
+    /// to scale the per-tier <c>MaxConcurrent</c> cap to this cluster's slice
+    /// of the global active-active pool (ADR-0010).
+    /// </summary>
+    public CapacityCoordinationOptions CapacityCoordination { get; set; } = new();
 }
 
 /// <summary>
@@ -166,6 +174,24 @@ public sealed class PodHeartbeatOptions
     /// reaper behavior without unmounting the heartbeat.
     /// </summary>
     public bool ReaperEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Maximum time <see cref="Agents.AI.ContactCenter.Coordination.Implementation.PodHeartbeatService.StopAsync"/>
+    /// will wait for the pod-lease release to complete before falling through
+    /// and letting the lease expire via TTL. Bounds graceful-shutdown latency
+    /// so a slow / hung Redis cannot stall pod termination past the
+    /// container-orchestrator's own grace period.
+    /// </summary>
+    public TimeSpan DrainTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// When <c>false</c>, <see cref="Agents.AI.ContactCenter.Coordination.Implementation.PodHeartbeatService.StopAsync"/>
+    /// skips the explicit pod-lease release and lets the lease expire via
+    /// TTL. Useful for crash-loop scenarios where preserving the lease lets
+    /// the orphan-detection path observe the pod outage uniformly across
+    /// drain types. Defaults to <c>true</c> (eager release on graceful stop).
+    /// </summary>
+    public bool ReleasePodLeaseOnStop { get; set; } = true;
 }
 
 /// <summary>
@@ -234,4 +260,24 @@ public sealed class WebhookForwarderOptions
     /// the limiting factor.
     /// </summary>
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+}
+
+/// <summary>
+/// Configuration for the active-active capacity split per ADR-0010. Each
+/// cluster admits a fraction of the per-tier global cap so the sum across
+/// clusters does not exceed the cap even if one cluster's clients are not
+/// aware that the other is up.
+/// </summary>
+public sealed class CapacityCoordinationOptions
+{
+    /// <summary>
+    /// Fraction of the per-tier <c>MaxConcurrent</c> cap this cluster is
+    /// allowed to admit. Must be in <c>(0, 1]</c>. <c>1.0</c> (the default)
+    /// disables sharding — appropriate for single-cluster deployments and
+    /// the in-memory dev path. In a 2-cluster active-active topology, set
+    /// each cluster to <c>0.5</c>; values outside the range are clamped to
+    /// <c>(0, 1]</c> by the resolver to fail-safe (under-admit) rather than
+    /// over-admit.
+    /// </summary>
+    public double ClusterShare { get; set; } = 1.0;
 }

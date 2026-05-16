@@ -160,12 +160,41 @@ public class PodHeartbeatServiceTests
         // No throw expected.
     }
 
+    [Fact]
+    public async Task StopAsync_Skips_Release_When_ReleasePodLeaseOnStop_Disabled()
+    {
+        var harness = CreateHarness(releasePodLeaseOnStop: false);
+        await harness.Heartbeat.RunHeartbeatTickAsync(CancellationToken.None);
+
+        await harness.Heartbeat.StopAsync(CancellationToken.None);
+
+        Assert.True(await harness.PodLeases.IsAliveAsync(harness.Identity.ClusterId, harness.Identity.PodId));
+    }
+
+    [Fact]
+    public async Task StopAsync_Bounded_By_DrainTimeout_When_Release_Hangs()
+    {
+        var podLeases = new HangingPodLeaseStore();
+        var harness = CreateHarness(
+            podLeases: podLeases,
+            drainTimeout: TimeSpan.FromMilliseconds(50));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await harness.Heartbeat.StopAsync(CancellationToken.None);
+        sw.Stop();
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"StopAsync took {sw.Elapsed} — expected drain-timeout-bounded.");
+        Assert.True(podLeases.ReleaseStarted, "Release should have been invoked before timeout.");
+    }
+
     private static Harness CreateHarness(
         IPodLeaseStore? podLeases = null,
         TimeSpan? leaseDuration = null,
         TimeSpan? heartbeatInterval = null,
         TimeSpan? reaperInterval = null,
-        bool reaperEnabled = true)
+        bool reaperEnabled = true,
+        bool releasePodLeaseOnStop = true,
+        TimeSpan? drainTimeout = null)
     {
         var time = new TestTimeProvider(DateTimeOffset.UtcNow);
         var identity = new MutableClusterIdentity
@@ -187,6 +216,8 @@ public class PodHeartbeatServiceTests
                 LeaseDuration = leaseDuration ?? TimeSpan.FromSeconds(90),
                 ReaperInterval = reaperInterval ?? TimeSpan.FromSeconds(60),
                 ReaperEnabled = reaperEnabled,
+                ReleasePodLeaseOnStop = releasePodLeaseOnStop,
+                DrainTimeout = drainTimeout ?? TimeSpan.FromSeconds(5),
             },
         };
 
@@ -219,6 +250,23 @@ public class PodHeartbeatServiceTests
             => throw new InvalidOperationException("simulated transient failure");
         public Task<bool> IsAliveAsync(string clusterId, string podId, CancellationToken cancellationToken = default)
             => Task.FromResult(false);
+    }
+
+    private sealed class HangingPodLeaseStore : IPodLeaseStore
+    {
+        public bool ReleaseStarted { get; private set; }
+
+        public Task RenewAsync(TimeSpan leaseDuration, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public async Task ReleaseAsync(CancellationToken cancellationToken = default)
+        {
+            ReleaseStarted = true;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        }
+
+        public Task<bool> IsAliveAsync(string clusterId, string podId, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
     }
 
     private sealed class MutableClusterIdentity : IClusterIdentity

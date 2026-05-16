@@ -91,9 +91,25 @@ public sealed class PodHeartbeatService : BackgroundService, IPodHeartbeat
     {
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
 
+        var settings = _options.CurrentValue.PodHeartbeat;
+        if (!settings.ReleasePodLeaseOnStop)
+        {
+            return;
+        }
+
+        var drainTimeout = settings.DrainTimeout > TimeSpan.Zero
+            ? settings.DrainTimeout
+            : TimeSpan.FromSeconds(5);
+
+        using var timeout = new CancellationTokenSource(drainTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
-            await _podLeases.ReleaseAsync(cancellationToken).ConfigureAwait(false);
+            await _podLeases.ReleaseAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Pod lease release exceeded drain timeout {DrainTimeout}; lease will expire via TTL.", drainTimeout);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
