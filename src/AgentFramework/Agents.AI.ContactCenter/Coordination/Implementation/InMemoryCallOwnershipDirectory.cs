@@ -124,6 +124,38 @@ public sealed class InMemoryCallOwnershipDirectory : ICallOwnershipDirectory
         }
     }
 
+    public async Task<int> ReapOrphansAsync(IPodLeaseStore podLeases, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(podLeases);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var now = _timeProvider.GetUtcNow();
+        var reaped = 0;
+
+        foreach (var entry in _owners)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (entry.Value.LeaseUntil > now)
+            {
+                continue;
+            }
+
+            var alive = await podLeases.IsAliveAsync(entry.Value.ClusterId, entry.Value.PodId, cancellationToken).ConfigureAwait(false);
+            if (alive)
+            {
+                continue;
+            }
+
+            if (_owners.TryRemove(new KeyValuePair<string, CallOwnership>(entry.Key, entry.Value)))
+            {
+                reaped++;
+            }
+        }
+
+        return reaped;
+    }
+
     private CallOwnership BuildLocalOwner(CallOwnershipKind kind, DateTimeOffset now) =>
         new(_identity.ClusterId, _identity.PodId, _identity.InstanceId, kind, now + _leaseDuration);
 }

@@ -36,6 +36,14 @@ public sealed class HyperscaleOptions
     /// to broadcast and cache the active degradation ceiling (ADR-0008).
     /// </summary>
     public TierCeilingOptions TierCeiling { get; set; } = new();
+
+    /// <summary>
+    /// Pod heartbeat and reaper cadence used by
+    /// <see cref="Agents.AI.ContactCenter.Coordination.IPodHeartbeat"/> to
+    /// renew the local <c>pod:lease:*</c> + every owned-call lease and to
+    /// sweep orphaned <c>owner:*</c> entries (ADR-0011).
+    /// </summary>
+    public PodHeartbeatOptions PodHeartbeat { get; set; } = new();
 }
 
 /// <summary>
@@ -112,4 +120,42 @@ public sealed class TierCeilingOptions
     /// calls at the highest tier the per-tier capacity counter allows.
     /// </summary>
     public AgentTier DefaultCeiling { get; set; } = AgentTier.RealtimeVoice;
+}
+
+/// <summary>
+/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.IPodHeartbeat"/>
+/// per ADR-0011. The heartbeat lease window is intentionally distinct from
+/// <see cref="CallOwnershipOptions.LeaseDuration"/>: the pod lease and the
+/// per-call lease are renewed in the same tick but Redis applies independent
+/// TTLs to each key family.
+/// </summary>
+public sealed class PodHeartbeatOptions
+{
+    /// <summary>
+    /// How often the pod renews its own <c>pod:lease:*</c> and the lease of
+    /// every tracked owned call. Default 30 s per ADR-0011.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// TTL written by the heartbeat onto <c>pod:lease:{clusterId}:{podId}</c>.
+    /// Should be at least 3× <see cref="HeartbeatInterval"/> so a single
+    /// missed tick does not orphan the pod. Default 90 s per ADR-0011.
+    /// </summary>
+    public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(90);
+
+    /// <summary>
+    /// How often the heartbeat invokes the cross-pod reaper sweep. Defaults
+    /// to 60 s — twice the heartbeat cadence — so reap pressure stays low
+    /// while still bounding orphan lifetime to roughly
+    /// <see cref="LeaseDuration"/> + this interval.
+    /// </summary>
+    public TimeSpan ReaperInterval { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// When <c>false</c> the heartbeat still renews pod / call leases but
+    /// does not run the orphan sweep. Used during incident triage to freeze
+    /// reaper behavior without unmounting the heartbeat.
+    /// </summary>
+    public bool ReaperEnabled { get; set; } = true;
 }

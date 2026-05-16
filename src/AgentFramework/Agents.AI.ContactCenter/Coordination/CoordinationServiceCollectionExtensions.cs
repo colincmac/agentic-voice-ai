@@ -1,3 +1,5 @@
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Calling.Implementation;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination.Implementation;
 using Microsoft.Extensions.Configuration;
@@ -120,6 +122,93 @@ public static class CoordinationServiceCollectionExtensions
         builder.Services.TryAddSingleton<RedisTierCeilingProvider>();
         builder.Services.TryAddSingleton<ITierCeilingProvider>(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the in-process <see cref="IDistributedCapacityTracker"/>
+    /// (<see cref="InMemoryDistributedCapacityTracker"/>). Suitable for dev /
+    /// Aspire and for the per-pod cluster-local fallback in ADR-0004's
+    /// degraded-mode admission contract.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryDistributedCapacityTracker(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IDistributedCapacityTracker, InMemoryDistributedCapacityTracker>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the Redis-backed <see cref="IDistributedCapacityTracker"/>
+    /// (<see cref="RedisDistributedCapacityTracker"/>) per ADR-0004. The
+    /// caller is responsible for registering an
+    /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> (typically via
+    /// Aspire's <c>AddRedisClient</c>).
+    /// </summary>
+    public static IHostApplicationBuilder AddRedisDistributedCapacityTracker(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IDistributedCapacityTracker, RedisDistributedCapacityTracker>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the distributed <see cref="IAgentTierResolver"/>
+    /// (<see cref="DistributedAgentTierResolver"/>) that composes the
+    /// active <see cref="ITierCeilingProvider"/> (ADR-0008) and
+    /// <see cref="IDistributedCapacityTracker"/> (ADR-0004) into a single
+    /// atomic admit decision. Also binds
+    /// <see cref="AgentTierOptions"/> from
+    /// <see cref="AgentTierOptions.SectionName"/>. Callers must also
+    /// register an <see cref="ITierCeilingProvider"/> and an
+    /// <see cref="IDistributedCapacityTracker"/> — either the in-memory or
+    /// Redis flavour.
+    /// </summary>
+    public static IHostApplicationBuilder AddDistributedAgentTierResolver(this IHostApplicationBuilder builder)
+    {
+        builder.Services.Configure<AgentTierOptions>(builder.Configuration.GetSection(AgentTierOptions.SectionName));
+        builder.Services.TryAddSingleton<IAgentTierResolver, DistributedAgentTierResolver>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the in-process <see cref="IPodHeartbeat"/>
+    /// (<see cref="PodHeartbeatService"/>) backed by an
+    /// <see cref="InMemoryPodLeaseStore"/>. Suitable for dev / Aspire; the
+    /// cross-pod reaper is degenerate (only the local pod exists) but the
+    /// owned-call lease renewal loop still keeps in-memory
+    /// <see cref="ICallOwnershipDirectory"/> entries fresh. Requires an
+    /// <see cref="ICallOwnershipDirectory"/> to already be registered.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryPodHeartbeat(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IPodLeaseStore, InMemoryPodLeaseStore>();
+        builder.Services.TryAddSingleton<PodHeartbeatService>();
+        builder.Services.TryAddSingleton<IPodHeartbeat>(sp => sp.GetRequiredService<PodHeartbeatService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<PodHeartbeatService>());
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the Redis-backed <see cref="IPodHeartbeat"/>
+    /// (<see cref="PodHeartbeatService"/>) and <see cref="IPodLeaseStore"/>
+    /// (<see cref="RedisPodLeaseStore"/>) per ADR-0011. The caller is
+    /// responsible for registering an
+    /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> (typically
+    /// via Aspire's <c>AddRedisClient</c>) and an
+    /// <see cref="ICallOwnershipDirectory"/> (the Redis flavour for the
+    /// reaper sweep to do anything meaningful). The same singleton is wired
+    /// as <see cref="IPodHeartbeat"/> and as an <see cref="IHostedService"/>
+    /// so the heartbeat loop starts before the first <c>IncomingCall</c>.
+    /// </summary>
+    public static IHostApplicationBuilder AddRedisPodHeartbeat(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IPodLeaseStore, RedisPodLeaseStore>();
+        builder.Services.TryAddSingleton<PodHeartbeatService>();
+        builder.Services.TryAddSingleton<IPodHeartbeat>(sp => sp.GetRequiredService<PodHeartbeatService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<PodHeartbeatService>());
         return builder;
     }
 }

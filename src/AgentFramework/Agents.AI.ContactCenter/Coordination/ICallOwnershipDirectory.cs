@@ -65,4 +65,18 @@ public interface ICallOwnershipDirectory
     Task<bool> ReleaseAsync(
         string callConnectionId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sweeps the directory for orphaned <c>owner:*</c> entries per
+    /// ADR-0011's reaper path: an entry is reaped when its lease has
+    /// expired <strong>and</strong> the owning pod's
+    /// <c>pod:lease:{clusterId}:{podId}</c> is no longer alive (looked up
+    /// via <paramref name="podLeases"/>). Reap claims are atomic
+    /// compare-and-DEL so two reapers racing for the same orphan do not
+    /// double-process.
+    /// </summary>
+    /// <returns>The number of orphaned entries removed by this sweep.</returns>
+    Task<int> ReapOrphansAsync(
+        IPodLeaseStore podLeases,
+        CancellationToken cancellationToken = default);
 }

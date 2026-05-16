@@ -32,4 +32,26 @@ internal static class CoordinationRedisKeys
     /// </summary>
     public static string ClusterTierCeiling(string clusterId)
         => $"ceiling:cluster:{{{clusterId}}}";
+
+    /// <summary>
+    /// <c>cap:tier:{tier}</c> — global per-tier admission counter per
+    /// ADR-0004. The literal-brace hash tag is the integer tier code so each
+    /// tier's counter lands on its own Redis shard, deliberately distinct
+    /// from per-call <c>{callConnectionId}</c> keys. Operations are
+    /// <c>INCR</c> / <c>DECR</c> via the
+    /// <see cref="IDistributedCapacityTracker"/> Lua scripts.
+    /// </summary>
+    public static string CapacityCounter(Configuration.AgentTier tier)
+        => $"cap:tier:{{{(int)tier}}}";
+
+    /// <summary>
+    /// <c>pod:lease:{clusterId}:{podId}</c> — pod heartbeat lease per
+    /// ADR-0011. The hash tag on <c>{clusterId}</c> keeps every pod lease
+    /// for one cluster on the same shard so the reaper's cluster-scoped
+    /// scans stay local. The value is the local
+    /// <see cref="IClusterIdentity.InstanceId"/>; TTL is
+    /// <c>PodHeartbeatOptions.LeaseDuration</c>.
+    /// </summary>
+    public static string PodLease(string clusterId, string podId)
+        => $"pod:lease:{{{clusterId}}}:{podId}";
 }
