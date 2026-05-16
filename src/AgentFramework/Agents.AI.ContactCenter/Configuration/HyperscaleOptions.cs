@@ -21,6 +21,14 @@ public sealed class HyperscaleOptions
     /// to short-circuit duplicate at-least-once mid-call callbacks per ADR-0004.
     /// </summary>
     public WebhookIdempotencyOptions WebhookIdempotency { get; set; } = new();
+
+    /// <summary>
+    /// Per-call ownership lease policy used by
+    /// <see cref="Agents.AI.ContactCenter.Coordination.ICallOwnershipDirectory"/>
+    /// to bind a call to the pod that holds its bi-di WS / verb session
+    /// (ADR-0011).
+    /// </summary>
+    public CallOwnershipOptions CallOwnership { get; set; } = new();
 }
 
 /// <summary>
@@ -68,4 +76,19 @@ public sealed class WebhookIdempotencyOptions
     /// matches ADR-0004 for ACS Call Automation callbacks.
     /// </summary>
     public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromMinutes(30);
+}
+
+/// <summary>
+/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.ICallOwnershipDirectory"/>.
+/// </summary>
+public sealed class CallOwnershipOptions
+{
+    /// <summary>
+    /// How long a per-call ownership lease lives before the directory
+    /// considers the owner dead and the call reapable. The pod heartbeat
+    /// (ADR-0011) renews owned-call leases at one-third of this interval, so
+    /// a single missed heartbeat does not orphan calls. Default 90 s matches
+    /// the lease window in ADR-0011.
+    /// </summary>
+    public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(90);
 }

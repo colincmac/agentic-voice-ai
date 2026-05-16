@@ -63,4 +63,31 @@ public static class CoordinationServiceCollectionExtensions
         builder.Services.TryAddSingleton<IWebhookIdempotencyStore, RedisWebhookIdempotencyStore>();
         return builder;
     }
+
+    /// <summary>
+    /// Registers the in-process <see cref="ICallOwnershipDirectory"/>
+    /// (<see cref="InMemoryCallOwnershipDirectory"/>). Suitable for dev /
+    /// Aspire and for the per-pod fallback in ADR-0004's degraded-mode
+    /// admission contract; not suitable for cross-pod callback dispatch.
+    /// </summary>
+    public static IHostApplicationBuilder AddInMemoryCallOwnershipDirectory(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<ICallOwnershipDirectory, InMemoryCallOwnershipDirectory>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the Redis-backed <see cref="ICallOwnershipDirectory"/>
+    /// (<see cref="RedisCallOwnershipDirectory"/>) per ADR-0011. The caller is
+    /// responsible for registering an
+    /// <see cref="StackExchange.Redis.IConnectionMultiplexer"/> (typically via
+    /// Aspire's <c>AddRedisClient</c>).
+    /// </summary>
+    public static IHostApplicationBuilder AddRedisCallOwnershipDirectory(this IHostApplicationBuilder builder)
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<ICallOwnershipDirectory, RedisCallOwnershipDirectory>();
+        return builder;
+    }
 }

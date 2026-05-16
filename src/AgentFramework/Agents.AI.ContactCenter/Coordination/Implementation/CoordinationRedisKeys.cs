@@ -14,4 +14,13 @@ internal static class CoordinationRedisKeys
     /// </summary>
     public static string Dedup(string callConnectionId, int sequenceNumber)
         => $"dedup:{{{callConnectionId}}}:{sequenceNumber}";
+
+    /// <summary>
+    /// <c>owner:{callConnectionId}</c> — call ownership lease per ADR-0011.
+    /// Value is the <see cref="CallOwnershipCodec"/>-encoded
+    /// <see cref="Coordination.CallOwnership"/>; TTL matches
+    /// <c>CallOwnershipOptions.LeaseDuration</c>.
+    /// </summary>
+    public static string Ownership(string callConnectionId)
+        => $"owner:{{{callConnectionId}}}";
 }
