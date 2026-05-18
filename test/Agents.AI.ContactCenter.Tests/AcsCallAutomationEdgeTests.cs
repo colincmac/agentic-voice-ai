@@ -2,7 +2,7 @@ using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using AcsCallAutomationModelFactory = global::Azure.Communication.CallAutomation.CallAutomationModelFactory;

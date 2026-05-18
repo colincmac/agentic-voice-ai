@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// HTTP-based <see cref="IWebhookForwarder"/> that targets a peer pod via

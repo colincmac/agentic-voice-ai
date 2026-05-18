@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Options;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// Default <see cref="IClusterIdentity"/> implementation that resolves

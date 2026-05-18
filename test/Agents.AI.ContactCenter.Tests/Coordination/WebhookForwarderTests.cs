@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Coordination.Implementation;
+using Agents.AI.ContactCenter.Coordination.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +13,7 @@ public class WebhookForwarderTests
     private const string CallbackPath = "/automation/callbacks/server-call-123";
     private const string ContentType = "application/cloudevents+json";
 
-    private static readonly byte[] SampleBody = Encoding.UTF8.GetBytes("[{\"type\":\"Microsoft.Communication.RecognizeCompleted\"}]");
+    private static readonly byte[] sampleBody = Encoding.UTF8.GetBytes("[{\"type\":\"Microsoft.Communication.RecognizeCompleted\"}]");
 
     // ---------- NullWebhookForwarder ----------
 
@@ -24,7 +24,7 @@ public class WebhookForwarderTests
         var forwarder = new NullWebhookForwarder(identity);
         var owner = CreateOwner("c-1", "pod-A");
 
-        var result = await forwarder.TryForwardAsync(owner, CallbackPath, SampleBody, ContentType);
+        var result = await forwarder.TryForwardAsync(owner, CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.LocalOwner, result.Outcome);
         Assert.True(result.IsSuccess is false);
@@ -38,7 +38,7 @@ public class WebhookForwarderTests
         var forwarder = new NullWebhookForwarder(identity);
         var owner = CreateOwner("c-1", "pod-B");
 
-        var result = await forwarder.TryForwardAsync(owner, CallbackPath, SampleBody, ContentType);
+        var result = await forwarder.TryForwardAsync(owner, CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.OwnerUnreachable, result.Outcome);
     }
@@ -51,7 +51,7 @@ public class WebhookForwarderTests
         cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => forwarder.TryForwardAsync(CreateOwner("c", "p"), CallbackPath, SampleBody, ContentType, headers: null, cts.Token));
+            () => forwarder.TryForwardAsync(CreateOwner("c", "p"), CallbackPath, sampleBody, ContentType, headers: null, cts.Token));
     }
 
     // ---------- URL building ----------
@@ -100,7 +100,7 @@ public class WebhookForwarderTests
         var harness = CreateHarness();
         var owner = CreateOwner(harness.Identity.ClusterId, harness.Identity.PodId);
 
-        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, SampleBody, ContentType);
+        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.LocalOwner, result.Outcome);
         Assert.Empty(harness.Handler.Requests);
@@ -112,7 +112,7 @@ public class WebhookForwarderTests
         var harness = CreateHarness();
         var owner = CreateOwner(clusterId: "other-cluster", podId: "pod-B");
 
-        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, SampleBody, ContentType);
+        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.CrossClusterBlocked, result.Outcome);
         Assert.Empty(harness.Handler.Requests);
@@ -128,7 +128,7 @@ public class WebhookForwarderTests
         });
 
         var result = await harness.Forwarder.TryForwardAsync(
-            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType);
+            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.OwnerUnreachable, result.Outcome);
         Assert.Empty(harness.Handler.Requests);
@@ -146,7 +146,7 @@ public class WebhookForwarderTests
             ["traceparent"] = "00-abcdef0123456789abcdef0123456789-0123456789abcdef-01",
         };
 
-        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, SampleBody, ContentType, extra);
+        var result = await harness.Forwarder.TryForwardAsync(owner, CallbackPath, sampleBody, ContentType, extra);
 
         Assert.Equal(WebhookForwardOutcome.Forwarded, result.Outcome);
         Assert.True(result.IsSuccess);
@@ -159,7 +159,7 @@ public class WebhookForwarderTests
         Assert.Equal(8080, sent.Uri.Port);
         Assert.Equal("/automation/callbacks/forward", sent.Uri.AbsolutePath);
         Assert.Equal(ContentType, sent.ContentType);
-        Assert.Equal(SampleBody, sent.Body);
+        Assert.Equal(sampleBody, sent.Body);
         Assert.Equal(CallbackPath, sent.Headers[HttpWebhookForwarder.ForwardedPathHeader]);
         Assert.Equal(harness.Identity.InstanceId, sent.Headers[HttpWebhookForwarder.ForwardedByHeader]);
         Assert.Equal(extra["traceparent"], sent.Headers["traceparent"]);
@@ -174,7 +174,7 @@ public class WebhookForwarderTests
             new HttpResponseMessage(HttpStatusCode.Accepted));
 
         var result = await harness.Forwarder.TryForwardAsync(
-            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType);
+            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.Forwarded, result.Outcome);
         Assert.Equal(202, result.StatusCode);
@@ -190,7 +190,7 @@ public class WebhookForwarderTests
             new HttpResponseMessage(HttpStatusCode.OK));
 
         var result = await harness.Forwarder.TryForwardAsync(
-            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType);
+            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.RemoteRejected, result.Outcome);
         Assert.Equal(404, result.StatusCode);
@@ -206,7 +206,7 @@ public class WebhookForwarderTests
             new HttpResponseMessage(HttpStatusCode.BadGateway));
 
         var result = await harness.Forwarder.TryForwardAsync(
-            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType);
+            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.RemoteRejected, result.Outcome);
         Assert.Equal(502, result.StatusCode);
@@ -220,7 +220,7 @@ public class WebhookForwarderTests
         harness.Handler.AlwaysThrow(new HttpRequestException("connection refused"));
 
         var result = await harness.Forwarder.TryForwardAsync(
-            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType);
+            CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType);
 
         Assert.Equal(WebhookForwardOutcome.OwnerUnreachable, result.Outcome);
         Assert.Null(result.StatusCode);
@@ -238,7 +238,7 @@ public class WebhookForwarderTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             harness.Forwarder.TryForwardAsync(
-                CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, SampleBody, ContentType, headers: null, cts.Token));
+                CreateOwner(harness.Identity.ClusterId, "pod-B"), CallbackPath, sampleBody, ContentType, headers: null, cts.Token));
 
         Assert.Empty(harness.Handler.Requests);
     }

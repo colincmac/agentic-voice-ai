@@ -2,7 +2,7 @@ using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using AcsDtmfTone = Azure.Communication.CallAutomation.DtmfTone;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Production adapter that forwards directly to <see cref="CallMedia"/> on a real

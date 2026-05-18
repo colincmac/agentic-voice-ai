@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// Pipe-delimited wire format for <see cref="CallOwnership"/>:

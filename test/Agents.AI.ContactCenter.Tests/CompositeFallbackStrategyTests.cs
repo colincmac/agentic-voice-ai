@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;

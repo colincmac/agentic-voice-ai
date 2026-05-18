@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Coordination.Implementation;
+using Agents.AI.ContactCenter.Coordination.Core;
 using Agents.AI.ContactCenter.Exceptions;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;

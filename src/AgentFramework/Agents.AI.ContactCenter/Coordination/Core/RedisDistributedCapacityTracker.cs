@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.Configuration;
 using StackExchange.Redis;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// Distributed <see cref="IDistributedCapacityTracker"/> backed by Azure

@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication;
 using Azure.Communication.CallAutomation;

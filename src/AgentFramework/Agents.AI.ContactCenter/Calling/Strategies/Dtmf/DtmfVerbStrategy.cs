@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 

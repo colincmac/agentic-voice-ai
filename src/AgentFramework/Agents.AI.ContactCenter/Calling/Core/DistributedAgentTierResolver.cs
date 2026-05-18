@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Exceptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Distributed <see cref="IAgentTierResolver"/> that composes the per-cluster

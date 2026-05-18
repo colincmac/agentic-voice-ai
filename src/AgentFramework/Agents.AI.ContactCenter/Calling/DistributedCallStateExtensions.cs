@@ -49,8 +49,8 @@ public static class DistributedCallStateExtensions
     /// <remarks>
     /// Once registered, <see cref="ICallOwnershipDirectory"/> and
     /// <see cref="IPodHeartbeat"/> are picked up via constructor injection
-    /// by <see cref="Implementation.CallSessionFactory"/> and
-    /// <see cref="Implementation.CallSession"/> automatically — the
+    /// by <see cref="Core.CallSessionFactory"/> and
+    /// <see cref="Core.CallSession"/> automatically — the
     /// optional ctor params resolve from DI when the services are present.
     /// </remarks>
     public static CallSessionContainerBuilder AddDistributedCallState(

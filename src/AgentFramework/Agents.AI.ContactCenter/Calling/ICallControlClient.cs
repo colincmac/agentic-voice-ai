@@ -1,4 +1,4 @@
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Azure.Communication.CallAutomation;
 
 namespace Agents.AI.ContactCenter.Calling;

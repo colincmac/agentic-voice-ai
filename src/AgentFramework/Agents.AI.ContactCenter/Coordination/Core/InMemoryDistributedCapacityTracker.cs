@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Configuration;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// In-process <see cref="IDistributedCapacityTracker"/> backed by per-tier

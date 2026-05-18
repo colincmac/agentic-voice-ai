@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// In-process <see cref="IPodLeaseStore"/>. Suitable for single-pod dev /

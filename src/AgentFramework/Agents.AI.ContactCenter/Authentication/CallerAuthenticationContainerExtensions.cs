@@ -1,9 +1,9 @@
 using Agents.AI.ContactCenter.Authentication.UserIdentity;
-using Agents.AI.ContactCenter.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Agents.AI.ContactCenter.Calling;
 
-namespace Agents.AI.ContactCenter.Calling;
+namespace Agents.AI.ContactCenter.Authentication;
 
 /// <summary>
 /// DI extensions for plugging caller-authentication methods into the

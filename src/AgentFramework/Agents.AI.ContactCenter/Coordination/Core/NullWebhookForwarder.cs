@@ -1,4 +1,4 @@
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// No-op <see cref="IWebhookForwarder"/> for dev / single-pod scenarios.

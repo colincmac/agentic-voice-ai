@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Agents.AI.ContactCenter.Telemetry;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Built-in observer that turns <see cref="StrategyEvent"/>s into

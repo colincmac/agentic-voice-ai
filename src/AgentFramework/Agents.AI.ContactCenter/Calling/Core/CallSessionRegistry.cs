@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Default in-process registry of active call sessions.

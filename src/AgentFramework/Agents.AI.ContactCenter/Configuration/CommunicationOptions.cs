@@ -9,7 +9,6 @@ public class CommunicationOptions
     public bool ConfigureAcsTeamsIntegration { get; set; } = false;
     public required AcsOptions Acs { get; set; }
     public required TeamsOptions Teams { get; set; }
-    public AzureBotOptions? BotOptions { get; set; }
     public ContactCenterOptions ContactCenterOptions { get; set; } = new ContactCenterOptions();
 }
 
@@ -30,27 +29,5 @@ public class TeamsOptions
     public required string ResourceObjectId { get; set; }
     public required string PhoneNumber { get; set; }
     public string Identity { get; set; } = string.Empty;
-    public string BotSecret { get; set; } = string.Empty;
-
-    //public required string ClientSecret { get; set; }
-    //public required string BotId { get; set; }
-    //public required string BotDisplayName { get; set; }
-    //public required string BotEndpoint { get; set; }
-    //public required string AppIdUri { get; set; }
-    //public string Authority => $"https://login.microsoftonline.com/{TenantId}";
-}
-public class TeamsCallQueue
-{
-    public string? FriendlyName { get; set; }
-    public string? Descriptions { get; set; }
-    public required string ResourceObjectId { get; set; }
-    public required string ResourceAccountPhoneNumber { get; set; }
 }
 
-public class AzureBotOptions
-{
-    public string BotAppId { get; set; } = string.Empty;
-    public string BotAppSecret { get; set; } = string.Empty;
-    public string BotAppType { get; set; } = string.Empty;
-    public string BotTenantId { get; set; } = string.Empty;
-}

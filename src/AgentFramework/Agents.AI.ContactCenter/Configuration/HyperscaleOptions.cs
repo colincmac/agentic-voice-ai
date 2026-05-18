@@ -1,3 +1,5 @@
+using Agents.AI.ContactCenter.Coordination.Core;
+
 namespace Agents.AI.ContactCenter.Configuration;
 
 /// <summary>
@@ -55,7 +57,7 @@ public sealed class HyperscaleOptions
 
     /// <summary>
     /// Per-cluster capacity coordination policy used by
-    /// <see cref="Agents.AI.ContactCenter.Calling.Implementation.DistributedAgentTierResolver"/>
+    /// <see cref="Calling.Core.DistributedAgentTierResolver"/>
     /// to scale the per-tier <c>MaxConcurrent</c> cap to this cluster's slice
     /// of the global active-active pool (ADR-0010).
     /// </summary>
@@ -176,7 +178,7 @@ public sealed class PodHeartbeatOptions
     public bool ReaperEnabled { get; set; } = true;
 
     /// <summary>
-    /// Maximum time <see cref="Agents.AI.ContactCenter.Coordination.Implementation.PodHeartbeatService.StopAsync"/>
+    /// Maximum time <see cref="PodHeartbeatService.StopAsync"/>
     /// will wait for the pod-lease release to complete before falling through
     /// and letting the lease expire via TTL. Bounds graceful-shutdown latency
     /// so a slow / hung Redis cannot stall pod termination past the
@@ -185,7 +187,7 @@ public sealed class PodHeartbeatOptions
     public TimeSpan DrainTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// When <c>false</c>, <see cref="Agents.AI.ContactCenter.Coordination.Implementation.PodHeartbeatService.StopAsync"/>
+    /// When <c>false</c>, <see cref="PodHeartbeatService.StopAsync"/>
     /// skips the explicit pod-lease release and lets the lease expire via
     /// TTL. Useful for crash-loop scenarios where preserving the lease lets
     /// the orphan-detection path observe the pod outage uniformly across

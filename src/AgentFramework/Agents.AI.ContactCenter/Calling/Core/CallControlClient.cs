@@ -1,6 +1,6 @@
 using Azure.Communication.CallAutomation;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Production adapter that forwards directly to <see cref="CallConnection"/>.

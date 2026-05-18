@@ -5,7 +5,7 @@ using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Signaling;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;

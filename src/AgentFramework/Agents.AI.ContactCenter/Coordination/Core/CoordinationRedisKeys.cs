@@ -1,4 +1,4 @@
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// Hash-tagged Redis key formats for the coordination plane (ADR-0004).
@@ -18,7 +18,7 @@ internal static class CoordinationRedisKeys
     /// <summary>
     /// <c>owner:{callConnectionId}</c> — call ownership lease per ADR-0011.
     /// Value is the <see cref="CallOwnershipCodec"/>-encoded
-    /// <see cref="Coordination.CallOwnership"/>; TTL matches
+    /// <see cref="CallOwnership"/>; TTL matches
     /// <c>CallOwnershipOptions.LeaseDuration</c>.
     /// </summary>
     public static string Ownership(string callConnectionId)

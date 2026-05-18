@@ -9,7 +9,7 @@ using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Streaming variant of the ACS caller edge. Owns the bidirectional media

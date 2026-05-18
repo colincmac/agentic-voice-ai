@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Options;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// In-process <see cref="ITierCeilingProvider"/> for single-pod dev / Aspire

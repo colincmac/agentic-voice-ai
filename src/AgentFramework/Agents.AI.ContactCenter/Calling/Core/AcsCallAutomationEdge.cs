@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using AcsDtmfTone = Azure.Communication.CallAutomation.DtmfTone;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Verb-based ACS caller edge. Owns no media WebSocket — it dispatches Play /

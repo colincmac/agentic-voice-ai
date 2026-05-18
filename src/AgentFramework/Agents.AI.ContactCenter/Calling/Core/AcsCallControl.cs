@@ -1,7 +1,7 @@
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Shared helpers for the ACS-backed <see cref="ICallControl"/> implementations.

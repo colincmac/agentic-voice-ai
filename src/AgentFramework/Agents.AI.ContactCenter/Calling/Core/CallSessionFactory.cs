@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Exceptions;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
 /// Default <see cref="ICallSessionFactory"/>. Resolves the strategy synchronously

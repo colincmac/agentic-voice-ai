@@ -1,6 +1,6 @@
 using StackExchange.Redis;
 
-namespace Agents.AI.ContactCenter.Coordination.Implementation;
+namespace Agents.AI.ContactCenter.Coordination.Core;
 
 /// <summary>
 /// Distributed <see cref="IPodLeaseStore"/> backed by Azure Managed Redis

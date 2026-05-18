@@ -1,6 +1,6 @@
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Coordination.Implementation;
+using Agents.AI.ContactCenter.Coordination.Core;
 
 namespace Agents.AI.ContactCenter.Tests.Coordination;
 

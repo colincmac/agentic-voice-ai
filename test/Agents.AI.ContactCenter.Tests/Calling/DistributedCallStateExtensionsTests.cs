@@ -1,8 +1,8 @@
 using System.Reflection;
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Coordination.Implementation;
+using Agents.AI.ContactCenter.Coordination.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

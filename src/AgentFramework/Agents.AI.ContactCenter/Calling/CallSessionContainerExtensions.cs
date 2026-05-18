@@ -4,7 +4,6 @@ using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
 using Agents.AI.ContactCenter.AITools;
-using Agents.AI.ContactCenter.Calling.Implementation;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
@@ -19,6 +18,7 @@ using Agents.AI.ContactCenter.Calling.Strategies.Composite;
 using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
+using Agents.AI.ContactCenter.Calling.Core;
 
 namespace Agents.AI.ContactCenter.Calling;
 
