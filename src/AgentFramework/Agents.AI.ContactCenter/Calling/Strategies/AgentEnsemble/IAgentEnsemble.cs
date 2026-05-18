@@ -1,27 +1,26 @@
 using System.Threading.Channels;
 
-namespace Agents.AI.ContactCenter.Calling;
-
-// SKETCH — sub-contract used by AgentEnsembleStrategy.
-//
-// Captures the "primary speaker + parallel delegates" shape explicitly:
-//   - SpeakerCandidates  — agents that own an IRealtimeVoiceBackend and CAN be the
-//                          voice the caller hears. Exactly one is the active primary.
-//   - Delegates          — text-only background workers (researcher, sentiment analyst,
-//                          guardrail, scribe). They do not produce caller-facing audio;
-//                          they consume conversation context and push AgentInsight back.
-//   - PromoteAsync       — swap which speaker candidate is the active primary
-//                          (specialist takeover, supervisor handoff to AI, etc.).
-//   - PrimaryChanged     — fires after a swap so AgentEnsembleStrategy can re-pump
-//                          the new primary's backend without missing a beat.
-//
-// This shape is consumed by AgentEnsembleStrategy. ICallSession does not see the
-// individual agents — it sees a single IConversationStrategy and an
-// AgentSpeakingChanged event on the StrategyEvent stream.
+namespace Agents.AI.ContactCenter.Calling.Strategies.AgentEnsemble;
 
 /// <summary>
 /// Orchestration primitive for an AI brain composed of multiple cooperating agents.
 /// </summary>
+/// <remarks>
+/// Captures the "primary speaker + parallel delegates" shape explicitly:
+///   - SpeakerCandidates  — agents that own an IRealtimeVoiceBackend and CAN be the
+///                          voice the caller hears. Exactly one is the active primary.
+///   - Delegates          — text-only background workers (researcher, sentiment analyst,
+///                          guardrail, scribe). They do not produce caller-facing audio;
+///                          they consume conversation context and push AgentInsight back.
+///   - PromoteAsync       — swap which speaker candidate is the active primary
+///                          (specialist takeover, supervisor handoff to AI, etc.).
+///   - PrimaryChanged     — fires after a swap so AgentEnsembleStrategy can re-pump
+///                          the new primary's backend without missing a beat.
+///
+/// This shape is consumed by AgentEnsembleStrategy. ICallSession does not see the
+/// individual agents — it sees a single IConversationStrategy and an
+/// AgentSpeakingChanged event on the StrategyEvent stream.
+/// </remarks>
 public interface IAgentEnsemble : IAsyncDisposable
 {
     /// <summary>The candidate currently speaking to the caller.</summary>

@@ -13,11 +13,6 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.Composite;
 /// preserved via <c>restoreFrom</c>. The caller's edge is never touched —
 /// only the brain swaps.
 /// </summary>
-/// <remarks>
-/// Replaces today's <see cref="FallbackOrchestrator"/> + the fire-and-forget
-/// background-attach in <see cref="TieredSessionActivator"/>. Degradation is
-/// now a property of the strategy graph, not a side-channel.
-/// </remarks>
 public sealed class CompositeFallbackStrategy : IConversationStrategy
 {
     private readonly IReadOnlyList<IConversationStrategyFactory> _orderedFactories;
