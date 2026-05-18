@@ -1,5 +1,5 @@
 using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;

@@ -2,11 +2,11 @@ using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 /// <summary>
 /// Converts <see cref="AgentResponseUpdate"/> instances coming out of
-/// <see cref="Agents.AI.Realtime.RealtimeAIAgent.GetStreamingResponseAsync"/>
+/// <see cref="Realtime.RealtimeAIAgent.GetStreamingResponseAsync"/>
 /// into <see cref="RealtimeBackendUpdate"/> records that the new
 /// <see cref="IRealtimeVoiceBackend"/> contract exposes.
 /// </summary>

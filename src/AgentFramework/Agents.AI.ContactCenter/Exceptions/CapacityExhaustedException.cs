@@ -1,6 +1,7 @@
+using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Configuration;
 
-namespace Agents.AI.ContactCenter.Calling;
+namespace Agents.AI.ContactCenter.Exceptions;
 
 /// <summary>
 /// Thrown by <see cref="IAgentTierResolver"/> when no <see cref="AgentTier"/>

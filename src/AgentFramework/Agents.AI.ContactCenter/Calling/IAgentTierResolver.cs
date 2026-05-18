@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Exceptions;
 
 namespace Agents.AI.ContactCenter.Calling;
 

@@ -1,6 +1,7 @@
+using Agents.AI.ContactCenter.Calling.Implementation;
 using Azure.Communication.CallAutomation;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling;
 
 /// <summary>
 /// Tiny adapter over the bits of <see cref="CallConnection"/> that

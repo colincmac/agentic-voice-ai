@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 /// <summary>
 /// Strategy factory that resolves an <see cref="IRealtimeVoiceBackend"/> from DI

@@ -4,8 +4,9 @@ using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Agents.AI.ContactCenter.Calling.Implementation;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 /// <summary>
 /// Verb-based companion to <see cref="DtmfStreamingStrategy"/>. Emits

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.AgentEnsemble;
 
 /// <summary>
 /// In-process implementation of <see cref="IAgentEnsemble"/>. Holds a fixed list of

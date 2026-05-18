@@ -6,8 +6,11 @@ using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Agents.AI.ContactCenter.Calling.Strategies.Composite;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
+using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
 /// <summary>
 /// Tier 3 strategy: STT → <see cref="IIntentClassifier"/> → workflow transition → TTS.

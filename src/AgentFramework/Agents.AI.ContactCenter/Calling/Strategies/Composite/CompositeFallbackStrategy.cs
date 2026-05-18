@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Composite;
 
 /// <summary>
 /// Wraps an ordered list of strategy factories. Starts the first one; on

@@ -8,7 +8,7 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 /// <summary>
 /// Tier 4 strategy: DTMF menu navigation driven directly by <see cref="RealtimeIvrWorkflowDefinition"/>.

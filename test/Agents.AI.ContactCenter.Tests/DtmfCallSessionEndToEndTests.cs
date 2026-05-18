@@ -8,6 +8,7 @@ using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Implementation;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
 

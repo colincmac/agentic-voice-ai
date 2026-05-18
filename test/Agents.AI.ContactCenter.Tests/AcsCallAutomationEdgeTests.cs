@@ -9,6 +9,7 @@ using AcsCallAutomationModelFactory = global::Azure.Communication.CallAutomation
 using AcsCallMediaRecognitionType = global::Azure.Communication.CallAutomation.CallMediaRecognitionType;
 using AcsDtmfTone = global::Azure.Communication.CallAutomation.DtmfTone;
 using AcsRecognizeCompleted = global::Azure.Communication.CallAutomation.RecognizeCompleted;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
 

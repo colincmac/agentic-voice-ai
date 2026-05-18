@@ -3,8 +3,9 @@ using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Agents.AI.ContactCenter.Calling.Implementation;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 
 public sealed class DtmfStreamingStrategyFactory : IConversationStrategyFactory

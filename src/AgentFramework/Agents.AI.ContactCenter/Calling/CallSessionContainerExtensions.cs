@@ -15,6 +15,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Agents.AI.ContactCenter.Calling.Strategies.Composite;
+using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
+using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 namespace Agents.AI.ContactCenter.Calling;
 

@@ -5,6 +5,7 @@ using Agents.AI.ContactCenter.Calling.Implementation;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Coordination.Implementation;
+using Agents.AI.ContactCenter.Exceptions;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Signaling;

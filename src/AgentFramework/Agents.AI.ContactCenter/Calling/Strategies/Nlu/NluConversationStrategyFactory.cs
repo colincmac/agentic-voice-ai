@@ -4,7 +4,7 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
 /// <summary>
 /// Factory for the Tier 3 <see cref="NluConversationStrategy"/>. Resolves the

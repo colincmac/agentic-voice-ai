@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 #pragma warning disable MEAI001
 
-namespace Agents.AI.ContactCenter.Calling.Implementation;
+namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 /// <summary>
 /// Production adapter that exposes <see cref="AuthorizingRealtimeAIAgent"/> through the

@@ -4,6 +4,7 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Implementation;
+using Agents.AI.ContactCenter.Calling.Strategies.AgentEnsemble;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
 
