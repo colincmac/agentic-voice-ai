@@ -169,6 +169,7 @@
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="$(AspNetCoreVersion)" />
+    <PackageVersion Include="YamlDotNet" Version="17.1.0" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 </Project>

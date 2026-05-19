@@ -58,10 +58,5 @@
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.ContactCenter\Agents.AI.ContactCenter.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="Workflow\Samples\*.yaml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
 
 </Project>

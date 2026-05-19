@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -27,6 +27,11 @@
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.Net.ClientFactory" />
 
+    <!-- Agent Framework Workflows runtime (executor/edge/InProcessExecution) -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" />
+
+    <!-- YAML authoring surface for declarative IVR workflows -->
+    <PackageReference Include="YamlDotNet" />
 
   </ItemGroup>
 
@@ -40,6 +45,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
     <ProjectReference Include="..\Agents.AI\Agents.AI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship YAML samples + schema next to the assembly so they can be discovered at runtime. -->
+    <Content Include="IvrWorkflow\Samples\*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="IvrWorkflow\Schema\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
