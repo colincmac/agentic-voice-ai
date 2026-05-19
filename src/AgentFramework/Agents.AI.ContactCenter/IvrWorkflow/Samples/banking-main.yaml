@@ -66,6 +66,11 @@ capabilities:
     tools:
       - activate-card
 
+  - id: transfer-to-human
+    description: "Escalate the caller to a live agent."
+    tools:
+      - transfer-to-human
+
 stages:
   - id: greeting
     goal: "Greet the caller and capture their primary intent."

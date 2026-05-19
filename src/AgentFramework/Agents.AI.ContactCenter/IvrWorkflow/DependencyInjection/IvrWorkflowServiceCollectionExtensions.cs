@@ -8,6 +8,7 @@ using Agents.AI.ContactCenter.IvrWorkflow.Guards;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
 using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.IvrWorkflow.Strategies;
+using Agents.AI.ContactCenter.IvrWorkflow.Workflows;
 using Azure.Storage.Blobs;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -115,6 +116,8 @@ public static class IvrWorkflowServiceCollectionExtensions
             };
             return new IvrWorkflowLoader(source, sp.GetRequiredService<IIvrWorkflowCompiler>());
         });
+
+        services.TryAddSingleton<IIvrWorkflowGraphBuilder, IvrWorkflowGraphBuilder>();
 
         var builder = new IvrWorkflowFrameworkBuilder(services, registrations);
         configure?.Invoke(builder);
