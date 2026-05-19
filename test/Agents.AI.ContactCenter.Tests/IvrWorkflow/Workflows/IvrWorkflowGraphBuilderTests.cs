@@ -12,7 +12,7 @@ namespace Agents.AI.ContactCenter.Tests.IvrWorkflow.Workflows;
 
 public class IvrWorkflowGraphBuilderTests
 {
-    private static readonly string[] SampleToolNames =
+    private static readonly string[] sampleToolNames =
     [
         "balance-lookup",
         "activate-card",
@@ -31,7 +31,7 @@ public class IvrWorkflowGraphBuilderTests
             b.AddFileSystemSource(
                 System.IO.Path.Combine(System.AppContext.BaseDirectory, "IvrWorkflow", "Samples"));
 
-            foreach (var name in SampleToolNames)
+            foreach (var name in sampleToolNames)
             {
                 b.AddTool(name, AIFunctionFactory.Create(
                     () => "stub",

@@ -14,7 +14,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Loading;
 /// </summary>
 public static class IvrWorkflowYamlReader
 {
-    private static readonly IDeserializer s_deserializer = new DeserializerBuilder()
+    private static readonly IDeserializer deserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
         .Build();
@@ -28,7 +28,7 @@ public static class IvrWorkflowYamlReader
         ArgumentException.ThrowIfNullOrWhiteSpace(yaml);
         try
         {
-            var doc = s_deserializer.Deserialize<IvrWorkflowDocument>(yaml)
+            var doc = deserializer.Deserialize<IvrWorkflowDocument>(yaml)
                 ?? throw new IvrWorkflowYamlException(
                     $"YAML document from '{sourceName ?? "<unknown>"}' deserialized to null.");
             return doc;
