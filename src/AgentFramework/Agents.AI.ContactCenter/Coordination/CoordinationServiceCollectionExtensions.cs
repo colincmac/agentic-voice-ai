@@ -40,6 +40,14 @@ public static class CoordinationServiceCollectionExtensions
         return builder;
     }
 
+    public static IHostApplicationBuilder AddWebhookIdempotencyStore<TWebhookIdempotencyStore>(this IHostApplicationBuilder builder)
+    where TWebhookIdempotencyStore : class, IWebhookIdempotencyStore
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IWebhookIdempotencyStore, TWebhookIdempotencyStore>();
+        return builder;
+    }
+
     /// <summary>
     /// Registers the in-process <see cref="IWebhookIdempotencyStore"/>
     /// (<see cref="InMemoryWebhookIdempotencyStore"/>). Suitable for dev /
@@ -53,6 +61,8 @@ public static class CoordinationServiceCollectionExtensions
         return builder;
     }
 
+
+
     /// <summary>
     /// Registers the Redis-backed <see cref="IWebhookIdempotencyStore"/>
     /// (<see cref="RedisWebhookIdempotencyStore"/>). The caller is responsible
@@ -63,6 +73,14 @@ public static class CoordinationServiceCollectionExtensions
     {
         builder.AddClusterIdentity();
         builder.Services.TryAddSingleton<IWebhookIdempotencyStore, RedisWebhookIdempotencyStore>();
+        return builder;
+    }
+
+    public static IHostApplicationBuilder AddCallOwnershipDirectory<TCallOwnershipDirectory>(this IHostApplicationBuilder builder)
+        where TCallOwnershipDirectory : class, ICallOwnershipDirectory
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<ICallOwnershipDirectory, TCallOwnershipDirectory>();
         return builder;
     }
 
@@ -90,6 +108,14 @@ public static class CoordinationServiceCollectionExtensions
     {
         builder.AddClusterIdentity();
         builder.Services.TryAddSingleton<ICallOwnershipDirectory, RedisCallOwnershipDirectory>();
+        return builder;
+    }
+
+    public static IHostApplicationBuilder AddTierCeilingProvider<TTierCeilingProvider>(this IHostApplicationBuilder builder)
+        where TTierCeilingProvider : class, ITierCeilingProvider
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<ITierCeilingProvider, TTierCeilingProvider>();
         return builder;
     }
 
@@ -122,6 +148,14 @@ public static class CoordinationServiceCollectionExtensions
         builder.Services.TryAddSingleton<RedisTierCeilingProvider>();
         builder.Services.TryAddSingleton<ITierCeilingProvider>(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RedisTierCeilingProvider>());
+        return builder;
+    }
+
+    public static IHostApplicationBuilder AddDistributedCapacityTracker<TDistributedCapacityTracker>(this IHostApplicationBuilder builder)
+        where TDistributedCapacityTracker : class, IDistributedCapacityTracker
+    {
+        builder.AddClusterIdentity();
+        builder.Services.TryAddSingleton<IDistributedCapacityTracker, TDistributedCapacityTracker>();
         return builder;
     }
 
@@ -164,9 +198,9 @@ public static class CoordinationServiceCollectionExtensions
     /// <see cref="IDistributedCapacityTracker"/> — either the in-memory or
     /// Redis flavour.
     /// </summary>
-    public static IHostApplicationBuilder AddDistributedAgentTierResolver(this IHostApplicationBuilder builder)
+    public static IHostApplicationBuilder AddDistributedAgentTierResolver(this IHostApplicationBuilder builder, string sectionName = AgentTierOptions.SectionName)
     {
-        builder.Services.Configure<AgentTierOptions>(builder.Configuration.GetSection(AgentTierOptions.SectionName));
+        builder.Services.Configure<AgentTierOptions>(builder.Configuration.GetSection(sectionName));
         builder.Services.TryAddSingleton<IAgentTierResolver, DistributedAgentTierResolver>();
         return builder;
     }

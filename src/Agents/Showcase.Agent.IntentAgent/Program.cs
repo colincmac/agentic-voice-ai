@@ -1,47 +1,25 @@
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Showcase.Agent.IntentAgent.Classifiers;
+using Showcase.Agent.IntentAgent.Services;
 using Showcase.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+// gRPC SLM intent-classification service. The showcase backs the wire
+// contract with an in-process keyword classifier; the GPU host swap (Phi-4-mini
+// behind ONNX runtime / TorchSharp) plugs in behind the same IIntentClassifier
+// contract without any wire-protocol change.
+// See docs/architecture/aks-topology.md for the GPU node-pool topology and
+// KEDA scaling shape on this service.
+builder.Services.AddGrpc();
+builder.Services.AddSingleton<IIntentClassifier, StubKeywordIntentClassifier>();
 
 var app = builder.Build();
 
 app.MapDefaultEndpoints();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-app.UseHttpsRedirection();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapGrpcService<IntentClassificationGrpcService>();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

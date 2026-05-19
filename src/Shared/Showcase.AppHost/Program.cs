@@ -130,9 +130,17 @@ var keyVault = builder.AddAzureKeyVault("secrets")
 //    .Publi
 //    .WithUv();
 
+// IntentAgent — gRPC SLM intent-classification service. Lives on the GPU
+// compute environment per docs/architecture/aks-topology.md so the voice-edge
+// stays on the CPU pool while the model inference runs where the GPUs are.
+var intentAgent = builder.AddProject<Projects.Showcase_Agent_IntentAgent>("intentagent")
+    .WithReference(appinsights)
+    .WithComputeEnvironment(acaGpuEnvironment);
+
 var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceagent")
     // API References
     //.WithReference(biometricsApi)
+    .WithReference(intentAgent)
 
     // AI References 
     .WithReference(chat)
@@ -151,9 +159,6 @@ var voiceAgent = builder.AddProject<Projects.Showcase_Agent_VoiceAgent>("voiceag
     //.WithAzureUserAssignedIdentity(sharedMi)
     //.WithEnvironment("CONNECTIONSTRINGS__voicebiometrics", $"{builder.Configuration.GetConnectionString("voicebiometrics")}")
     .WithExternalHttpEndpoints();
-
-
-//builder.AddProject<Projects.Showcase_Agent_IntentAgent>("showcase-agent-intentagent");
 
 #endregion
 

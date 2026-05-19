@@ -5,17 +5,16 @@ using Agents.AI.ContactCenter.Configuration;
 
 namespace Agents.AI.ContactCenter.Calling;
 
-// SKETCH — quality, sentiment, and dashboard projection contracts.
-//
-// CallQualitySnapshot is the unit the operator dashboard consumes (one snapshot
-// per call, mutated continuously). ICallQualityReporter is what observers call
-// to push updates. The dashboard hub (today's OperatorDashboardBroadcaster) becomes
-// a subscriber to ICallQualityReporter rather than reaching into session internals.
-
 /// <summary>
 /// Live, mutable view of a call's quality and content. Streamed to operator dashboards.
 /// One snapshot per active call; replaces ad-hoc updates against <c>LiveCallSummary</c>.
 /// </summary>
+/// <remarks>
+/// CallQualitySnapshot is the unit the operator dashboard consumes (one snapshot
+/// per call, mutated continuously). ICallQualityReporter is what observers call
+/// to push updates. The dashboard hub (today's OperatorDashboardBroadcaster) becomes
+/// a subscriber to ICallQualityReporter rather than reaching into session internals.
+/// </remarks>
 public sealed record CallQualitySnapshot
 {
     public required string CallId { get; init; }

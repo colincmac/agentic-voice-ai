@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
@@ -38,4 +39,6 @@ public sealed class ConversationContext
     // Summary (updated at step transitions, not every turn)
     public string? ConversationSummary { get; set; }
     public List<string> ActionsTaken { get; } = [];
+
+    public ConcurrentDictionary<string, object> AdditionalProperties { get; } = new();
 }

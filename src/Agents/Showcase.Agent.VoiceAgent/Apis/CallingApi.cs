@@ -4,6 +4,8 @@ using System.Text.Json;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.Coordination.Core;
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Azure.Messaging;
@@ -122,6 +124,20 @@ public static class CallingApi
 
                     if (mode == "verb")
                     {
+                        // Claim ownership before the verb edge starts so the very first
+                        // mid-call callback can find this pod (ADR-0011).
+                        var claim = await services.Ownership.TryAcquireAsync(
+                            callConnection.CallConnectionId,
+                            CallOwnershipKind.Verb,
+                            cancellationToken).ConfigureAwait(false);
+
+                        if (!claim.Acquired)
+                        {
+                            services.Logger.LogWarning(
+                                "Verb-mode ownership claim refused for {CallConnectionId}; existing owner is {OwnerCluster}/{OwnerPod}",
+                                callConnection.CallConnectionId, claim.Owner.ClusterId, claim.Owner.PodId);
+                        }
+
                         // Verb-mode session is born here — no WS handshake will follow.
                         await StartVerbSessionAsync(services, callConnection, incoming, cancellationToken);
                     }
@@ -133,26 +149,45 @@ public static class CallingApi
         }).WithName("Call Automation - HandleIncomingCall");
 
         routeGroup.MapPost("/automation/callbacks/{serverCallId}", async (
+            HttpContext httpContext,
             [AsParameters] CallingServices services,
-            [FromBody] CloudEvent[] cloudEvents,
-            [FromRoute] string serverCallId) =>
+            [FromRoute] string serverCallId,
+            CancellationToken cancellationToken) =>
         {
-            foreach (var cloudEvent in cloudEvents)
-            {
-                var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
-                services.Logger.LogDebug("Call event {Type} for {ServerCallId}",
-                    callAutomationEvent.GetType().Name, serverCallId);
-
-                // Find the session and dispatch to the verb edge if the call uses one.
-                var callId = $"call_{callAutomationEvent.CallConnectionId}";
-                var session = services.SessionRegistry.TryGet(callId);
-                if (session?.CallerEdge is AcsCallAutomationEdge verbEdge)
-                {
-                    DispatchToVerbEdge(verbEdge, callAutomationEvent);
-                }
-            }
-            return Results.Ok();
+            return await HandleCallbackAsync(
+                httpContext,
+                services,
+                serverCallId,
+                isForwarded: false,
+                cancellationToken).ConfigureAwait(false);
         }).WithName("Call Automation - HandleCallEvents");
+
+        // Forwarded receive endpoint for cross-pod dispatch per ADR-0011. The
+        // non-owning pod replays the original webhook body verbatim; this route
+        // skips the owner lookup and processes locally. Loop protection: refuse
+        // any request that carries our own InstanceId in X-Forwarded-By-Instance.
+        routeGroup.MapPost("/automation/callbacks/_forwarded/{serverCallId}", async (
+            HttpContext httpContext,
+            [AsParameters] CallingServices services,
+            [FromRoute] string serverCallId,
+            CancellationToken cancellationToken) =>
+        {
+            var forwardedBy = httpContext.Request.Headers[HttpWebhookForwarder.ForwardedByHeader].ToString();
+            if (string.Equals(forwardedBy, services.ClusterIdentity.InstanceId, StringComparison.Ordinal))
+            {
+                services.Logger.LogWarning(
+                    "Refusing forwarded webhook that originated from this pod (loop guard); InstanceId={InstanceId}",
+                    services.ClusterIdentity.InstanceId);
+                return Results.StatusCode(StatusCodes.Status421MisdirectedRequest);
+            }
+
+            return await HandleCallbackAsync(
+                httpContext,
+                services,
+                serverCallId,
+                isForwarded: true,
+                cancellationToken).ConfigureAwait(false);
+        }).WithName("Call Automation - HandleForwardedCallEvents");
 
         routeGroup.MapGet("/automation/media/wss/{serverCallId}", async (
             HttpContext httpContext,
@@ -170,12 +205,35 @@ public static class CallingApi
             var logger = loggerFactory.CreateLogger("CallAutomation.WebSocket");
 
             WebSocket? webSocket = null;
+            var callConnectionIdForOwnership = callConnectionId;
+            var ownershipClaimed = false;
             try
             {
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
                     "Media WebSocket established for ServerCallId={ServerCallId}, CallConnectionId={CallConnectionId}, Tier={Tier}",
                     serverCallId, callConnectionId, AgentTier.RealtimeVoice);
+
+                // Pod-pinned bi-di stream — claim streaming ownership before the
+                // session starts so the very first mid-call callback can find us.
+                var claim = await services.Ownership.TryAcquireAsync(
+                    callConnectionIdForOwnership,
+                    CallOwnershipKind.Streaming,
+                    httpContext.RequestAborted).ConfigureAwait(false);
+
+                if (!claim.Acquired)
+                {
+                    logger.LogError(
+                        "Streaming ownership claim refused for {CallConnectionId}; existing owner {OwnerCluster}/{OwnerPod} — closing WS",
+                        callConnectionId, claim.Owner.ClusterId, claim.Owner.PodId);
+                    await webSocket.CloseAsync(
+                        WebSocketCloseStatus.PolicyViolation,
+                        "Call already owned",
+                        CancellationToken.None);
+                    return;
+                }
+
+                ownershipClaimed = true;
 
                 var callConnection = services.CallAutomationClient.GetCallConnection(callConnectionId);
                 var callProperties = (await callConnection.GetCallConnectionPropertiesAsync(httpContext.RequestAborted)).Value;
@@ -213,8 +271,155 @@ public static class CallingApi
                         CancellationToken.None);
                 }
             }
+            finally
+            {
+                if (ownershipClaimed)
+                {
+                    try
+                    {
+                        await services.Ownership.ReleaseAsync(callConnectionIdForOwnership, CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception releaseEx)
+                    {
+                        logger.LogWarning(releaseEx,
+                            "Failed to release streaming ownership for {CallConnectionId}; lease will expire via TTL",
+                            callConnectionIdForOwnership);
+                    }
+                }
+            }
         }).WithName("Call Automation - Media WebSocket");
     }
+
+    /// <summary>
+    /// Shared callback dispatch for the direct webhook route and the
+    /// <c>_forwarded</c> route. Reads the raw body so it can be replayed
+    /// verbatim to the WS-owning pod when the local pod is not the owner
+    /// (ADR-0011). Forwarded requests skip the owner lookup since the sender
+    /// already resolved it.
+    /// </summary>
+    private static async Task<IResult> HandleCallbackAsync(
+        HttpContext httpContext,
+        CallingServices services,
+        string serverCallId,
+        bool isForwarded,
+        CancellationToken cancellationToken)
+    {
+        // Read once so we can both parse and (potentially) forward the body.
+        byte[] bodyBytes;
+        using (var ms = new MemoryStream())
+        {
+            await httpContext.Request.Body.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+            bodyBytes = ms.ToArray();
+        }
+
+        var contentType = httpContext.Request.ContentType ?? "application/cloudevents-batch+json";
+
+        CloudEvent[] cloudEvents;
+        try
+        {
+            cloudEvents = CloudEvent.ParseMany(BinaryData.FromBytes(bodyBytes));
+        }
+        catch (Exception ex)
+        {
+            services.Logger.LogWarning(ex, "Failed to parse CloudEvent batch for {ServerCallId}", serverCallId);
+            return Results.BadRequest();
+        }
+
+        // Group by callConnectionId so we look up the owner once per call.
+        var byCall = new Dictionary<string, List<CallAutomationEventBase>>(StringComparer.Ordinal);
+        foreach (var cloudEvent in cloudEvents)
+        {
+            var callAutomationEvent = CallAutomationEventParser.Parse(cloudEvent);
+            services.Logger.LogDebug("Call event {Type} for {ServerCallId} (forwarded={Forwarded})",
+                callAutomationEvent.GetType().Name, serverCallId, isForwarded);
+
+            var ccid = callAutomationEvent.CallConnectionId;
+            if (string.IsNullOrEmpty(ccid))
+            {
+                continue;
+            }
+
+            if (!byCall.TryGetValue(ccid, out var list))
+            {
+                list = new List<CallAutomationEventBase>();
+                byCall[ccid] = list;
+            }
+            list.Add(callAutomationEvent);
+        }
+
+        foreach (var (callConnectionId, events) in byCall)
+        {
+            // Forwarded payloads always dispatch locally — the sender resolved the owner.
+            // For first-hop deliveries, look up ownership and decide local-vs-forward.
+            if (!isForwarded)
+            {
+                var owner = await services.Ownership.GetOwnerAsync(callConnectionId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (owner is not null
+                    && !IsLocalOwner(owner, services.ClusterIdentity)
+                    && owner.Kind == CallOwnershipKind.Streaming)
+                {
+                    // Streaming-mode call owned by another pod — forward verbatim.
+                    var forwardResult = await services.WebhookForwarder.TryForwardAsync(
+                        owner,
+                        callbackPath: $"{httpContext.Request.Path}{httpContext.Request.QueryString}",
+                        body: bodyBytes,
+                        contentType: contentType,
+                        headers: null,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                    if (forwardResult.IsSuccess)
+                    {
+                        continue;
+                    }
+
+                    services.Logger.LogWarning(
+                        "Forward to streaming owner {OwnerPod} failed with {Outcome} ({Status}); dropping {CallConnectionId} to reaper path",
+                        owner.PodId, forwardResult.Outcome, forwardResult.StatusCode, callConnectionId);
+                    // Fall through to local-dispatch attempt; the reaper (ADR-0011)
+                    // will polite-hangup the call if it stays orphaned.
+                }
+            }
+
+            DispatchLocally(services, callConnectionId, events);
+
+            // Release ownership once the call has ended, regardless of who answered.
+            if (events.Any(e => e is CallDisconnected))
+            {
+                await services.Ownership.ReleaseAsync(callConnectionId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return Results.Ok();
+    }
+
+    private static void DispatchLocally(
+        CallingServices services,
+        string callConnectionId,
+        IReadOnlyList<CallAutomationEventBase> events)
+    {
+        var callId = $"call_{callConnectionId}";
+        var session = services.SessionRegistry.TryGet(callId);
+        if (session?.CallerEdge is not AcsCallAutomationEdge verbEdge)
+        {
+            // Streaming-mode events for a call we don't own locally fall here only
+            // when the forward attempt failed; we have no in-pod handler to drive,
+            // so log and let the reaper deal with it.
+            return;
+        }
+
+        foreach (var evt in events)
+        {
+            DispatchToVerbEdge(verbEdge, evt);
+        }
+    }
+
+    private static bool IsLocalOwner(CallOwnership owner, IClusterIdentity identity)
+        => string.Equals(owner.ClusterId, identity.ClusterId, StringComparison.Ordinal)
+           && string.Equals(owner.PodId, identity.PodId, StringComparison.Ordinal);
 
     /// <summary>
     /// Verb-mode call-start path. Answer has already happened; we wrap the

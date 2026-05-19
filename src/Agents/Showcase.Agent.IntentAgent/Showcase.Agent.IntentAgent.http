@@ -1,6 +1,10 @@
 @Showcase.Agent.IntentAgent_HostAddress = http://localhost:5160
 
-GET {{Showcase.Agent.IntentAgent_HostAddress}}/weatherforecast/
-Accept: application/json
+# This service exposes the agents.intent.v1.IntentClassification gRPC service
+# (see src/protos/agents.intent.v1.proto). Use grpcurl or the dotnet-grpc CLI
+# to exercise it; HTTP probes only hit /health and /alive (see ServiceDefaults).
+
+GET {{Showcase.Agent.IntentAgent_HostAddress}}/health
+Accept: text/plain
 
 ###

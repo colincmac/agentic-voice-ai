@@ -7,6 +7,7 @@ using Agents.AI.ContactCenter.Authorization.IdentityVerification;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
+using Agents.Intent.V1;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
@@ -20,6 +21,7 @@ using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Authentication;
 using Showcase.Agent.VoiceAgent.Configuration;
+using Showcase.Agent.VoiceAgent.Nlu;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 
@@ -112,8 +114,28 @@ builder.Services.AddSingleton<CallerAuthStateRegistry>();
 
 // Demo NLU dependencies — keyword classifier + scripted recognizer keep the showcase
 // free of an Azure CLU / Speech-to-Text dependency while still exercising the NLU
-// strategy end-to-end. Replace with real implementations in production.
-builder.Services.AddSingleton<IIntentClassifier, StubKeywordIntentClassifier>();
+// strategy end-to-end. When the AppHost wires an `intentagent` resource (the GPU
+// gRPC service in the two-pool AKS topology — see docs/architecture/aks-topology.md),
+// the voice-edge talks to it over gRPC; otherwise the in-process stub keeps the
+// showcase self-contained.
+var intentAgentEndpoint = builder.Configuration.GetConnectionString("intentagent")
+    ?? builder.Configuration["services:intentagent:grpc:0"]
+    ?? builder.Configuration["services:intentagent:https:0"]
+    ?? builder.Configuration["services:intentagent:http:0"];
+
+if (!string.IsNullOrWhiteSpace(intentAgentEndpoint))
+{
+    builder.Services.AddGrpcClient<IntentClassification.IntentClassificationClient>(options =>
+    {
+        options.Address = new Uri(intentAgentEndpoint);
+    });
+    builder.Services.AddSingleton<IIntentClassifier, GrpcIntentClassifier>();
+}
+else
+{
+    builder.Services.AddSingleton<IIntentClassifier, StubKeywordIntentClassifier>();
+}
+
 builder.Services.AddTransient<ISpeechRecognizer, StubSpeechRecognizer>();
 
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>

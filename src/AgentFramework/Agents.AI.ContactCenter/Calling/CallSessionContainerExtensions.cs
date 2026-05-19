@@ -277,4 +277,50 @@ public sealed class CallSessionContainerBuilder
             new CompositeFallbackStrategyFactory(topTier, orderedTiers));
         return this;
     }
+
+    /// <summary>
+    /// Wires the hybrid sticky-WS + stateless-webhook ownership router per
+    /// ADR-0011 onto the call container. Registers an
+    /// <see cref="ICallOwnershipDirectory"/>, an <see cref="IWebhookForwarder"/>,
+    /// an <see cref="IPodHeartbeat"/>, and an <see cref="IWebhookIdempotencyStore"/>
+    /// so the call-edge can claim ownership on answer, look up the owner on
+    /// every mid-call callback, forward to the WS-owning pod when remote, and
+    /// release the lease on <c>CallDisconnected</c>.
+    /// </summary>
+    /// <param name="useRedis">
+    /// When <c>true</c> (the default in-cluster posture) wires the Redis-backed
+    /// flavour of every primitive plus the <c>HttpWebhookForwarder</c>. The
+    /// caller must register an <see cref="StackExchange.Redis.IConnectionMultiplexer"/>
+    /// (typically via Aspire's <c>AddRedisClient</c>) and set the
+    /// <c>WebhookForwarder</c> section of <see cref="HyperscaleOptions"/>.
+    /// When <c>false</c>, wires the in-memory flavour suitable for the showcase
+    /// / single-pod dev loop; the <see cref="NullWebhookForwarder"/> resolves
+    /// every owner as either local (no-op) or unreachable (drop to the local
+    /// fallback path).
+    /// </param>
+    /// <remarks>
+    /// Idempotent — every inner registration uses <c>TryAddSingleton</c>, so
+    /// callers may safely co-register the Redis and in-memory flavours of
+    /// individual primitives ahead of this call (e.g. Redis ownership +
+    /// in-memory idempotency for the pilot tier).
+    /// </remarks>
+    public CallSessionContainerBuilder AddCallOwnershipRouting(bool useRedis = true)
+    {
+        if (useRedis)
+        {
+            Builder.AddRedisCallOwnershipDirectory();
+            Builder.AddRedisWebhookIdempotencyStore();
+            Builder.AddRedisPodHeartbeat();
+            Builder.AddHttpWebhookForwarder();
+        }
+        else
+        {
+            Builder.AddInMemoryCallOwnershipDirectory();
+            Builder.AddInMemoryWebhookIdempotencyStore();
+            Builder.AddInMemoryPodHeartbeat();
+            Builder.AddInMemoryWebhookForwarder();
+        }
+
+        return this;
+    }
 }

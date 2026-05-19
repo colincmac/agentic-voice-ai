@@ -70,6 +70,7 @@ public enum EdgeCapabilities
     StopPlayback = 1 << 3,
     CollectDtmf = 1 << 4,
     TransferCall = 1 << 5,
+    AddParticipant = 1 << 6,
 
     /// <summary>Streaming edges: PCM audio in/out + barge-in stop.</summary>
     Streaming = Audio | StopPlayback,
