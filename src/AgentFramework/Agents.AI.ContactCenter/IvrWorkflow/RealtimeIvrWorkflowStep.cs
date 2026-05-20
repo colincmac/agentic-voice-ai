@@ -87,6 +87,15 @@ public sealed class RealtimeIvrWorkflowStep
     public StepDtmfConfiguration? StepDtmfConfiguration { get; init; }
 
     /// <summary>
+    /// Indicates whether this step is terminal — i.e. once the workflow enters this stage
+    /// no further transitions are expected. Strategies use this to decide whether to expose
+    /// the synthetic advance tool to the model and when to wind the session down. Populated
+    /// by <c>IvrWorkflowCompiler</c> from the YAML <c>terminal:</c> flag; defaults to
+    /// <see langword="false"/> for steps built directly in code.
+    /// </summary>
+    public bool Terminal { get; init; }
+
+    /// <summary>
     /// Gets the valid step IDs this step can transition to.
     /// </summary>
     public IReadOnlyList<string> ValidTransitions =>

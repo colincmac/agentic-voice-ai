@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
@@ -43,6 +44,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     private bool _suspended;
     private bool _prewarmed;
     private CallEdgeMetadata? _callerMetadata;
+    private ConversationContext? _conversationContext;
 
     public RealtimeVoiceStrategy(
         IRealtimeVoiceBackend backend,
@@ -136,7 +138,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         // Authenticate the caller (if any authenticators are registered) before the first
         // prompt push so the navigator's prompt can include the resolved identity.
-        var conversationContext = await CallerAuthenticationRunner.RunAsync(
+        _conversationContext = await CallerAuthenticationRunner.RunAsync(
             services,
             _callId,
             _callerMetadata,
@@ -148,16 +150,34 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         // Seed the agent with the system prompt for the current workflow step.
         var step = _navigator.EnterInitialStep();
+        await ApplyStageAsync(step, cancellationToken).ConfigureAwait(false);
+    }
 
-        // Push the step's tool surface, wrapped with the step's guards so any tool
-        // invocation by the realtime model is gated by the navigator's live state.
-        var initialTools = _navigator.WrapToolsWithCurrentGuards(step.AvailableTools ?? []);
-        await _backend.UpdateToolsAsync(initialTools, cancellationToken).ConfigureAwait(false);
+    /// <summary>
+    /// Push the current step's prompt and guard-wrapped tool surface (including the
+    /// synthesized <see cref="IvrAdvanceTool"/> when the step can advance) onto the
+    /// realtime backend, and emit <see cref="StrategyEvent.WorkflowStepEntered"/> for
+    /// observers. Called once on entry from <see cref="PushInitialStateAsync"/> and again
+    /// after every successful navigator transition driven by an advance function call.
+    /// </summary>
+    private async Task ApplyStageAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken)
+    {
+        var tools = _navigator!.WrapToolsWithCurrentGuards(step.AvailableTools ?? []).ToList();
 
-        var prompt = _navigator.BuildCurrentStepPrompt(conversationContext);
+        if (!step.Terminal)
+        {
+            var advance = IvrAdvanceTool.TryCreate(step);
+            if (advance is not null)
+            {
+                tools.Add(advance);
+            }
+        }
+
+        await _backend.UpdateToolsAsync(tools, cancellationToken).ConfigureAwait(false);
+
+        var prompt = _navigator.BuildCurrentStepPrompt(_conversationContext);
         await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
 
-        // Events buffer in the unbounded channel until the session pumps them out.
         await _events.Writer.WriteAsync(
             new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
@@ -269,6 +289,13 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                             ct).ConfigureAwait(false);
                         break;
 
+                    case RealtimeBackendUpdate.FunctionCalled call:
+                        await _events.Writer.WriteAsync(
+                            new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At),
+                            ct).ConfigureAwait(false);
+                        await HandleFunctionCallAsync(call, ct).ConfigureAwait(false);
+                        break;
+
                     case RealtimeBackendUpdate.Faulted fault:
                         _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
                         await _events.Writer.WriteAsync(
@@ -290,5 +317,96 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                 new StrategyEvent.Faulted(ex.Message, ex, DateTimeOffset.UtcNow),
                 CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Dispatch a tool invocation that came back from the realtime backend. Today the
+    /// only orchestration tool we own is <see cref="IvrAdvanceTool"/>; other tool calls
+    /// are surfaced as <see cref="StrategyEvent.FunctionCalled"/> and otherwise left to
+    /// the backend's own function-invocation pipeline (the model will receive a
+    /// <c>FunctionResultContent</c> by the time it observes them here).
+    /// </summary>
+    private async Task HandleFunctionCallAsync(RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
+    {
+        if (!string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_navigator?.CurrentStep is not { } currentStep)
+        {
+            _logger.LogWarning("Advance tool fired but no current step is set on call {CallId}", _callId);
+            return;
+        }
+
+        var chosen = ExtractAdvanceChoice(call.Arguments);
+        if (chosen is null)
+        {
+            _logger.LogWarning(
+                "Advance tool fired on step {StepId} without a '{Arg}' argument; arguments: {Args}",
+                currentStep.Id, IvrAdvanceTool.NextStageArgumentName, string.Join(",", call.Arguments.Keys));
+            return;
+        }
+
+        var resolution = IvrAdvanceTool.Resolve(currentStep, chosen);
+        if (!resolution.IsTransition || resolution.TargetStageId is not { Length: > 0 } target)
+        {
+            _logger.LogInformation(
+                "Advance choice '{Chosen}' on step {StepId} resolved to {Kind}; not transitioning",
+                chosen, currentStep.Id, resolution.Kind);
+            return;
+        }
+
+        var result = _navigator.TransitionTo(target);
+        if (!result.Succeeded || result.NewStep is null)
+        {
+            _logger.LogWarning(
+                "Realtime advance to '{Target}' from '{Current}' rejected: {Reason}",
+                target, currentStep.Id, result.Reason);
+            return;
+        }
+
+        await ApplyStageAsync(result.NewStep, ct).ConfigureAwait(false);
+
+        if (result.NewStep.Terminal)
+        {
+            await EndSessionAsync($"terminal stage '{result.NewStep.Id}' reached", ct).ConfigureAwait(false);
+        }
+    }
+
+    private static string? ExtractAdvanceChoice(IReadOnlyDictionary<string, object?> arguments)
+    {
+        if (arguments.TryGetValue(IvrAdvanceTool.NextStageArgumentName, out var value) && value is not null)
+        {
+            return value.ToString();
+        }
+
+        // Defensive: some providers serialize arguments with quoting nuances; if the
+        // dictionary holds exactly one argument fall back to that single value.
+        if (arguments.Count == 1)
+        {
+            var single = arguments.Values.First();
+            return single?.ToString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Wind the strategy down when the workflow lands on a terminal stage. We mark the
+    /// workflow complete, emit an <see cref="StrategyEvent.EscalationRequested"/>-style
+    /// hint, and signal the agent loop to exit. The session host owns hang-up itself.
+    /// </summary>
+    private async Task EndSessionAsync(string reason, CancellationToken ct)
+    {
+        _navigator?.Complete();
+
+        await _events.Writer.WriteAsync(
+            new StrategyEvent.AgentUtterance(_backend.AgentId, $"[session ending: {reason}]", DateTimeOffset.UtcNow),
+            CancellationToken.None).ConfigureAwait(false);
+
+        // Close the agent loop so the session moves to teardown. Use a separate cancel so
+        // the in-flight ApplyStageAsync above can complete cleanly.
+        await _cts.CancelAsync().ConfigureAwait(false);
     }
 }

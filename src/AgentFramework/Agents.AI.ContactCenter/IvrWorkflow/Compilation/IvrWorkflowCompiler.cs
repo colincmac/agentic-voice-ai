@@ -284,6 +284,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             MaxDuration = ParseDuration(stage.MaxDuration, stage.Id, errors),
             RequiredAuthLevel = ResolveStageAuthLevel(baseRequiredAuth, stage.Requires),
             StepDtmfConfiguration = dtmfConfig,
+            Terminal = stage.Terminal,
             Intents = compiledIntents.Count == 0
                 ? new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase)
                 : compiledIntents.ToDictionary(
