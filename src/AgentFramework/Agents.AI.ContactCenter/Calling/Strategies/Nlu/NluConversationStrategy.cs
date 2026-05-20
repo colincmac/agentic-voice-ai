@@ -241,10 +241,15 @@ public sealed class NluConversationStrategy : IConversationStrategy
     private async Task ProcessUtteranceAsync(string utterance, CancellationToken ct)
     {
         var step = _navigator?.CurrentStep ?? ResumeOrEnterInitialStep();
-        var validIntents = step.ValidTransitions.ToList();
 
-        // Always allow the well-known transfer intent — the workflow author doesn't need to
-        // model it as a transition for every step.
+        // Build the candidate intent set: every named intent on the current step plus the
+        // well-known transfer intent (so the workflow author doesn't have to model it).
+        var stepIntents = step.Intents;
+        var validIntents = new List<string>(stepIntents.Count + 1);
+        foreach (var intentName in stepIntents.Keys)
+        {
+            validIntents.Add(intentName);
+        }
         if (EscalationTarget is not null && !validIntents.Contains(TransferIntentName))
         {
             validIntents.Add(TransferIntentName);
@@ -252,7 +257,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
         if (validIntents.Count == 0)
         {
-            _logger.LogDebug("NLU step {StepId} has no transitions; storing utterance and re-prompting", step.Id);
+            _logger.LogDebug("NLU step {StepId} has no intents; storing utterance and re-prompting", step.Id);
             WorkflowState.Set(step.Id, utterance);
             await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
             return;
@@ -284,12 +289,31 @@ public sealed class NluConversationStrategy : IConversationStrategy
             return;
         }
 
-        var transition = _navigator!.TransitionTo(result.IntentName!);
+        // Look up the resolved intent so we can route via its declared next stage and
+        // honour any confirmation prompt the author attached.
+        if (!stepIntents.TryGetValue(result.IntentName!, out var intent) || intent.NextStepId is not { Length: > 0 } targetStage)
+        {
+            _logger.LogWarning(
+                "Intent '{Intent}' classified for step {StepId} but no nextStage is declared; re-prompting",
+                result.IntentName, step.Id);
+            await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(intent.ConfirmPrompt))
+        {
+            // The orchestration layer owns confirmation. For now we speak the prompt and
+            // commit the transition; a future enhancement can wait for a second confirming
+            // utterance before advancing.
+            await SpeakAsync(intent.ConfirmPrompt!, ct).ConfigureAwait(false);
+        }
+
+        var transition = _navigator!.TransitionTo(targetStage);
         if (!transition.Succeeded || transition.NewStep is null)
         {
             _logger.LogWarning(
-                "Intent '{Intent}' classified for step {StepId} but transition failed: {Reason}",
-                result.IntentName, step.Id, transition.Reason);
+                "Intent '{Intent}' classified for step {StepId} but transition to '{Target}' failed: {Reason}",
+                result.IntentName, step.Id, targetStage, transition.Reason);
             await SpeakAsync("Let's try that again.", ct).ConfigureAwait(false);
             await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
             return;

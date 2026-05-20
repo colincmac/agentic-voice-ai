@@ -92,7 +92,33 @@ public sealed class RealtimeIvrWorkflowStep
     public IReadOnlyList<string> ValidTransitions =>
         ConversationState.Transitions?.Select(t => t.NextStep).ToList() ?? [];
 
+    /// <summary>
+    /// Gets the compiled intent table for this step keyed by intent name. Populated by the
+    /// declarative IVR workflow compiler from the YAML <c>intents:</c> block; consumed by
+    /// the NLU strategy (to enumerate intent names and per-intent examples) and by the
+    /// realtime strategy (to synthesize an <c>advance</c> tool with the allowed intents).
+    /// Empty for runtime steps built directly in code without going through the compiler.
+    /// </summary>
+    public IReadOnlyDictionary<string, RealtimeIvrWorkflowIntent> Intents { get; init; } =
+        new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase);
 }
+
+/// <summary>
+/// Compiled intent metadata attached to a <see cref="RealtimeIvrWorkflowStep"/>. Mirrors
+/// <c>Compilation.CompiledIvrIntent</c> but lives on the runtime step so strategies can
+/// consume it without taking a dependency on the compiler types.
+/// </summary>
+/// <param name="Name">Intent name (e.g. <c>balance</c>).</param>
+/// <param name="Examples">Example utterances seeded by the YAML and used by keyword/NLU classifiers.</param>
+/// <param name="NextStepId">Optional next stage id the workflow transitions to when this intent fires.</param>
+/// <param name="CapabilityId">Optional capability the intent should invoke.</param>
+/// <param name="ConfirmPrompt">Optional confirmation prompt the orchestrator should speak before the transition.</param>
+public sealed record RealtimeIvrWorkflowIntent(
+    string Name,
+    IReadOnlyList<string> Examples,
+    string? NextStepId = null,
+    string? CapabilityId = null,
+    string? ConfirmPrompt = null);
 
 public readonly struct IvrStepAgentConfiguration(string Instructions, IEnumerable<AITool>? Tools = null)
 {
