@@ -25,6 +25,8 @@ using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Nlu;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
+using Agents.AI.ContactCenter.DependencyInjection;
+using Agents.AI.ContactCenter.Media.Analysis;
 
 var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
@@ -94,12 +96,16 @@ builder.AddKeyedConversationClient("voicelive")
 // ICallQualityReporter, and wires the realtime voice strategy on top of the existing
 // AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
 
-builder.Services.AddSingleton<ISpeechSynthesizer, AzureSpeechSynthesizer>(sp =>
-{
-    var endpoint = builder.Configuration.GetConnectionString("azurespeech");
-    if (string.IsNullOrEmpty(endpoint)) throw new InvalidOperationException("Azure Speech endpoint is not configured.");
+var azureSpeechConnectionString = builder.Configuration.GetConnectionString("AzureSpeech");
 
-    return new AzureSpeechSynthesizer(new Uri(endpoint));
+builder.Services.AddAzureSpeech(options =>
+{
+    builder.Configuration.GetSection("AzureSpeech").Bind(options);
+
+    if (!string.IsNullOrWhiteSpace(azureSpeechConnectionString))
+    {
+        options.Endpoint = new Uri(azureSpeechConnectionString);
+    }
 });
 
 // E2E showcase: register the auth-aware DTMF workflow as the default and the realtime

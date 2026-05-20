@@ -1,4 +1,4 @@
-namespace Agents.AI.ContactCenter.IvrWorkflow;
+namespace Agents.AI.ContactCenter.Media.Analysis;
 
 /// <summary>
 /// Classifies user utterances into intents for deterministic IVR routing (Tier 3).

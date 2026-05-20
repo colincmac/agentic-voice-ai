@@ -228,7 +228,7 @@ public sealed class CallSessionContainerBuilder
     /// Registers the Tier 3 NLU strategy (<see cref="NluConversationStrategy"/>). Requires an
     /// <see cref="Media.Audio.ISpeechRecognizer"/>,
     /// <see cref="Media.Audio.ISpeechSynthesizer"/>, and
-    /// <see cref="IvrWorkflow.IIntentClassifier"/> to be registered separately.
+    /// <see cref="Media.Analysis.IIntentClassifier"/> to be registered separately.
     /// </summary>
     public CallSessionContainerBuilder AddNluStrategy()
     {

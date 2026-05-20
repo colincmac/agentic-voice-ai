@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Azure;
+using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,8 @@ namespace Agents.AI.ContactCenter.DependencyInjection;
 /// </summary>
 public static class AzureSpeechServiceCollectionExtensions
 {
+
+
     /// <summary>
     /// Registers the Azure Speech Service with the service collection as both
     /// <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.

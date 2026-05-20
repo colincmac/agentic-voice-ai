@@ -125,7 +125,7 @@ public static class IvrWorkflowServiceCollectionExtensions
     }
 }
 
-/// <summary>Fluent builder used by <see cref="IvrWorkflowServiceCollectionExtensions.AddIvrWorkflowFramework"/>.</summary>
+/// <summary>Fluent builder used transitively by <see cref="IvrWorkflowServiceCollectionExtensions.AddIvrWorkflowFramework"/>.</summary>
 public sealed class IvrWorkflowFrameworkBuilder
 {
     private readonly IvrFrameworkRegistrations _registrations;

@@ -1,4 +1,4 @@
-using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.Media.Analysis;
 using Showcase.Agent.IntentAgent.Classifiers;
 using Showcase.Agent.IntentAgent.Services;
 using Showcase.ServiceDefaults;

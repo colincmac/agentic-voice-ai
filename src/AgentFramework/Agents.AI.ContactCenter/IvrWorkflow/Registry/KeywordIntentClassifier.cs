@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow.Registry;
 

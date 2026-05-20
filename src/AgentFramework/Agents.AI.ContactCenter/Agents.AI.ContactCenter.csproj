@@ -39,6 +39,8 @@
   <ItemGroup>
     <Protobuf Include="..\..\protos\agents.realtimevoice.v1.proto" GrpcServices="Server" />
     <Protobuf Include="..\..\protos\biometrics.v1.proto" GrpcServices="Client" />
+    <Protobuf Include="..\..\protos\agents.intent.v1.proto" GrpcServices="Client" />
+
   </ItemGroup>
 
 

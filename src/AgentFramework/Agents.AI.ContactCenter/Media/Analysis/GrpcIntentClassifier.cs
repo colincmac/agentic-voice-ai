@@ -1,9 +1,9 @@
-using Agents.AI.ContactCenter.Media.Analysis;
+using Agents.AI.ContactCenter.Calling;
 using Agents.Intent.V1;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 
-namespace Showcase.Agent.VoiceAgent.Nlu;
+namespace Agents.AI.ContactCenter.Media.Analysis;
 
 /// <summary>
 /// <see cref="IIntentClassifier"/> adapter that delegates classification to

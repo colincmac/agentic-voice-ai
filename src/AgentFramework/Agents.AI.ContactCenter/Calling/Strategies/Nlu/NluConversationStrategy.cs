@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
+using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 

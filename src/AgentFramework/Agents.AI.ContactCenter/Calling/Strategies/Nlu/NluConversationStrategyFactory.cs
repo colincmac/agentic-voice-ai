@@ -3,6 +3,7 @@ using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
