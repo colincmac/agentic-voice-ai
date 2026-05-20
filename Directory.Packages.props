@@ -42,6 +42,7 @@
     <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.2.0-beta.8" />
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.9.0-beta.1" />
     <PackageVersion Include="Azure.AI.VoiceLive" Version="1.1.0-beta.3" />
+    <PackageVersion Include="Azure.AI.Speech.Transcription" Version="1.0.0" />
     <PackageVersion Include="Azure.Communication.CallAutomation" Version="1.6.0-beta.1" />
     <PackageVersion Include="Azure.Communication.Common" Version="1.4.0" />
     <PackageVersion Include="Azure.Communication.Identity" Version="1.4.0-beta.1" />

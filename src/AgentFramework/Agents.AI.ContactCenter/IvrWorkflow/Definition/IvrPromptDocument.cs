@@ -4,7 +4,7 @@ using YamlDotNet.Serialization;
 namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 /// <summary>
-/// YAML projection of <see cref="Agents.AI.Extensions.RealtimeAgentHelpers.Prompting.RealtimePrompt"/>.
+/// YAML projection of <see cref="Extensions.RealtimeAgentHelpers.Prompting.RealtimePrompt"/>.
 /// Only the most commonly authored fields are exposed.
 /// </summary>
 public sealed class IvrPromptDocument

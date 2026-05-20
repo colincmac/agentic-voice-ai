@@ -209,7 +209,7 @@ internal static partial class Throw
         where T : struct, Enum
     {
 #if NET5_0_OR_GREATER
-        if (!Enum.IsDefined<T>(argument))
+        if (!Enum.IsDefined(argument))
 #else
         if (!Enum.IsDefined(typeof(T), argument))
 #endif

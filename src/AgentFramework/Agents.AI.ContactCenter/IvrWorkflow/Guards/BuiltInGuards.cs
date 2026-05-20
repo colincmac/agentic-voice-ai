@@ -35,7 +35,7 @@ public sealed class RequiredStateKeysGuard : IIvrStepGuard
 {
     public RequiredStateKeysGuard(IReadOnlyList<string> keys, string? failureMessage = null)
     {
-        Keys = keys ?? throw new System.ArgumentNullException(nameof(keys));
+        Keys = keys ?? throw new ArgumentNullException(nameof(keys));
         FailureMessage = failureMessage;
     }
 

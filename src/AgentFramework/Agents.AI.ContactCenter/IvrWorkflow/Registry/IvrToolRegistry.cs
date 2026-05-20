@@ -73,7 +73,7 @@ public sealed class IvrToolRegistry : IIvrToolRegistry
     }
 
     public IIvrToolRegistry AddFromType(
-        System.Type type,
+        Type type,
         object? instance = null,
         JsonSerializerOptions? serializerOptions = null)
     {
@@ -145,7 +145,7 @@ public sealed class IvrToolRegistry : IIvrToolRegistry
         return method.Name;
     }
 
-    private object CreateInstance(System.Type type)
+    private object CreateInstance(Type type)
     {
         // Prefer DI activation when a service provider is available.
         if (_services is not null)
@@ -171,7 +171,7 @@ public sealed class IvrToolRegistry : IIvrToolRegistry
                 $"Cannot instantiate tool type '{type.FullName}'. Register the type in DI or expose a parameterless constructor.");
     }
 
-    private static IEnumerable<System.Type> SafeGetTypes(Assembly assembly)
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
     {
         try
         {

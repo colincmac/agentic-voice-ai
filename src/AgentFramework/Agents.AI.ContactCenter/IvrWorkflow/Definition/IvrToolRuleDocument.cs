@@ -4,7 +4,7 @@ using YamlDotNet.Serialization;
 namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 /// <summary>
-/// YAML projection of <see cref="Agents.AI.Extensions.RealtimeAgentHelpers.Prompting.ToolUsageRule"/>.
+/// YAML projection of <see cref="Extensions.RealtimeAgentHelpers.Prompting.ToolUsageRule"/>.
 /// </summary>
 public sealed class IvrToolRuleDocument
 {

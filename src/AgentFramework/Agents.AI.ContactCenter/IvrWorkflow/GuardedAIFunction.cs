@@ -13,7 +13,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// </summary>
 /// <remarks>
 /// Instances are intended to be created per-step (typically by
-/// <see cref="WrapTools(System.Collections.Generic.IEnumerable{AITool}, System.Collections.Generic.IReadOnlyList{IIvrStepGuard}, System.Func{IvrWorkflowState}, ILoggerFactory?)"/>)
+/// <see cref="WrapTools(IEnumerable{AITool}, IReadOnlyList{IIvrStepGuard}, Func{IvrWorkflowState}, ILoggerFactory?)"/>)
 /// and discarded when the step changes. The <see cref="IvrWorkflowState"/> is read through
 /// a <see cref="Func{IvrWorkflowState}"/> on every invocation so callers can share one
 /// wrapper across calls without re-binding when state mutates.

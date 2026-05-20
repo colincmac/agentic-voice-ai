@@ -10,9 +10,9 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Strategies;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Mixed mapping caveat.</b> <see cref="IvrInteractionMode.Mixed"/> currently maps to
+/// <b>Mixed mapping caveat.</b> <see cref="Mixed"/> currently maps to
 /// <see cref="AgentTier.RealtimeVoice"/> via <see cref="IvrInteractionModeMappings.ToTier"/>,
-/// and <see cref="Strategies.IvrStrategySelector"/> only yields that single tier for a
+/// and <see cref="IvrStrategySelector"/> only yields that single tier for a
 /// <c>Mixed</c> primary. In practice that means a workflow declaring <c>primary: mixed</c>
 /// behaves identically to <c>primary: realtime</c> with the configured fallback chain.
 /// </para>

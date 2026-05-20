@@ -19,7 +19,7 @@ namespace Showcase.Agent.VoiceAgent.Apis;
 /// ACS Call Automation endpoints. Supports two answer modes:
 /// <list type="bullet">
 ///   <item><b>streaming</b> (default) — answers with bidirectional media WebSocket;
-///         WS handler builds <see cref="AcsCallerEdge"/> and starts the session.</item>
+///         WS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
 ///   <item><b>verb</b> (?mode=verb) — answers with no media WS; IncomingCall handler
 ///         builds <see cref="AcsCallAutomationEdge"/> and starts the session immediately.
 ///         Subsequent caller actions arrive on the callback webhook below.</item>
@@ -238,12 +238,12 @@ public static class CallingApi
                 var callConnection = services.CallAutomationClient.GetCallConnection(callConnectionId);
                 var callProperties = (await callConnection.GetCallConnectionPropertiesAsync(httpContext.RequestAborted)).Value;
 
-                var edge = new AcsCallerEdge(
+                var edge = new AcsCallerStreamEdge(
                     webSocket,
                     callProperties,
                     httpContext.RequestAborted,
                     services.CallAutomationClient,
-                    loggerFactory.CreateLogger<AcsCallerEdge>());
+                    loggerFactory.CreateLogger<AcsCallerStreamEdge>());
 
                 var callId = $"call_{callConnectionId}";
 

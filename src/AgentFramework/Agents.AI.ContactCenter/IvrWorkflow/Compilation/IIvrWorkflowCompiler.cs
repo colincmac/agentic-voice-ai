@@ -16,7 +16,7 @@ public interface IIvrWorkflowCompiler
 }
 
 /// <summary>Thrown when an <see cref="IvrWorkflowDocument"/> cannot be compiled.</summary>
-public sealed class IvrWorkflowCompilationException : System.Exception
+public sealed class IvrWorkflowCompilationException : Exception
 {
     public IvrWorkflowCompilationException(string workflow, IReadOnlyList<string> errors)
         : base($"IVR workflow '{workflow}' failed to compile:" + System.Environment.NewLine + " - " + string.Join(System.Environment.NewLine + " - ", errors))

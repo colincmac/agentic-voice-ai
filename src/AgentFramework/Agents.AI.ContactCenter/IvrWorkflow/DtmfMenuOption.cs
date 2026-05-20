@@ -13,7 +13,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// When <see cref="ActionToolName"/> is set, the strategy looks up the tool in the
 /// owning step's <see cref="RealtimeIvrWorkflowStep.AvailableTools"/>, invokes it with
 /// <see cref="Arguments"/> (resolved through the call-scoped
-/// <see cref="System.IServiceProvider"/>), then interprets the return value to decide
+/// <see cref="IServiceProvider"/>), then interprets the return value to decide
 /// what to do next. See <see cref="DtmfActionResult"/> for the supported return shapes.
 /// </remarks>
 public sealed record DtmfMenuOption

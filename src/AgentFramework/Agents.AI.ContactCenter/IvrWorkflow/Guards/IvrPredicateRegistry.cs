@@ -9,7 +9,7 @@ public sealed class IvrPredicateRegistry : IIvrPredicateRegistry
 {
     private readonly ConcurrentDictionary<string, RegisteredPredicate> _predicates = new(StringComparer.Ordinal);
 
-    public IIvrPredicateRegistry Add(string name, System.Func<IvrWorkflowState, bool> predicate, string? failureMessage = null)
+    public IIvrPredicateRegistry Add(string name, Func<IvrWorkflowState, bool> predicate, string? failureMessage = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(predicate);
@@ -20,7 +20,7 @@ public sealed class IvrPredicateRegistry : IIvrPredicateRegistry
         return this;
     }
 
-    public IIvrPredicateRegistry AddAsync(string name, System.Func<IvrWorkflowState, CancellationToken, Task<bool>> predicate, string? failureMessage = null)
+    public IIvrPredicateRegistry AddAsync(string name, Func<IvrWorkflowState, CancellationToken, Task<bool>> predicate, string? failureMessage = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(predicate);
@@ -36,7 +36,7 @@ public sealed class IvrPredicateRegistry : IIvrPredicateRegistry
         ArgumentException.ThrowIfNullOrEmpty(name);
         if (!_predicates.TryGetValue(name, out var entry))
         {
-            throw new System.InvalidOperationException(
+            throw new InvalidOperationException(
                 $"Predicate '{name}' is not registered. Add it via IIvrPredicateRegistry.Add(...) during host setup.");
         }
 
@@ -50,6 +50,6 @@ public sealed class IvrPredicateRegistry : IIvrPredicateRegistry
 
     private sealed record RegisteredPredicate(
         string FailureMessage,
-        System.Func<IvrWorkflowState, bool>? SyncPredicate = null,
-        System.Func<IvrWorkflowState, CancellationToken, Task<bool>>? AsyncPredicate = null);
+        Func<IvrWorkflowState, bool>? SyncPredicate = null,
+        Func<IvrWorkflowState, CancellationToken, Task<bool>>? AsyncPredicate = null);
 }

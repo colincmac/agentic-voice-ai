@@ -139,7 +139,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         var guards = new List<IIvrStepGuard>();
         if (baseRequiredAuth > AuthenticationLevel.None)
         {
-            guards.Add(new Guards.RequiredAuthLevelGuard(baseRequiredAuth));
+            guards.Add(new RequiredAuthLevelGuard(baseRequiredAuth));
         }
         foreach (var stageGuard in stage.Requires)
         {

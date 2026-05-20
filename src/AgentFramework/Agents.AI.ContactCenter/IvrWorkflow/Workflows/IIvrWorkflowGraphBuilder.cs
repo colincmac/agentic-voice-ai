@@ -46,7 +46,7 @@ public interface IIvrWorkflowGraphBuilder
 }
 
 /// <summary>Thrown when a <see cref="CompiledIvrWorkflow"/> cannot be lowered into a graph.</summary>
-public sealed class IvrWorkflowGraphBuildException : System.Exception
+public sealed class IvrWorkflowGraphBuildException : Exception
 {
     public IvrWorkflowGraphBuildException(string workflow, string error)
         : base($"Failed to build Agent Framework workflow graph for IVR workflow '{workflow}': {error}")

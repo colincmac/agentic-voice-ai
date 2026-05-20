@@ -35,7 +35,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Workflows;
 /// <para>
 /// Cancellation: when the supplied <see cref="CancellationToken"/> fires (e.g. the call hung
 /// up), implementations should unwind their per-stage waits and either return promptly or
-/// throw <see cref="System.OperationCanceledException"/>; the executor treats both as a
+/// throw <see cref="OperationCanceledException"/>; the executor treats both as a
 /// terminal end of the workflow without producing a transition.
 /// </para>
 /// </remarks>
@@ -107,7 +107,7 @@ public readonly record struct IvrStageOutcome
     public string? Reason { get; }
 
     /// <summary>Exception associated with a <see cref="IvrStageOutcomeKind.Faulted"/> outcome, if any.</summary>
-    public System.Exception? Exception { get; }
+    public Exception? Exception { get; }
 
     private IvrStageOutcome(
         IvrStageOutcomeKind kind,
@@ -115,7 +115,7 @@ public readonly record struct IvrStageOutcome
         IvrWorkflowStatus completionStatus,
         IReadOnlyDictionary<string, object?>? state,
         string? reason,
-        System.Exception? exception)
+        Exception? exception)
     {
         Kind = kind;
         NextStageId = nextStageId;
@@ -134,7 +134,7 @@ public readonly record struct IvrStageOutcome
     {
         if (string.IsNullOrWhiteSpace(nextStageId))
         {
-            throw new System.ArgumentException("Next stage id must be non-empty.", nameof(nextStageId));
+            throw new ArgumentException("Next stage id must be non-empty.", nameof(nextStageId));
         }
 
         return new IvrStageOutcome(
@@ -168,7 +168,7 @@ public readonly record struct IvrStageOutcome
     /// (which can decide to degrade the tier or hang up). This is <strong>not</strong> a
     /// transition; the navigator is not advanced.
     /// </summary>
-    public static IvrStageOutcome Faulted(string reason, System.Exception? exception = null) =>
+    public static IvrStageOutcome Faulted(string reason, Exception? exception = null) =>
         new(IvrStageOutcomeKind.Faulted, nextStageId: null, IvrWorkflowStatus.Failed, state: null, reason, exception);
 }
 
@@ -197,4 +197,4 @@ public enum IvrStageOutcomeKind
 /// <param name="StageId">Stage id where the fault occurred.</param>
 /// <param name="Reason">Human-readable reason from <see cref="IvrStageOutcome.Reason"/>.</param>
 /// <param name="Exception">Exception captured by the runner, if any.</param>
-public sealed record IvrStageFaultedOutput(string StageId, string Reason, System.Exception? Exception);
+public sealed record IvrStageFaultedOutput(string StageId, string Reason, Exception? Exception);

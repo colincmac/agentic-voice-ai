@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Microsoft.Extensions.AI;
-
+using System.Reflection;
+using System.Text.Json;
 namespace Agents.AI.ContactCenter.IvrWorkflow.Registry;
 
 /// <summary>
@@ -9,7 +10,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Registry;
 /// <list type="number">
 ///   <item>Direct registration via <see cref="AddTool(AITool)"/> or <see cref="AddTool(string, AITool)"/>.</item>
 ///   <item>Reflection-based scanning via <see cref="AddFromAssembly(System.Reflection.Assembly, System.Text.Json.JsonSerializerOptions?)"/>
-///         and <see cref="AddFromType(System.Type, object?, System.Text.Json.JsonSerializerOptions?)"/>, which discover
+///         and <see cref="AddFromType(Type, object?, System.Text.Json.JsonSerializerOptions?)"/>, which discover
 ///         <c>[McpServerTool]</c>- and <c>[AITool]</c>-decorated methods.</item>
 ///   <item>Bulk attachment through <see cref="AddTools(IEnumerable{AITool})"/>.</item>
 /// </list>
@@ -42,12 +43,12 @@ public interface IIvrToolRegistry
     /// hard-coding a MCP package reference).
     /// </summary>
     IIvrToolRegistry AddFromType(
-        System.Type type,
+        Type type,
         object? instance = null,
-        System.Text.Json.JsonSerializerOptions? serializerOptions = null);
+        JsonSerializerOptions? serializerOptions = null);
 
     /// <summary>Reflect over every public type in <paramref name="assembly"/> and call <see cref="AddFromType"/>.</summary>
     IIvrToolRegistry AddFromAssembly(
-        System.Reflection.Assembly assembly,
-        System.Text.Json.JsonSerializerOptions? serializerOptions = null);
+        Assembly assembly,
+        JsonSerializerOptions? serializerOptions = null);
 }

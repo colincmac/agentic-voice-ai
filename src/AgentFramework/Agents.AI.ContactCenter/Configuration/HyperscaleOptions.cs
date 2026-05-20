@@ -19,14 +19,14 @@ public sealed class HyperscaleOptions
 
     /// <summary>
     /// Webhook dedup token policy. Used by
-    /// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookIdempotencyStore"/>
+    /// <see cref="Coordination.IWebhookIdempotencyStore"/>
     /// to short-circuit duplicate at-least-once mid-call callbacks per ADR-0004.
     /// </summary>
     public WebhookIdempotencyOptions WebhookIdempotency { get; set; } = new();
 
     /// <summary>
     /// Per-call ownership lease policy used by
-    /// <see cref="Agents.AI.ContactCenter.Coordination.ICallOwnershipDirectory"/>
+    /// <see cref="Coordination.ICallOwnershipDirectory"/>
     /// to bind a call to the pod that holds its bi-di WS / verb session
     /// (ADR-0011).
     /// </summary>
@@ -34,14 +34,14 @@ public sealed class HyperscaleOptions
 
     /// <summary>
     /// Per-cluster tier-ceiling policy used by
-    /// <see cref="Agents.AI.ContactCenter.Coordination.ITierCeilingProvider"/>
+    /// <see cref="Coordination.ITierCeilingProvider"/>
     /// to broadcast and cache the active degradation ceiling (ADR-0008).
     /// </summary>
     public TierCeilingOptions TierCeiling { get; set; } = new();
 
     /// <summary>
     /// Pod heartbeat and reaper cadence used by
-    /// <see cref="Agents.AI.ContactCenter.Coordination.IPodHeartbeat"/> to
+    /// <see cref="Coordination.IPodHeartbeat"/> to
     /// renew the local <c>pod:lease:*</c> + every owned-call lease and to
     /// sweep orphaned <c>owner:*</c> entries (ADR-0011).
     /// </summary>
@@ -50,7 +50,7 @@ public sealed class HyperscaleOptions
     /// <summary>
     /// Cross-pod webhook forwarder transport per ADR-0011. Drives the URL
     /// shape used by
-    /// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookForwarder"/>
+    /// <see cref="Coordination.IWebhookForwarder"/>
     /// when a streaming-mode mid-call event lands on a non-owning pod.
     /// </summary>
     public WebhookForwarderOptions WebhookForwarder { get; set; } = new();
@@ -65,7 +65,7 @@ public sealed class HyperscaleOptions
 }
 
 /// <summary>
-/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.IClusterIdentity"/>.
+/// Configuration for <see cref="Coordination.IClusterIdentity"/>.
 /// All values resolve from configuration first, then the documented
 /// environment-variable fallbacks, then dev defaults.
 /// </summary>
@@ -93,13 +93,13 @@ public sealed class ClusterIdentityOptions
     /// <summary>
     /// Pod identifier. When null or whitespace, falls back to env var
     /// <see cref="PodIdEnvironmentVariable"/>, then <c>HOSTNAME</c>
-    /// (Kubernetes default), then <see cref="System.Environment.MachineName"/>.
+    /// (Kubernetes default), then <see cref="Environment.MachineName"/>.
     /// </summary>
     public string? PodId { get; set; }
 }
 
 /// <summary>
-/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.IWebhookIdempotencyStore"/>.
+/// Configuration for <see cref="Coordination.IWebhookIdempotencyStore"/>.
 /// </summary>
 public sealed class WebhookIdempotencyOptions
 {
@@ -112,7 +112,7 @@ public sealed class WebhookIdempotencyOptions
 }
 
 /// <summary>
-/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.ICallOwnershipDirectory"/>.
+/// Configuration for <see cref="Coordination.ICallOwnershipDirectory"/>.
 /// </summary>
 public sealed class CallOwnershipOptions
 {
@@ -127,7 +127,7 @@ public sealed class CallOwnershipOptions
 }
 
 /// <summary>
-/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.ITierCeilingProvider"/>.
+/// Configuration for <see cref="Coordination.ITierCeilingProvider"/>.
 /// </summary>
 public sealed class TierCeilingOptions
 {
@@ -141,7 +141,7 @@ public sealed class TierCeilingOptions
 }
 
 /// <summary>
-/// Configuration for <see cref="Agents.AI.ContactCenter.Coordination.IPodHeartbeat"/>
+/// Configuration for <see cref="Coordination.IPodHeartbeat"/>
 /// per ADR-0011. The heartbeat lease window is intentionally distinct from
 /// <see cref="CallOwnershipOptions.LeaseDuration"/>: the pod lease and the
 /// per-call lease are renewed in the same tick but Redis applies independent
@@ -198,7 +198,7 @@ public sealed class PodHeartbeatOptions
 
 /// <summary>
 /// Configuration for
-/// <see cref="Agents.AI.ContactCenter.Coordination.IWebhookForwarder"/> per
+/// <see cref="Coordination.IWebhookForwarder"/> per
 /// ADR-0011. Forwarding only happens inside one cluster (cross-cluster
 /// forwards are blocked by design), so the URL template targets the
 /// Kubernetes headless service that fronts the pods of the owning workload.

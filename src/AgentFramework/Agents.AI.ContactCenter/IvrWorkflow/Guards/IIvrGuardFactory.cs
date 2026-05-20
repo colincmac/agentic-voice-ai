@@ -35,10 +35,10 @@ public interface IIvrGuardBuildContext
 public interface IIvrPredicateRegistry
 {
     /// <summary>Register a synchronous predicate under a stable name.</summary>
-    IIvrPredicateRegistry Add(string name, System.Func<IvrWorkflowState, bool> predicate, string? failureMessage = null);
+    IIvrPredicateRegistry Add(string name, Func<IvrWorkflowState, bool> predicate, string? failureMessage = null);
 
     /// <summary>Register an async predicate under a stable name.</summary>
-    IIvrPredicateRegistry AddAsync(string name, System.Func<IvrWorkflowState, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> predicate, string? failureMessage = null);
+    IIvrPredicateRegistry AddAsync(string name, Func<IvrWorkflowState, CancellationToken, Task<bool>> predicate, string? failureMessage = null);
 
     /// <summary>Look up a registered predicate, throwing when it is missing.</summary>
     IIvrStepGuard Resolve(string name, string? failureMessageOverride = null);

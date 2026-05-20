@@ -173,7 +173,7 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers the Tier 4 DTMF strategy. Requires an <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/>
+    /// Registers the Tier 4 DTMF strategy. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
     /// to be registered separately for prompt playback.
     /// </summary>
     public CallSessionContainerBuilder AddDtmfStrategy(bool useStreaming = true)
@@ -193,7 +193,7 @@ public sealed class CallSessionContainerBuilder
     /// Registers the verb-based DTMF strategy. Pairs with
     /// <see cref="AcsCallAutomationEdge"/> and emits SpeakText + CollectDtmf
     /// directives instead of locally synthesized PCM. Requires no
-    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/>
+    /// <see cref="Media.Audio.ISpeechSynthesizer"/>
     /// since the platform handles TTS via attached Cognitive Services.
     /// </summary>
     public CallSessionContainerBuilder AddDtmfVerbStrategy()
@@ -226,9 +226,9 @@ public sealed class CallSessionContainerBuilder
 
     /// <summary>
     /// Registers the Tier 3 NLU strategy (<see cref="NluConversationStrategy"/>). Requires an
-    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechRecognizer"/>,
-    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/>, and
-    /// <see cref="Agents.AI.ContactCenter.IvrWorkflow.IIntentClassifier"/> to be registered separately.
+    /// <see cref="Media.Audio.ISpeechRecognizer"/>,
+    /// <see cref="Media.Audio.ISpeechSynthesizer"/>, and
+    /// <see cref="IvrWorkflow.IIntentClassifier"/> to be registered separately.
     /// </summary>
     public CallSessionContainerBuilder AddNluStrategy()
     {

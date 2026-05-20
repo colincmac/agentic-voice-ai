@@ -18,12 +18,12 @@ namespace Agents.AI.ContactCenter.Calling.Core;
 /// flavour of DTMF). Pair verb-based strategies with
 /// <see cref="AcsCallAutomationEdge"/> instead.
 /// </summary>
-public sealed class AcsCallerEdge : ICallEdge, ICallControl
+public sealed class AcsCallerStreamEdge : ICallEdge, ICallControl
 {
     private readonly WebSocket _webSocket;
     private readonly CallConnectionProperties _call;
     private readonly CallAutomationClient _callAutomationClient;
-    private readonly ILogger<AcsCallerEdge> _logger;
+    private readonly ILogger<AcsCallerStreamEdge> _logger;
     private readonly CancellationTokenSource _cts;
 
     private readonly Channel<AudioFrame> _inboundAudio = Channel.CreateBounded<AudioFrame>(
@@ -52,20 +52,20 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
     private int _disconnectFired;
     private readonly CallingTelemetry _telemetry;
 
-    public AcsCallerEdge(
+    public AcsCallerStreamEdge(
         WebSocket webSocket,
         CallConnectionProperties callConnection,
         CancellationToken httpContextCancellation,
         CallAutomationClient callAutomationClient,
 
-        ILogger<AcsCallerEdge>? logger = null,
+        ILogger<AcsCallerStreamEdge>? logger = null,
         CallingTelemetry? telemetry = null)
     {
         _webSocket = webSocket;
         _call = callConnection;
         _callAutomationClient = callAutomationClient;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(httpContextCancellation);
-        _logger = logger ?? NullLogger<AcsCallerEdge>.Instance;
+        _logger = logger ?? NullLogger<AcsCallerStreamEdge>.Instance;
         _telemetry = telemetry ?? CallingTelemetry.Default;
 
         Metadata = new CallEdgeMetadata
@@ -102,7 +102,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
         if (_callAutomationClient is null)
         {
             throw new InvalidOperationException(
-                $"{nameof(AcsCallerEdge)} {EdgeId} cannot hang up: no CallAutomationClient was provided.");
+                $"{nameof(AcsCallerStreamEdge)} {EdgeId} cannot hang up: no CallAutomationClient was provided.");
         }
 
         var connection = _callAutomationClient.GetCallConnection(_call.CallConnectionId);
@@ -114,7 +114,7 @@ public sealed class AcsCallerEdge : ICallEdge, ICallControl
         if (_callAutomationClient is null)
         {
             throw new InvalidOperationException(
-                $"{nameof(AcsCallerEdge)} {EdgeId} cannot transfer: no CallAutomationClient was provided.");
+                $"{nameof(AcsCallerStreamEdge)} {EdgeId} cannot transfer: no CallAutomationClient was provided.");
         }
 
         var connection = _callAutomationClient.GetCallConnection(_call.CallConnectionId);

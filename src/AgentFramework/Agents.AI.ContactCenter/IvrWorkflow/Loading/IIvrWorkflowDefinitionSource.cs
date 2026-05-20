@@ -31,4 +31,4 @@ public sealed record IvrWorkflowSourceEntry(
     string Yaml,
     string SourceName,
     string? ETag = null,
-    System.DateTimeOffset? LastModified = null);
+    DateTimeOffset? LastModified = null);

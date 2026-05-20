@@ -219,7 +219,7 @@ public sealed class IvrWorkflowFrameworkBuilder
 
     public IvrWorkflowFrameworkBuilder AddPredicateAsync(
         string name,
-        Func<IvrWorkflowState, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> predicate,
+        Func<IvrWorkflowState, CancellationToken, Task<bool>> predicate,
         string? failureMessage = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -245,5 +245,5 @@ internal sealed class IvrFrameworkRegistrations
 internal sealed record PredicateEntry(
     string Name,
     Func<IvrWorkflowState, bool>? Sync,
-    Func<IvrWorkflowState, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>? Async,
+    Func<IvrWorkflowState, CancellationToken, Task<bool>>? Async,
     string? FailureMessage);
