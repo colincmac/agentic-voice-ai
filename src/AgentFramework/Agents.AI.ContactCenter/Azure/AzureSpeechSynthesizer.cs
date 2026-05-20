@@ -92,20 +92,15 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
     private readonly string _gender;
 
     public AzureSpeechSynthesizer(
-        Uri endpoint,
-        string voiceName = "en-US-Ava:DragonHDLatestNeural",
-        SpeechSynthesisOutputFormat outputFormat = SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm,
+        SpeechConfig speechConfig,
         int concurrency = 2,
-        string locale = "en-US",
         string gender = "Female",
         ILogger<AzureSpeechSynthesizer>? logger = null)
     {
-        _speechConfig = SpeechConfig.FromEndpoint(endpoint, new AzureCliCredential());
-        //_speechConfig.SpeechSynthesisVoiceName = voiceName;
-        _speechConfig.SetSpeechSynthesisOutputFormat(outputFormat);
+        _speechConfig = speechConfig;
 
-        _locale = locale;
         _gender = gender;
+        _locale = speechConfig.SpeechSynthesisLanguage ?? "en-US";
         _logger = logger ?? NullLogger<AzureSpeechSynthesizer>.Instance;
 
         _pool = new SynthesizerPool(

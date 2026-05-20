@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Transcription;
+using Azure.Core;
 using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,8 @@ public sealed class AzureSpeechServiceOptions
 
     /// <summary>Maximum number of pooled instances to retain (default: 100).</summary>
     public int MaximumRetainedCapacity { get; set; } = 100;
+
+    public TokenCredential Credential { get; set; } = new DefaultAzureCredential();
 }
 
 /// <summary>
@@ -83,9 +86,10 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
         _logger = logger ?? NullLogger<AzureSpeechService>.Instance;
 
         // Create shared SpeechConfig
-        _speechConfig = SpeechConfig.FromEndpoint(options.Endpoint, new AzureCliCredential());
+        _speechConfig = SpeechConfig.FromEndpoint(options.Endpoint, credential: options.Credential);
         _speechConfig.SpeechRecognitionLanguage = options.RecognitionLocale;
         _speechConfig.SetSpeechSynthesisOutputFormat(options.OutputFormat);
+        _speechConfig.SpeechSynthesisVoiceName = options.SynthesisVoiceName;
 
         _logger.LogInformation(
             "Azure Speech Service initialized: Endpoint={Endpoint} RecognitionLocale={RecognitionLocale} SynthesisVoice={SynthesisVoice}",
@@ -106,8 +110,7 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
         _logger.LogDebug("Creating new speech recognizer");
 
         return new AzureSpeechRecognizer(
-            _options.Endpoint,
-            locale: _options.RecognitionLocale,
+            _speechConfig,
             concurrency: _options.Concurrency,
             logger: _logger as ILogger<AzureSpeechRecognizer>);
     }
@@ -126,11 +129,8 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
             _logger.LogDebug("Creating shared speech synthesizer");
 
             _synthesizer = new AzureSpeechSynthesizer(
-                _options.Endpoint,
-                voiceName: _options.SynthesisVoiceName,
-                outputFormat: _options.OutputFormat,
+                _speechConfig,
                 concurrency: _options.Concurrency,
-                locale: _options.SynthesisLocale,
                 gender: _options.SynthesisGender,
                 logger: _logger as ILogger<AzureSpeechSynthesizer>);
         }
@@ -159,8 +159,7 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
         _recognizer ??= new AzureSpeechRecognizer(
-            _options.Endpoint,
-            locale: _options.RecognitionLocale,
+            _speechConfig,
             concurrency: _options.Concurrency,
             logger: _logger as ILogger<AzureSpeechRecognizer>);
 
@@ -173,8 +172,7 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
         _recognizer ??= new AzureSpeechRecognizer(
-            _options.Endpoint,
-            locale: _options.RecognitionLocale,
+            _speechConfig,
             concurrency: _options.Concurrency,
             logger: _logger as ILogger<AzureSpeechRecognizer>);
 

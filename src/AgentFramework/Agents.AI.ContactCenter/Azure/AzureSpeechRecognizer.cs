@@ -85,7 +85,6 @@ public sealed class AzureSpeechRecognizer : ISpeechRecognizer
     private readonly SpeechConfig _speechConfig;
     private readonly RecognizerPool _pool;
     private readonly ILogger<AzureSpeechRecognizer> _logger;
-    private readonly string _locale;
 
     private SpeechRecognizer? _recognizer;
     private PushAudioInputStream? _audioInputStream;
@@ -97,14 +96,11 @@ public sealed class AzureSpeechRecognizer : ISpeechRecognizer
     private bool _isDisposed;
 
     public AzureSpeechRecognizer(
-        Uri endpoint,
-        string locale = "en-US",
+        SpeechConfig speechConfig,
         int concurrency = 2,
         ILogger<AzureSpeechRecognizer>? logger = null)
     {
-        _speechConfig = SpeechConfig.FromEndpoint(endpoint, new AzureCliCredential());
-        _speechConfig.SpeechRecognitionLanguage = locale;
-        _locale = locale;
+        _speechConfig = speechConfig;
         _logger = logger ?? NullLogger<AzureSpeechRecognizer>.Instance;
 
         _pool = new RecognizerPool(
