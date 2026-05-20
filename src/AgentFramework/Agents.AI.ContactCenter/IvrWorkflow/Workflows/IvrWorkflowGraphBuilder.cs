@@ -10,9 +10,13 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Workflows;
 public sealed class IvrWorkflowGraphBuilder : IIvrWorkflowGraphBuilder
 {
     /// <inheritdoc/>
-    public Workflow Build(CompiledIvrWorkflow workflow)
+    public Workflow Build(CompiledIvrWorkflow workflow) => Build(workflow, runnerSelector: static _ => null);
+
+    /// <inheritdoc/>
+    public Workflow Build(CompiledIvrWorkflow workflow, IvrStageRunnerSelector runnerSelector)
     {
         ArgumentNullException.ThrowIfNull(workflow);
+        ArgumentNullException.ThrowIfNull(runnerSelector);
 
         if (workflow.Stages.Count == 0)
         {
@@ -28,7 +32,7 @@ public sealed class IvrWorkflowGraphBuilder : IIvrWorkflowGraphBuilder
                 throw new IvrWorkflowGraphBuildException(workflow.Name, $"Duplicate stage id '{stage.Id}'.");
             }
 
-            executors[stage.Id] = new IvrStageExecutor(stage);
+            executors[stage.Id] = new IvrStageExecutor(stage, runnerSelector(stage));
         }
 
         var entry = executors[workflow.Stages[0].Id];
@@ -41,15 +45,19 @@ public sealed class IvrWorkflowGraphBuilder : IIvrWorkflowGraphBuilder
             builder.WithDescription(workflow.Description);
         }
 
-        var terminalExecutors = new List<ExecutorBinding>();
+        // In live mode (any stage has a runner) every executor may yield a workflow output
+        // (Complete / Faulted outcomes can fire from any stage), so they all need to be
+        // registered as output sources. In preview mode only terminal stages yield.
+        var liveMode = workflow.Stages.Any(s => executors[s.Id].Runner is not null);
+        var outputExecutors = new List<ExecutorBinding>();
 
         foreach (var stage in workflow.Stages)
         {
             var source = executors[stage.Id];
 
-            if (stage.Terminal)
+            if (stage.Terminal || liveMode)
             {
-                terminalExecutors.Add(source);
+                outputExecutors.Add(source);
 
                 // Terminal stages still expose any explicit transitions for visualization parity.
             }
@@ -87,9 +95,9 @@ public sealed class IvrWorkflowGraphBuilder : IIvrWorkflowGraphBuilder
             }
         }
 
-        if (terminalExecutors.Count > 0)
+        if (outputExecutors.Count > 0)
         {
-            builder.WithOutputFrom([.. terminalExecutors]);
+            builder.WithOutputFrom([.. outputExecutors]);
         }
 
         return builder.Build();
