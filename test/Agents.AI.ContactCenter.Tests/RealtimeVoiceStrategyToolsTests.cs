@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
@@ -114,6 +115,176 @@ public class RealtimeVoiceStrategyToolsTests
             InboundAudio = Channel.CreateUnbounded<AudioFrame>().Reader,
             InboundDtmf = Channel.CreateUnbounded<DtmfTone>().Reader,
             Services = new ServiceCollection().BuildServiceProvider(),
+        };
+    }
+
+    [Fact]
+    public async Task StartAsync_includes_advance_tool_when_step_has_transitions()
+    {
+        var tool = AIFunctionFactory.Create((Func<object?>)(() => null), "do_thing");
+
+        var workflow = BuildWorkflowWithTransitions(
+            initialStepId: "menu",
+            initialTools: [tool],
+            transitions: ["confirm"],
+            otherStepIds: ["confirm"]);
+
+        var backend = new ControllableRealtimeBackend("agent-1", "Agent 1");
+
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+
+        await strategy.StartAsync(BuildStartContext());
+
+        Assert.Single(backend.ToolUpdates);
+        var pushed = backend.ToolUpdates[0];
+        Assert.Equal(2, pushed.Count);
+        Assert.Contains(pushed, t => t.Name == IvrAdvanceTool.AdvanceToolName);
+
+        await strategy.StopAsync();
+    }
+
+    [Fact]
+    public async Task FunctionCalled_advance_transitions_navigator_and_refreshes_stage()
+    {
+        var initialTool = AIFunctionFactory.Create((Func<object?>)(() => null), "menu_tool");
+        var confirmTool = AIFunctionFactory.Create((Func<object?>)(() => null), "confirm_tool");
+
+        var workflow = new RealtimeIvrWorkflowDefinition
+        {
+            Name = "advance-test",
+            BasePrompt = new RealtimePrompt(),
+            Steps =
+            [
+                new RealtimeIvrWorkflowStep
+                {
+                    Id = "menu",
+                    AvailableTools = [initialTool],
+                    ConversationState = new ConversationState
+                    {
+                        Id = "menu",
+                        Description = "menu",
+                        Goal = "menu",
+                        Instructions = ["pick"],
+                        Transitions = [new StateTransition { NextStep = "confirm", Condition = "default" }],
+                    },
+                },
+                new RealtimeIvrWorkflowStep
+                {
+                    Id = "confirm",
+                    AvailableTools = [confirmTool],
+                    Terminal = true,
+                    ConversationState = new ConversationState
+                    {
+                        Id = "confirm",
+                        Description = "confirm",
+                        Goal = "confirm",
+                        Instructions = ["finalize"],
+                    },
+                },
+            ]
+        };
+
+        var backend = new ControllableRealtimeBackend("agent-adv", "Adv Agent");
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+
+        await strategy.StartAsync(BuildStartContext());
+        Assert.True(await backend.WaitForConnectAsync(TimeSpan.FromSeconds(2)));
+
+        // Drain the initial events (initial WorkflowStepEntered + AgentSpeakingChanged) so the
+        // assertions below observe only the transition-driven events.
+        await DrainEventsAsync(strategy, expected: 2);
+
+        // Simulate the realtime model invoking the advance tool with the next stage id.
+        await backend.EmitAsync(new RealtimeBackendUpdate.FunctionCalled(
+            Name: IvrAdvanceTool.AdvanceToolName,
+            Arguments: new Dictionary<string, object?> { ["next_stage"] = "confirm" },
+            CallId: "call-1",
+            At: DateTimeOffset.UtcNow));
+
+        // Wait for the strategy to: emit FunctionCalled, perform the transition (which pushes
+        // a new tools and prompt update), and emit WorkflowStepEntered + AgentSpeakingChanged.
+        var events = await DrainEventsAsync(strategy, expected: 3, timeoutMs: 2000);
+
+        Assert.Contains(events, e => e is StrategyEvent.FunctionCalled fc && fc.Name == "advance");
+        Assert.Contains(events, e => e is StrategyEvent.WorkflowStepEntered w && w.StepId == "confirm");
+
+        // Navigator should now be on "confirm" and the backend should have received a second
+        // tools update (no advance tool this time because confirm is terminal).
+        Assert.Equal("confirm", strategy.WorkflowState.CurrentStepName);
+        Assert.True(backend.ToolUpdates.Count >= 2, $"expected >= 2 tool updates, got {backend.ToolUpdates.Count}");
+        var lastTools = backend.ToolUpdates[^1];
+        Assert.DoesNotContain(lastTools, t => t.Name == IvrAdvanceTool.AdvanceToolName);
+
+        await strategy.StopAsync();
+    }
+
+    private static async Task<List<StrategyEvent>> DrainEventsAsync(
+        RealtimeVoiceStrategy strategy,
+        int expected,
+        int timeoutMs = 1000)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        var collected = new List<StrategyEvent>();
+        while (collected.Count < expected && DateTimeOffset.UtcNow < deadline)
+        {
+            using var readCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            try
+            {
+                var ev = await strategy.Events.ReadAsync(readCts.Token);
+                collected.Add(ev);
+            }
+            catch (OperationCanceledException)
+            {
+                // continue polling until the deadline
+            }
+        }
+        return collected;
+    }
+
+    private static RealtimeIvrWorkflowDefinition BuildWorkflowWithTransitions(
+        string initialStepId,
+        IReadOnlyList<AITool>? initialTools,
+        string[] transitions,
+        string[] otherStepIds)
+    {
+        var steps = new List<RealtimeIvrWorkflowStep>
+        {
+            new RealtimeIvrWorkflowStep
+            {
+                Id = initialStepId,
+                AvailableTools = initialTools,
+                ConversationState = new ConversationState
+                {
+                    Id = initialStepId,
+                    Description = $"step {initialStepId}",
+                    Goal = "test",
+                    Instructions = ["do the thing"],
+                    Transitions = transitions.Length == 0
+                        ? null
+                        : [.. transitions.Select(t => new StateTransition { NextStep = t, Condition = "default" })],
+                },
+            },
+        };
+        foreach (var s in otherStepIds)
+        {
+            steps.Add(new RealtimeIvrWorkflowStep
+            {
+                Id = s,
+                Terminal = true,
+                ConversationState = new ConversationState
+                {
+                    Id = s,
+                    Description = s,
+                    Goal = s,
+                    Instructions = ["done"],
+                },
+            });
+        }
+        return new RealtimeIvrWorkflowDefinition
+        {
+            Name = "tools-test-ivr-transitions",
+            BasePrompt = new RealtimePrompt(),
+            Steps = steps,
         };
     }
 

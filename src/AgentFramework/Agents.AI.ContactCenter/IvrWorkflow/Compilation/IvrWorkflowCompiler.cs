@@ -284,6 +284,18 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             MaxDuration = ParseDuration(stage.MaxDuration, stage.Id, errors),
             RequiredAuthLevel = ResolveStageAuthLevel(baseRequiredAuth, stage.Requires),
             StepDtmfConfiguration = dtmfConfig,
+            Terminal = stage.Terminal,
+            Intents = compiledIntents.Count == 0
+                ? new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase)
+                : compiledIntents.ToDictionary(
+                    kv => kv.Key,
+                    kv => new RealtimeIvrWorkflowIntent(
+                        kv.Value.Name,
+                        kv.Value.Examples,
+                        kv.Value.NextStageId,
+                        kv.Value.CapabilityId,
+                        kv.Value.ConfirmPrompt),
+                    StringComparer.OrdinalIgnoreCase),
         };
 
         return new CompiledIvrStage

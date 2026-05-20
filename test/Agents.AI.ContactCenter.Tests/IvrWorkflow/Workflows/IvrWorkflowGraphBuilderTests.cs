@@ -153,6 +153,74 @@ public class IvrWorkflowGraphBuilderTests
         Assert.Equal("menu", workflow.StartExecutorId);
     }
 
+    [Fact]
+    public void GraphEdges_match_runtime_transition_closure_for_banking_main()
+    {
+        // The graph is currently a preview / documentation projection of the runtime —
+        // CallSessionFactory consumes CompiledIvrWorkflow.Runtime directly. This test
+        // pins the contract: every edge the graph builder emits must correspond to a
+        // transition the runtime can actually drive (from the union of ConversationState
+        // transitions and DTMF menu / collect.onValidNextStage targets).
+        var compiled = CompileSample("banking-main.yaml");
+        var workflow = new IvrWorkflowGraphBuilder().Build(compiled);
+
+        var edges = workflow.ReflectEdges();
+
+        foreach (var stage in compiled.Stages)
+        {
+            var runtimeTargets = ExpectedRuntimeTargets(stage);
+
+            if (runtimeTargets.Count == 0)
+            {
+                Assert.False(edges.ContainsKey(stage.Id),
+                    $"Stage '{stage.Id}' has no runtime transitions but graph exposes outgoing edges.");
+                continue;
+            }
+
+            Assert.True(edges.ContainsKey(stage.Id), $"Stage '{stage.Id}' missing from graph edges");
+            var edgeTargets = edges[stage.Id]
+                .SelectMany(e => e.Connection.SinkIds)
+                .ToHashSet(StringComparer.Ordinal);
+            Assert.Equal(runtimeTargets, edgeTargets);
+        }
+    }
+
+    private static HashSet<string> ExpectedRuntimeTargets(CompiledIvrStage stage)
+    {
+        var targets = new HashSet<string>(StringComparer.Ordinal);
+
+        if (stage.RuntimeStep.ConversationState.Transitions is { } transitions)
+        {
+            foreach (var t in transitions)
+            {
+                if (!string.IsNullOrWhiteSpace(t.NextStep))
+                {
+                    targets.Add(t.NextStep);
+                }
+            }
+        }
+
+        if (stage.RuntimeStep.StepDtmfConfiguration is { } dtmf)
+        {
+            if (dtmf.MenuOptions is { Count: > 0 } options)
+            {
+                foreach (var kv in options)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Value.NextStepId))
+                    {
+                        targets.Add(kv.Value.NextStepId!);
+                    }
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(dtmf.OnValidNextStepId))
+            {
+                targets.Add(dtmf.OnValidNextStepId!);
+            }
+        }
+
+        return targets;
+    }
+
     private static CompiledIvrStage CloneWithBadTransition(CompiledIvrStage stage)
     {
         // Re-use the runtime step but override transitions with a target that doesn't exist.

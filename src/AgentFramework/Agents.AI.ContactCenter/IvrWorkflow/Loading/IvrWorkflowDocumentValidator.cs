@@ -83,9 +83,89 @@ public static class IvrWorkflowDocumentValidator
             {
                 ValidateDtmf(stage.Id, dtmf, stageIds, capabilityIds, errors);
             }
+
+            ValidateTransitionReachability(stage, errors);
         }
 
         return new IvrWorkflowValidationResult(errors);
+    }
+
+    /// <summary>
+    /// Ensure non-terminal stages whose primary modality is realtime or NLU declare at
+    /// least one way to leave the stage. Without this check a workflow can author a
+    /// realtime stage with no transitions, no intents and no <c>on_exit</c>, and the
+    /// realtime strategy will sit on the stage forever because there is no advance trigger
+    /// the model can fire. DTMF-only stages are intentionally exempt because the DTMF
+    /// runtime can still complete the call via <c>tool</c> / <c>capability</c> on a digit.
+    /// </summary>
+    private static void ValidateTransitionReachability(IvrStageDocument stage, List<string> errors)
+    {
+        if (stage.Terminal)
+        {
+            return;
+        }
+
+        if (HasTransitionAffordance(stage))
+        {
+            return;
+        }
+
+        // If the stage only has DTMF configured we let the DTMF-only path handle reachability —
+        // the DTMF strategies can complete the call via menu options without an explicit transition.
+        var hasNonDtmfModality = stage.Realtime is not null || stage.Intents.Count > 0;
+        if (!hasNonDtmfModality && stage.Dtmf is not null)
+        {
+            return;
+        }
+
+        errors.Add(
+            $"Stage '{stage.Id}' is non-terminal but has no transitions, intents with nextStage, or onExit; " +
+            "realtime/NLU strategies cannot advance from it. Add `transitions:`, an intent with `nextStage:`, or `onExit:`.");
+    }
+
+    private static bool HasTransitionAffordance(IvrStageDocument stage)
+    {
+        if (!string.IsNullOrWhiteSpace(stage.OnExit))
+        {
+            return true;
+        }
+
+        foreach (var t in stage.Transitions)
+        {
+            if (!string.IsNullOrWhiteSpace(t.To))
+            {
+                return true;
+            }
+        }
+
+        foreach (var intent in stage.Intents)
+        {
+            if (!string.IsNullOrWhiteSpace(intent.NextStage)
+                || !string.IsNullOrWhiteSpace(intent.Capability))
+            {
+                return true;
+            }
+        }
+
+        if (stage.Dtmf is { } dtmf)
+        {
+            foreach (var option in dtmf.Options)
+            {
+                if (!string.IsNullOrWhiteSpace(option.NextStage)
+                    || !string.IsNullOrWhiteSpace(option.Capability)
+                    || !string.IsNullOrWhiteSpace(option.Tool))
+                {
+                    return true;
+                }
+            }
+
+            if (dtmf.Collect is { } collect && !string.IsNullOrWhiteSpace(collect.OnValidNextStage))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void ValidateIntents(

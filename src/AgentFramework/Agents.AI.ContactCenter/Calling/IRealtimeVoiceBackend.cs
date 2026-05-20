@@ -66,5 +66,20 @@ public abstract record RealtimeBackendUpdate(DateTimeOffset At)
     public sealed record Audio(ReadOnlyMemory<byte> Pcm, DateTimeOffset At) : RealtimeBackendUpdate(At);
     public sealed record Transcript(string Speaker, string Text, bool IsFinal, DateTimeOffset At) : RealtimeBackendUpdate(At);
     public sealed record AgentText(string Text, DateTimeOffset At) : RealtimeBackendUpdate(At);
+
+    /// <summary>
+    /// Emitted when the realtime model invokes a tool. Strategies use this to react to
+    /// orchestration-level functions (for example the synthesized IVR <c>advance</c> tool
+    /// that drives stage transitions) without having to subscribe to the underlying
+    /// <c>FunctionCallContent</c> stream. <paramref name="Arguments"/> is the parsed
+    /// argument dictionary; <paramref name="CallId"/> is the realtime provider's call id
+    /// when available.
+    /// </summary>
+    public sealed record FunctionCalled(
+        string Name,
+        IReadOnlyDictionary<string, object?> Arguments,
+        string? CallId,
+        DateTimeOffset At) : RealtimeBackendUpdate(At);
+
     public sealed record Faulted(Exception Exception, string Message, DateTimeOffset At) : RealtimeBackendUpdate(At);
 }
