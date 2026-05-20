@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -94,10 +95,8 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
         await primary.Backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         var step = _navigator.EnterInitialStep();
-        var prompt = _navigator.BuildCurrentStepPrompt();
-        await primary.Backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+        await ApplyStageOnAsync(primary, step, cancellationToken).ConfigureAwait(false);
 
-        await EmitAsync(new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow)).ConfigureAwait(false);
         await EmitAsync(new StrategyEvent.AgentSpeakingChanged(primary.AgentId, primary.DisplayName, DateTimeOffset.UtcNow)).ConfigureAwait(false);
 
         StartPrimaryPumps(primary);
@@ -177,8 +176,10 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
         try
         {
-            var prompt = _navigator!.BuildCurrentStepPrompt();
-            await newPrimary.Backend.UpdateSystemPromptAsync(prompt, _cts.Token).ConfigureAwait(false);
+            if (_navigator?.CurrentStep is { } currentStep)
+            {
+                await ApplyStageOnAsync(newPrimary, currentStep, _cts.Token).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) { _logger.LogWarning(ex, "New primary prompt update failed"); }
 
@@ -247,6 +248,12 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
                         var uEvent = new StrategyEvent.AgentUtterance(primary.AgentId, text.Text, text.At);
                         _utterances.Add(uEvent);
                         await EmitAsync(uEvent).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.FunctionCalled call:
+                        await EmitAsync(new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At))
+                            .ConfigureAwait(false);
+                        await HandleFunctionCallAsync(primary, call, ct).ConfigureAwait(false);
                         break;
 
                     case RealtimeBackendUpdate.Faulted fault:
@@ -353,6 +360,94 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     }
 
     private ValueTask EmitAsync(StrategyEvent ev) => _events.Writer.WriteAsync(ev, CancellationToken.None);
+
+    /// <summary>
+    /// Push the current stage's prompt and guard-wrapped tool surface (including the
+    /// synthesized <see cref="IvrAdvanceTool"/> when the stage can advance) onto
+    /// <paramref name="primary"/>, and emit <see cref="StrategyEvent.WorkflowStepEntered"/>
+    /// for observers. Called on session start, after every primary swap, and after every
+    /// successful navigator transition driven by an advance call.
+    /// </summary>
+    private async Task ApplyStageOnAsync(IConversationalAgent primary, RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        var tools = _navigator!.WrapToolsWithCurrentGuards(step.AvailableTools ?? []).ToList();
+
+        if (!step.Terminal)
+        {
+            var advance = IvrAdvanceTool.TryCreate(step);
+            if (advance is not null)
+            {
+                tools.Add(advance);
+            }
+        }
+
+        await primary.Backend.UpdateToolsAsync(tools, ct).ConfigureAwait(false);
+
+        var prompt = _navigator.BuildCurrentStepPrompt();
+        await primary.Backend.UpdateSystemPromptAsync(prompt, ct).ConfigureAwait(false);
+
+        await EmitAsync(new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Dispatch a function call from <paramref name="primary"/>'s backend. Today only the
+    /// synthesized advance tool is handled here; other calls are surfaced as
+    /// <see cref="StrategyEvent.FunctionCalled"/> and left to the backend's own pipeline.
+    /// </summary>
+    private async Task HandleFunctionCallAsync(IConversationalAgent primary, RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
+    {
+        if (!string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
+        {
+            return;
+        }
+        if (_navigator?.CurrentStep is not { } currentStep)
+        {
+            return;
+        }
+
+        var chosen = ExtractAdvanceChoice(call.Arguments);
+        if (chosen is null)
+        {
+            _logger.LogWarning("Advance tool fired on ensemble stage {StepId} without an argument", currentStep.Id);
+            return;
+        }
+
+        var resolution = IvrAdvanceTool.Resolve(currentStep, chosen);
+        if (!resolution.IsTransition || resolution.TargetStageId is not { Length: > 0 } target)
+        {
+            return;
+        }
+
+        var result = _navigator.TransitionTo(target);
+        if (!result.Succeeded || result.NewStep is null)
+        {
+            _logger.LogWarning(
+                "Ensemble advance to '{Target}' from '{Current}' rejected: {Reason}",
+                target, currentStep.Id, result.Reason);
+            return;
+        }
+
+        await ApplyStageOnAsync(primary, result.NewStep, ct).ConfigureAwait(false);
+
+        if (result.NewStep.Terminal)
+        {
+            _navigator.Complete();
+            await _cts.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static string? ExtractAdvanceChoice(IReadOnlyDictionary<string, object?> arguments)
+    {
+        if (arguments.TryGetValue(IvrAdvanceTool.NextStageArgumentName, out var value) && value is not null)
+        {
+            return value.ToString();
+        }
+        if (arguments.Count == 1)
+        {
+            return arguments.Values.First()?.ToString();
+        }
+        return null;
+    }
 
     /// <summary>
     /// Bridge that lets delegates publish insights into the ensemble's bus through

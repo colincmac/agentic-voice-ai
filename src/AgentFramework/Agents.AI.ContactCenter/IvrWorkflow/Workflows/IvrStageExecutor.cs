@@ -13,8 +13,19 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Workflows;
 /// (registered by <see cref="IvrWorkflowGraphBuilder"/>) can route to the next stage.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Preview only.</b> The graph produced by <see cref="IvrWorkflowGraphBuilder"/> is currently
+/// used for tooling (visualization, structural validation, graph-shape tests) — the live call
+/// runtime in <see cref="Calling.Core.CallSessionFactory"/> consumes
+/// <see cref="CompiledIvrWorkflow.Runtime"/> directly through the per-tier
+/// <see cref="Calling.IConversationStrategyFactory"/> registrations. The bridge intentionally
+/// keeps the graph shape in sync with the runtime's transition closure so that a future
+/// promotion (where the graph becomes the orchestrator) does not break authoring contracts.
+/// </para>
+/// <para>
 /// Terminal stages skip the forward step and yield their incoming message as a workflow
 /// output via <see cref="IWorkflowContext.YieldOutputAsync(object, CancellationToken)"/>.
+/// </para>
 /// </remarks>
 public sealed class IvrStageExecutor : Executor<IvrStageMessage>
 {
