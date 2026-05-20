@@ -43,20 +43,29 @@ public sealed class AzureSpeechServiceOptions
 
 /// <summary>
 /// Composite Azure Speech service providing both speech recognition (STT) and synthesis (TTS).
-/// Manages shared <see cref="SpeechConfig"/> and coordinates recognizer/synthesizer pools.
+/// Implements both <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/> for
+/// direct use in Contact Center strategies.
 /// </summary>
 /// <remarks>
 /// This service wraps <see cref="AzureSpeechRecognizer"/> and <see cref="AzureSpeechSynthesizer"/>
 /// with shared configuration and lifecycle management. Use this when you need both STT and TTS
 /// capabilities in the same application context.
+/// 
+/// The recognizer implementation is session-scoped: each instance manages one recognition session.
+/// The synthesizer implementation is stateless and thread-safe: can be reused across multiple calls.
 /// </remarks>
-public sealed class AzureSpeechService : IAsyncDisposable
+public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
 {
     private readonly AzureSpeechServiceOptions _options;
     private readonly ILogger<AzureSpeechService> _logger;
     private readonly SpeechConfig _speechConfig;
 
+    // Synthesizer backing (lazy, shared singleton)
     private AzureSpeechSynthesizer? _synthesizer;
+
+    // Recognizer backing (created lazily per instance)
+    private AzureSpeechRecognizer? _recognizer;
+
     private bool _isDisposed;
 
     public AzureSpeechService(
@@ -129,69 +138,59 @@ public sealed class AzureSpeechService : IAsyncDisposable
         return _synthesizer;
     }
 
-    /// <summary>
-    /// Convenience method to synthesize text directly without managing the synthesizer lifecycle.
-    /// </summary>
-    /// <param name="text">The text to synthesize into speech.</param>
-    /// <param name="inputFormat">The input format (Text or SSML).</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>An async stream of raw audio frames (PCM).</returns>
-    public async IAsyncEnumerable<ReadOnlyMemory<byte>> SynthesizeAsync(
+    #region ISpeechSynthesizer Implementation
+
+    /// <inheritdoc />
+    IAsyncEnumerable<ReadOnlyMemory<byte>> ISpeechSynthesizer.SynthesizeAsync(
         string text,
-        SynthesizerInputFormat inputFormat = SynthesizerInputFormat.Text,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        SynthesizerInputFormat inputFormat,
+        CancellationToken cancellationToken)
     {
-        var synthesizer = GetSynthesizer();
+        return GetSynthesizer().SynthesizeAsync(text, inputFormat, cancellationToken);
+    }
 
-        await foreach (var frame in synthesizer.SynthesizeAsync(text, inputFormat, cancellationToken).ConfigureAwait(false))
+    #endregion
+
+    #region ISpeechRecognizer Implementation
+
+    /// <inheritdoc />
+    async Task ISpeechRecognizer.WriteAudioAsync(ReadOnlyMemory<byte> audioData, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        _recognizer ??= new AzureSpeechRecognizer(
+            _options.Endpoint,
+            locale: _options.RecognitionLocale,
+            concurrency: _options.Concurrency,
+            logger: _logger as ILogger<AzureSpeechRecognizer>);
+
+        await _recognizer.WriteAudioAsync(audioData, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    IAsyncEnumerable<TranscriptSegment> ISpeechRecognizer.GetTranscriptsAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        _recognizer ??= new AzureSpeechRecognizer(
+            _options.Endpoint,
+            locale: _options.RecognitionLocale,
+            concurrency: _options.Concurrency,
+            logger: _logger as ILogger<AzureSpeechRecognizer>);
+
+        return _recognizer.GetTranscriptsAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    async Task ISpeechRecognizer.CompleteAsync(CancellationToken cancellationToken)
+    {
+        if (_recognizer is not null)
         {
-            yield return frame;
+            await _recognizer.CompleteAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Convenience method to create a recognizer and stream transcripts from audio.
-    /// </summary>
-    /// <param name="audioStream">Async stream of raw PCM audio data.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>An async stream of transcript segments.</returns>
-    public async IAsyncEnumerable<TranscriptSegment> RecognizeAsync(
-        IAsyncEnumerable<ReadOnlyMemory<byte>> audioStream,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await using var recognizer = CreateRecognizer();
-
-        // Start streaming audio into the recognizer
-        var audioTask = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var audioData in audioStream.WithCancellation(cancellationToken).ConfigureAwait(false))
-                {
-                    await recognizer.WriteAudioAsync(audioData, cancellationToken).ConfigureAwait(false);
-                }
-
-                await recognizer.CompleteAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogDebug("Audio streaming canceled");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error streaming audio to recognizer");
-            }
-        }, cancellationToken);
-
-        // Stream transcripts as they arrive
-        await foreach (var segment in recognizer.GetTranscriptsAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return segment;
-        }
-
-        // Wait for audio streaming to complete
-        await audioTask.ConfigureAwait(false);
-    }
+    #endregion
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -205,6 +204,13 @@ public sealed class AzureSpeechService : IAsyncDisposable
 
         _logger.LogInformation("Disposing Azure Speech Service");
 
+        // Dispose recognizer if it was created
+        if (_recognizer is not null)
+        {
+            await _recognizer.DisposeAsync().ConfigureAwait(false);
+        }
+
+        // Dispose synthesizer if it was created
         if (_synthesizer is not null)
         {
             _synthesizer.Dispose();
@@ -212,6 +218,5 @@ public sealed class AzureSpeechService : IAsyncDisposable
 
         // SpeechConfig doesn't implement IDisposable in the Azure Speech SDK
         // It will be garbage collected when no longer referenced
-        await Task.CompletedTask;
     }
 }

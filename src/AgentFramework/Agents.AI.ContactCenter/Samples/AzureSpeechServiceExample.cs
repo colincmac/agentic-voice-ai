@@ -1,5 +1,6 @@
 using Agents.AI.ContactCenter.Azure;
 using Agents.AI.ContactCenter.DependencyInjection;
+using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,7 +9,8 @@ namespace Agents.AI.ContactCenter.Samples;
 
 /// <summary>
 /// Example demonstrating how to configure and use the Azure Speech Service composite
-/// for both speech recognition (STT) and synthesis (TTS).
+/// for both speech recognition (STT) and synthesis (TTS). The service implements both
+/// <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/> interfaces.
 /// </summary>
 public static class AzureSpeechServiceExample
 {
@@ -28,6 +30,11 @@ public static class AzureSpeechServiceExample
         //   "MaximumRetainedCapacity": 100
         // }
         services.AddAzureSpeech(configuration);
+
+        // The service is now available as:
+        // - AzureSpeechService (concrete type)
+        // - ISpeechRecognizer (for STT scenarios)
+        // - ISpeechSynthesizer (for TTS scenarios)
 
         // Or specify a custom configuration section:
         // services.AddAzureSpeech(configuration.GetSection("MyCustomSection"));
@@ -69,14 +76,13 @@ public static class AzureSpeechServiceExample
     }
 
     /// <summary>
-    /// Example 4: Use the service for text-to-speech synthesis.
+    /// Example 4: Inject as ISpeechSynthesizer (for strategies that only need TTS).
     /// </summary>
-    public static async Task SynthesizeSpeechExample(AzureSpeechService speechService, CancellationToken cancellationToken)
+    public static async Task UseSynthesizerInterfaceExample(ISpeechSynthesizer synthesizer, CancellationToken cancellationToken)
     {
         var text = "Hello! Welcome to the Azure Speech Service.";
 
-        // Using the convenience method
-        await foreach (var audioFrame in speechService.SynthesizeAsync(text, cancellationToken: cancellationToken))
+        await foreach (var audioFrame in synthesizer.SynthesizeAsync(text, cancellationToken: cancellationToken))
         {
             // Process audio frame (e.g., send to transport, save to file)
             Console.WriteLine($"Received audio frame: {audioFrame.Length} bytes");
@@ -84,36 +90,10 @@ public static class AzureSpeechServiceExample
     }
 
     /// <summary>
-    /// Example 5: Use the service for speech recognition (speech-to-text).
+    /// Example 5: Inject as ISpeechRecognizer (for strategies that only need STT).
     /// </summary>
-    public static async Task RecognizeSpeechExample(
-        AzureSpeechService speechService,
-        IAsyncEnumerable<ReadOnlyMemory<byte>> audioStream,
-        CancellationToken cancellationToken)
+    public static async Task UseRecognizerInterfaceExample(ISpeechRecognizer recognizer, CancellationToken cancellationToken)
     {
-        // Using the convenience method
-        await foreach (var transcript in speechService.RecognizeAsync(audioStream, cancellationToken))
-        {
-            if (transcript.IsFinal)
-            {
-                Console.WriteLine($"[FINAL] {transcript.Text}");
-            }
-            else
-            {
-                Console.WriteLine($"[INTERIM] {transcript.Text}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Example 6: Use the service with manual recognizer lifecycle management.
-    /// </summary>
-    public static async Task RecognizeSpeechWithManualLifecycleExample(
-        AzureSpeechService speechService,
-        CancellationToken cancellationToken)
-    {
-        await using var recognizer = speechService.CreateRecognizer();
-
         // Start consuming transcripts in background
         var transcriptTask = Task.Run(async () =>
         {
@@ -142,32 +122,43 @@ public static class AzureSpeechServiceExample
     }
 
     /// <summary>
-    /// Example 7: Use the service with manual synthesizer access.
+    /// Example 6: Inject as concrete type for factory methods.
     /// </summary>
-    public static async Task SynthesizeSpeechWithManualAccessExample(
-        AzureSpeechService speechService,
-        CancellationToken cancellationToken)
+    public static async Task UseConcreteTypeExample(AzureSpeechService speechService, CancellationToken cancellationToken)
     {
+        // Create independent recognizer instances
+        await using var recognizer1 = speechService.CreateRecognizer();
+        await using var recognizer2 = speechService.CreateRecognizer();
+
+        // Get shared synthesizer
         var synthesizer = speechService.GetSynthesizer();
 
-        // Use SSML for more control
-        var ssml = @"
-<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-    <voice name='en-US-Ava:DragonHDLatestNeural'>
-        <prosody rate='slow' pitch='low'>
-            Welcome to our service.
-        </prosody>
-        <break time='500ms'/>
-        How may I help you today?
-    </voice>
-</speak>";
-
-        await foreach (var audioFrame in synthesizer.SynthesizeAsync(
-            ssml,
-            Media.Audio.SynthesizerInputFormat.SSML,
-            cancellationToken))
+        // Use both
+        await foreach (var frame in synthesizer.SynthesizeAsync("Hello from recognizer 1", cancellationToken: cancellationToken))
         {
-            Console.WriteLine($"Received audio frame: {audioFrame.Length} bytes");
+            await recognizer1.WriteAudioAsync(frame, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Example 7: Contact Center strategy pattern (inject as ISpeechSynthesizer).
+    /// </summary>
+    public class MyContactCenterStrategy
+    {
+        private readonly ISpeechSynthesizer _synthesizer;
+
+        // The strategy only knows about the interface, not the concrete implementation
+        public MyContactCenterStrategy(ISpeechSynthesizer synthesizer)
+        {
+            _synthesizer = synthesizer;
+        }
+
+        public async Task SpeakGreetingAsync(CancellationToken ct)
+        {
+            await foreach (var frame in _synthesizer.SynthesizeAsync("Welcome to our service!", cancellationToken: ct))
+            {
+                // Send to caller
+            }
         }
     }
 
@@ -187,32 +178,43 @@ public static class AzureSpeechServiceExample
         });
 
         await using var provider = services.BuildServiceProvider();
+
+        // Can resolve as any of these:
         var speechService = provider.GetRequiredService<AzureSpeechService>();
+        var synthesizer = provider.GetRequiredService<ISpeechSynthesizer>();
+        var recognizer = provider.GetRequiredService<ISpeechRecognizer>();
+
+        // All three resolve to the same singleton instance
+        Console.WriteLine($"Same instance: {ReferenceEquals(speechService, synthesizer)}"); // True
+        Console.WriteLine($"Same instance: {ReferenceEquals(speechService, recognizer)}"); // True
+
         var cancellationToken = CancellationToken.None;
 
         // Synthesize speech
         Console.WriteLine("Synthesizing speech...");
         var audioFrames = new List<ReadOnlyMemory<byte>>();
-        await foreach (var frame in speechService.SynthesizeAsync("Please say your name.", cancellationToken: cancellationToken))
+        await foreach (var frame in synthesizer.SynthesizeAsync("Please say your name.", cancellationToken: cancellationToken))
         {
             audioFrames.Add(frame);
         }
         Console.WriteLine($"Synthesized {audioFrames.Count} audio frames");
 
-        // Recognize speech (simulated with the synthesized audio)
+        // Recognize speech (write audio to the same instance cast as ISpeechRecognizer)
         Console.WriteLine("Recognizing speech...");
-        await foreach (var transcript in speechService.RecognizeAsync(ToAsyncEnumerable(audioFrames), cancellationToken))
+        var transcriptTask = Task.Run(async () =>
         {
-            Console.WriteLine($"{(transcript.IsFinal ? "FINAL" : "INTERIM")}: {transcript.Text}");
-        }
-    }
+            await foreach (var transcript in recognizer.GetTranscriptsAsync(cancellationToken))
+            {
+                Console.WriteLine($"{(transcript.IsFinal ? "FINAL" : "INTERIM")}: {transcript.Text}");
+            }
+        }, cancellationToken);
 
-    private static async IAsyncEnumerable<T> ToAsyncEnumerable<T>(IEnumerable<T> source)
-    {
-        foreach (var item in source)
+        foreach (var frame in audioFrames)
         {
-            yield return item;
-            await Task.Yield();
+            await recognizer.WriteAudioAsync(frame, cancellationToken);
         }
+
+        await recognizer.CompleteAsync(cancellationToken);
+        await transcriptTask;
     }
 }

@@ -1,22 +1,28 @@
 # Azure Speech Service
 
-Composite service providing both **speech recognition (STT)** and **speech synthesis (TTS)** backed by the Azure Speech SDK.
+Composite service providing both **speech recognition (STT)** and **speech synthesis (TTS)** backed by the Azure Speech SDK. Implements both `ISpeechRecognizer` and `ISpeechSynthesizer` interfaces for seamless integration with Contact Center strategies.
 
 ## Overview
 
-The `AzureSpeechService` orchestrates:
+The `AzureSpeechService` implements:
 
-- **`AzureSpeechRecognizer`** — Continuous speech-to-text using push audio input streams
-- **`AzureSpeechSynthesizer`** — Text-to-speech with streaming PCM audio output
+- **`ISpeechRecognizer`** — Continuous speech-to-text using push audio input streams
+- **`ISpeechSynthesizer`** — Text-to-speech with streaming PCM audio output
+
+And orchestrates:
+
+- **`AzureSpeechRecognizer`** — Backing recognizer with connection pooling
+- **`AzureSpeechSynthesizer`** — Backing synthesizer with connection pooling
 
 Both components maintain **pre-warmed connection pools** to minimize first-byte latency and support high-concurrency scenarios.
 
 ## Features
 
+- ✅ **Interface implementation** — Direct `ISpeechRecognizer` and `ISpeechSynthesizer` support
 - ✅ **Unified configuration** — Single options object for both STT and TTS
 - ✅ **Connection pooling** — Reuses warmed WebSocket connections across requests
 - ✅ **Streaming API** — Low-latency audio/transcript streaming via `IAsyncEnumerable<T>`
-- ✅ **Dependency injection** — First-class DI support with validation
+- ✅ **Dependency injection** — Registered as both interfaces automatically
 - ✅ **Azure CLI authentication** — Uses `AzureCliCredential` by default
 - ✅ **Interim transcripts** — Real-time partial results during recognition
 - ✅ **SSML support** — Fine-grained control over synthesis prosody
@@ -46,7 +52,7 @@ Add to `appsettings.json`:
 ```csharp
 using Agents.AI.ContactCenter.DependencyInjection;
 
-// From configuration
+// From configuration (registers as AzureSpeechService, ISpeechRecognizer, and ISpeechSynthesizer)
 services.AddAzureSpeech(configuration);
 
 // Or with inline configuration
@@ -61,32 +67,87 @@ services.AddAzureSpeech(options =>
 ### 3. Inject and Use
 
 ```csharp
-public class MyService
+// Option A: Inject as ISpeechSynthesizer (for strategies that only need TTS)
+public class MyTtsStrategy
+{
+    private readonly ISpeechSynthesizer _synthesizer;
+
+    public MyTtsStrategy(ISpeechSynthesizer synthesizer)
+    {
+        _synthesizer = synthesizer;
+    }
+
+    public async Task Speak(CancellationToken ct)
+    {
+        await foreach (var frame in _synthesizer.SynthesizeAsync("Hello!", cancellationToken: ct))
+        {
+            // Process audio frame
+        }
+    }
+}
+
+// Option B: Inject as ISpeechRecognizer (for strategies that only need STT)
+public class MySttStrategy
+{
+    private readonly ISpeechRecognizer _recognizer;
+
+    public MySttStrategy(ISpeechRecognizer recognizer)
+    {
+        _recognizer = recognizer;
+    }
+
+    public async Task Listen(CancellationToken ct)
+    {
+        await foreach (var transcript in _recognizer.GetTranscriptsAsync(ct))
+        {
+            Console.WriteLine($"{(transcript.IsFinal ? "FINAL" : "INTERIM")}: {transcript.Text}");
+        }
+    }
+}
+
+// Option C: Inject as AzureSpeechService (for factory methods)
+public class MyCompositeService
 {
     private readonly AzureSpeechService _speechService;
 
-    public MyService(AzureSpeechService speechService)
+    public MyCompositeService(AzureSpeechService speechService)
     {
         _speechService = speechService;
     }
 
-    public async Task SynthesizeSpeech(CancellationToken ct)
+    public async Task ProcessCall(CancellationToken ct)
     {
-        await foreach (var audioFrame in _speechService.SynthesizeAsync("Hello world!", cancellationToken: ct))
-        {
-            // Process audio frame (send to transport, save to file, etc.)
-        }
-    }
+        // Create independent recognizer instances
+        await using var recognizer1 = _speechService.CreateRecognizer();
+        await using var recognizer2 = _speechService.CreateRecognizer();
 
-    public async Task RecognizeSpeech(IAsyncEnumerable<ReadOnlyMemory<byte>> audioStream, CancellationToken ct)
-    {
-        await foreach (var transcript in _speechService.RecognizeAsync(audioStream, ct))
-        {
-            Console.WriteLine(transcript.IsFinal ? $"[FINAL] {transcript.Text}" : $"[INTERIM] {transcript.Text}");
-        }
+        // Get shared synthesizer
+        var synthesizer = _speechService.GetSynthesizer();
     }
 }
 ```
+```
+
+## Dependency Injection
+
+The service is registered as:
+
+1. **`AzureSpeechService`** (concrete singleton)
+2. **`ISpeechRecognizer`** (interface, forwarding to the same singleton)
+3. **`ISpeechSynthesizer`** (interface, forwarding to the same singleton)
+
+All three resolve to the **same singleton instance**:
+
+```csharp
+var speechService = provider.GetRequiredService<AzureSpeechService>();
+var recognizer = provider.GetRequiredService<ISpeechRecognizer>();
+var synthesizer = provider.GetRequiredService<ISpeechSynthesizer>();
+
+Console.WriteLine(ReferenceEquals(speechService, recognizer)); // True
+Console.WriteLine(ReferenceEquals(speechService, synthesizer)); // True
+```
+
+This allows Contact Center strategies to depend only on `ISpeechRecognizer` or `ISpeechSynthesizer` without knowing about the concrete implementation.
 
 ## Configuration Options
 
@@ -103,55 +164,82 @@ public class MyService
 
 ## Usage Patterns
 
-### Pattern 1: Convenience Methods
+### Pattern 1: Interface Injection (Recommended for Strategies)
 
-The service provides high-level methods that handle lifecycle management:
+Contact Center strategies should depend on interfaces for testability:
 
 ```csharp
-// Synthesize (one-liner)
-await foreach (var frame in speechService.SynthesizeAsync("Hello!", cancellationToken: ct))
+// TTS-only strategy
+public class GreetingStrategy
 {
-    // Handle frame
+    private readonly ISpeechSynthesizer _synthesizer;
+
+    public GreetingStrategy(ISpeechSynthesizer synthesizer)
+    {
+        _synthesizer = synthesizer;
+    }
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        await foreach (var frame in _synthesizer.SynthesizeAsync("Welcome!", cancellationToken: ct))
+        {
+            // Send to transport
+        }
+    }
 }
 
-// Recognize (one-liner)
-await foreach (var transcript in speechService.RecognizeAsync(audioStream, ct))
+// STT-only strategy
+public class TranscriptionStrategy
 {
-    // Handle transcript
+    private readonly ISpeechRecognizer _recognizer;
+
+    public TranscriptionStrategy(ISpeechRecognizer recognizer)
+    {
+        _recognizer = recognizer;
+    }
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        await foreach (var transcript in _recognizer.GetTranscriptsAsync(ct))
+        {
+            // Process transcript
+        }
+    }
 }
 ```
 
-### Pattern 2: Manual Lifecycle
+### Pattern 2: Factory Methods
 
-For advanced scenarios requiring fine-grained control:
+### Pattern 2: Factory Methods
+
+Use the concrete type when you need to create multiple independent recognizer sessions:
 
 ```csharp
-// Create recognizer
-await using var recognizer = speechService.CreateRecognizer();
-
-// Consume transcripts in background
-var transcriptTask = Task.Run(async () =>
+public class MultiSessionService
 {
-    await foreach (var transcript in recognizer.GetTranscriptsAsync(ct))
+    private readonly AzureSpeechService _speechService;
+
+    public MultiSessionService(AzureSpeechService speechService)
     {
-        ProcessTranscript(transcript);
+        _speechService = speechService;
     }
-}, ct);
 
-// Write audio
-foreach (var audioChunk in GetAudioChunks())
-{
-    await recognizer.WriteAudioAsync(audioChunk, ct);
+    public async Task ProcessMultipleCallersAsync(CancellationToken ct)
+    {
+        // Create independent recognizer per caller
+        await using var caller1Recognizer = _speechService.CreateRecognizer();
+        await using var caller2Recognizer = _speechService.CreateRecognizer();
+
+        // Both share the underlying pool but maintain separate sessions
+    }
 }
-
-// Signal completion
-await recognizer.CompleteAsync(ct);
-await transcriptTask;
 ```
 
 ### Pattern 3: SSML Synthesis
 
-Use SSML for prosody control:
+### Pattern 3: SSML Synthesis
+
+Use SSML for prosody control (works with both interface and concrete type):
 
 ```csharp
 var ssml = @"
@@ -163,8 +251,15 @@ var ssml = @"
     </voice>
 </speak>";
 
-var synthesizer = speechService.GetSynthesizer();
+// Via interface
 await foreach (var frame in synthesizer.SynthesizeAsync(ssml, SynthesizerInputFormat.SSML, ct))
+{
+    // Handle frame
+}
+
+// Or via concrete type's GetSynthesizer()
+var synth = speechService.GetSynthesizer();
+await foreach (var frame in synth.SynthesizeAsync(ssml, SynthesizerInputFormat.SSML, ct))
 {
     // Handle frame
 }
@@ -173,17 +268,25 @@ await foreach (var frame in synthesizer.SynthesizeAsync(ssml, SynthesizerInputFo
 ## Architecture
 
 ```
-AzureSpeechService
-├── CreateRecognizer() ────> AzureSpeechRecognizer (new instance per call)
-│                            └── RecognizerPool (shared, pre-warmed)
+AzureSpeechService (implements ISpeechRecognizer + ISpeechSynthesizer)
 │
-└── GetSynthesizer() ──────> AzureSpeechSynthesizer (singleton)
-                             └── SynthesizerPool (shared, pre-warmed)
+├── ISpeechSynthesizer Implementation ──> GetSynthesizer() ──> AzureSpeechSynthesizer (shared singleton)
+│                                                              └── SynthesizerPool (pre-warmed)
+│
+└── ISpeechRecognizer Implementation ──> Lazy _recognizer ───> AzureSpeechRecognizer (per-instance)
+                                                               └── RecognizerPool (pre-warmed)
+
+Factory Methods (optional):
+├── CreateRecognizer() ────────────────> New AzureSpeechRecognizer instance
+└── GetSynthesizer() ──────────────────> Shared AzureSpeechSynthesizer instance
 ```
 
-- **Recognizers** are created per-call and disposed after use (stateful, session-scoped)
-- **Synthesizer** is shared across all calls (stateless, safe for concurrent use)
-- Both use **connection pools** to avoid WebSocket setup latency
+**Key Points:**
+
+- **Single Singleton**: One `AzureSpeechService` instance per application
+- **Recognizer**: Lazy-initialized per service instance (session-scoped via interface calls)
+- **Synthesizer**: Shared across all calls (stateless, thread-safe)
+- **Pools**: Both maintain pre-warmed Azure SDK connections
 
 ## Connection Pooling
 

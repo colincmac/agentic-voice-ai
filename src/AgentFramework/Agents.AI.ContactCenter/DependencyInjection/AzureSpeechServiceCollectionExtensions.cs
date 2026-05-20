@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Azure;
+using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -12,7 +13,8 @@ namespace Agents.AI.ContactCenter.DependencyInjection;
 public static class AzureSpeechServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the Azure Speech Service with the service collection.
+    /// Registers the Azure Speech Service with the service collection as both
+    /// <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Configuration section containing Azure Speech options (defaults to "AzureSpeech").</param>
@@ -25,7 +27,8 @@ public static class AzureSpeechServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the Azure Speech Service with the service collection.
+    /// Registers the Azure Speech Service with the service collection as both
+    /// <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configurationSection">Configuration section containing Azure Speech options.</param>
@@ -39,13 +42,14 @@ public static class AzureSpeechServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        services.TryAddSingleton<AzureSpeechService>();
+        RegisterService(services);
 
         return services;
     }
 
     /// <summary>
     /// Registers the Azure Speech Service with the service collection using a configuration delegate.
+    /// Service is registered as both <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">A delegate to configure Azure Speech options.</param>
@@ -59,13 +63,14 @@ public static class AzureSpeechServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        services.TryAddSingleton<AzureSpeechService>();
+        RegisterService(services);
 
         return services;
     }
 
     /// <summary>
     /// Registers the Azure Speech Service with explicit options.
+    /// Service is registered as both <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="options">The Azure Speech options.</param>
@@ -82,6 +87,20 @@ public static class AzureSpeechServiceCollectionExtensions
             return new AzureSpeechService(options, logger);
         });
 
+        // Register as both interfaces, forwarding to the concrete service
+        services.TryAddSingleton<ISpeechRecognizer>(sp => sp.GetRequiredService<AzureSpeechService>());
+        services.TryAddSingleton<ISpeechSynthesizer>(sp => sp.GetRequiredService<AzureSpeechService>());
+
         return services;
+    }
+
+    private static void RegisterService(IServiceCollection services)
+    {
+        // Register the concrete service
+        services.TryAddSingleton<AzureSpeechService>();
+
+        // Register as both interfaces, forwarding to the concrete service
+        services.TryAddSingleton<ISpeechRecognizer>(sp => sp.GetRequiredService<AzureSpeechService>());
+        services.TryAddSingleton<ISpeechSynthesizer>(sp => sp.GetRequiredService<AzureSpeechService>());
     }
 }
