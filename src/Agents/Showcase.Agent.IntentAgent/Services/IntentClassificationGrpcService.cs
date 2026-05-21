@@ -2,7 +2,7 @@ using Agents.AI.ContactCenter.Media.Analysis;
 using Agents.Intent.V1;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
-
+using Agents.AI.ContactCenter;
 namespace Showcase.Agent.IntentAgent.Services;
 
 /// <summary>
@@ -20,7 +20,7 @@ namespace Showcase.Agent.IntentAgent.Services;
 /// <c>docs/architecture/aks-topology.md</c> for the GPU node-pool topology
 /// and KEDA scaling shape.
 /// </remarks>
-public sealed class IntentClassificationGrpcService : IntentClassification.IntentClassificationBase
+public sealed class IntentClassificationGrpcService : IntentClassification.IntentClassificationClient
 {
     private readonly IIntentClassifier _classifier;
     private readonly ILogger<IntentClassificationGrpcService> _logger;

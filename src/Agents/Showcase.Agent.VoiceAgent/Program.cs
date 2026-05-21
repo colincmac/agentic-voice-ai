@@ -22,7 +22,6 @@ using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Authentication;
 using Showcase.Agent.VoiceAgent.Configuration;
-using Showcase.Agent.VoiceAgent.Nlu;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 using Agents.AI.ContactCenter.DependencyInjection;
@@ -135,8 +134,10 @@ builder.Services.AddIvrWorkflowFramework(b => b
 // free of an Azure CLU / Speech-to-Text dependency while still exercising the NLU
 // strategy end-to-end. When the AppHost wires an `intentagent` resource (the GPU
 // gRPC service in the two-pool AKS topology — see docs/architecture/aks-topology.md),
-// the voice-edge talks to it over gRPC; otherwise the in-process stub keeps the
-// showcase self-contained.
+// the voice-edge talks to it over gRPC. When no gRPC endpoint is configured but the
+// "chat" IChatClient is registered, the voice-edge classifies in-process using the
+// hosted chat-completions model (typically phi-4-mini-instruct on Azure Foundry).
+// Falls back to the in-process stub keyword matcher when neither is available.
 var intentAgentEndpoint = builder.Configuration.GetConnectionString("intentagent")
     ?? builder.Configuration["services:intentagent:grpc:0"]
     ?? builder.Configuration["services:intentagent:https:0"]
@@ -149,6 +150,13 @@ if (!string.IsNullOrWhiteSpace(intentAgentEndpoint))
         options.Address = new Uri(intentAgentEndpoint);
     });
     builder.Services.AddSingleton<IIntentClassifier, GrpcIntentClassifier>();
+}
+else if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("chat")))
+{
+    // phi-4-mini-instruct (or any chat-completions model) registered as the "chat" keyed
+    // IChatClient at the top of this file. Drops the classifier directly into the NLU
+    // strategy without touching the existing realtime pipeline.
+    builder.Services.AddChatClientIntentClassifier(chatClientKey: "chat");
 }
 else
 {

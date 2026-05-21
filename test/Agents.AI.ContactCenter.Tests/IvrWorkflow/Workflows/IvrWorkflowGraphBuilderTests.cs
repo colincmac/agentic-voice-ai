@@ -231,7 +231,7 @@ public class IvrWorkflowGraphBuilderTests
             {
                 Transitions =
                 [
-                    new Agents.AI.Extensions.RealtimeAgentHelpers.Prompting.StateTransition
+                    new global::Agents.AI.Extensions.RealtimeAgentHelpers.Prompting.StateTransition
                     {
                         NextStep = "nonexistent-target",
                         Condition = "always",

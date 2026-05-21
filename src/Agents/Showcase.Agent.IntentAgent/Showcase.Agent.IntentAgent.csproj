@@ -14,9 +14,6 @@
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Protobuf Include="..\..\protos\agents.intent.v1.proto" GrpcServices="Server" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.ContactCenter\Agents.AI.ContactCenter.csproj" />

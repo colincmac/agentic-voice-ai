@@ -41,9 +41,9 @@
 
   </ItemGroup>
 
-  <ItemGroup>
+  <!--<ItemGroup>
     <Protobuf Include="..\..\protos\agents.intent.v1.proto" GrpcServices="Client" />
-  </ItemGroup>
+  </ItemGroup>-->
   <!-- A2A dependency -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />

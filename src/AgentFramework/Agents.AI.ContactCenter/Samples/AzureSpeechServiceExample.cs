@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Azure;
+using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.Configuration;
