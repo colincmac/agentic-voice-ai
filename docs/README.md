@@ -30,6 +30,7 @@ Long-form, narrative documentation that ADRs reference but do not replace. Group
 | [`architecture/sequence-diagrams.md`](architecture/sequence-diagrams.md)                       | Full PSTN → Teams → ACS → IVR → CCaaS sequence diagram in mermaid (formerly Appendix A of `call-flow.md`). |
 | [`architecture/transfer-patterns.md`](architecture/transfer-patterns.md)                       | Blind vs consultative transfer patterns and the VoIP-vs-SIP transport rules for `customCallingContext` headers. |
 | [`architecture/aks-topology.md`](architecture/aks-topology.md)                                 | Deployment view: the three Deployments (`voice-edge`, `intent-agent`, `voice-biometrics`), two AKS node pools, hybrid sticky-WS + stateless-webhook routing, and the showcase→hyperscale scaling matrix. Consumes ADR-0004 / 0008 / 0010 / 0011. |
+| [`strategies/README.md`](strategies/README.md)                                                 | Conversation-strategy catalog: Realtime / NLU / DTMF / Composite, what each emits, and how `IvrWorkflowState` is handed off across workflow step changes and degradation events. |
 | [`voice-identity-verification.md`](voice-identity-verification.md)                             | Operator/developer guide for the voice biometrics feature (stub mode and gRPC mode).                 |
 | [`design/agentic-evals.md`](design/agentic-evals.md)                                           | Evaluation strategy for agent trajectories (judge models, metrics, Azure-format results).            |
 

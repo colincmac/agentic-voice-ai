@@ -16,7 +16,7 @@ namespace Agents.AI.ContactCenter.Tests;
 /// </summary>
 public class IvrIntentAgentClassifierTests
 {
-    private static readonly string[] _candidateIntents = ["check_balance", "pay_bill", "speak_to_agent"];
+    private static readonly string[] candidateIntents = ["check_balance", "pay_bill", "speak_to_agent"];
 
     [Fact]
     public async Task ClassifyAsync_returns_none_for_empty_utterance()
@@ -24,7 +24,7 @@ public class IvrIntentAgentClassifierTests
         var chat = new FakeChatClient(_ => throw new InvalidOperationException("Chat client should not be invoked"));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("   ", _candidateIntents);
+        var result = await agent.ClassifyAsync("   ", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -48,7 +48,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"check_balance","confidence":0.92,"entities":{"account":"primary"}}""")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("what is my checking balance", _candidateIntents);
+        var result = await agent.ClassifyAsync("what is my checking balance", candidateIntents);
 
         Assert.False(result.IsNone);
         Assert.Equal("check_balance", result.IntentName);
@@ -70,7 +70,7 @@ public class IvrIntentAgentClassifierTests
                 """)));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("I want to pay my bill", _candidateIntents);
+        var result = await agent.ClassifyAsync("I want to pay my bill", candidateIntents);
 
         Assert.Equal("pay_bill", result.IntentName);
         Assert.Equal(0.81, result.Confidence, precision: 2);
@@ -85,7 +85,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"order_pizza","confidence":0.99}""")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("I'd like a pepperoni pie", _candidateIntents);
+        var result = await agent.ClassifyAsync("I'd like a pepperoni pie", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -98,7 +98,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"none","confidence":0.10}""")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("hello there", _candidateIntents);
+        var result = await agent.ClassifyAsync("hello there", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -111,7 +111,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"check_balance","confidence":0.4}""")));
         var agent = new IvrIntentAgent(chat, options: new IvrIntentAgentOptions { MinimumConfidence = 0.6 });
 
-        var result = await agent.ClassifyAsync("balance?", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance?", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -124,7 +124,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"CHECK_BALANCE","confidence":0.9}""")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("balance please", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance please", candidateIntents);
 
         Assert.Equal("check_balance", result.IntentName); // matches the candidate casing
     }
@@ -137,7 +137,7 @@ public class IvrIntentAgentClassifierTests
                 """{"intent":"pay_bill"}""")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("pay my bill", _candidateIntents);
+        var result = await agent.ClassifyAsync("pay my bill", candidateIntents);
 
         Assert.Equal("pay_bill", result.IntentName);
         Assert.Equal(1.0, result.Confidence);
@@ -150,7 +150,7 @@ public class IvrIntentAgentClassifierTests
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "I think you want to check your balance.")));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("how much do I have", _candidateIntents);
+        var result = await agent.ClassifyAsync("how much do I have", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -161,7 +161,7 @@ public class IvrIntentAgentClassifierTests
         var chat = new FakeChatClient(_ => throw new InvalidOperationException("backend down"));
         var agent = new IvrIntentAgent(chat);
 
-        var result = await agent.ClassifyAsync("balance?", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance?", candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -175,7 +175,7 @@ public class IvrIntentAgentClassifierTests
         var agent = new IvrIntentAgent(chat);
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
-            await agent.ClassifyAsync("hello", _candidateIntents, cts.Token));
+            await agent.ClassifyAsync("hello", candidateIntents, cts.Token));
     }
 
     [Fact]
@@ -199,13 +199,13 @@ public class IvrIntentAgentClassifierTests
         };
         var agent = new IvrIntentAgent(chat, options: options);
 
-        _ = await agent.ClassifyAsync("balance please", _candidateIntents);
+        _ = await agent.ClassifyAsync("balance please", candidateIntents);
 
         Assert.NotNull(captured);
         Assert.Equal(2, captured!.Count);
         var userText = captured[1].Text;
         Assert.NotNull(userText);
-        foreach (var intent in _candidateIntents)
+        foreach (var intent in candidateIntents)
         {
             Assert.Contains(intent, userText!, StringComparison.Ordinal);
         }
@@ -227,7 +227,7 @@ public class IvrIntentAgentClassifierTests
         });
         var agent = new IvrIntentAgent(chat);
 
-        _ = await agent.ClassifyAsync("balance", _candidateIntents);
+        _ = await agent.ClassifyAsync("balance", candidateIntents);
 
         Assert.NotNull(capturedOptions);
         Assert.Equal(ChatResponseFormat.Json, capturedOptions!.ResponseFormat);
