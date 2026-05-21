@@ -16,6 +16,7 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 ///   <item><c>caller-intent-biometric</c> — realtime ACME Financial caller-intent + biometric flow (port of <c>ConversationWorkflowFactory.CreateCallerIntentWorkflow</c>).</item>
 ///   <item><c>authenticated-dtmf</c> — PIN-gated DTMF banking flow (port of <c>AuthenticatedSampleWorkflows.BuildAuthenticatedDtmfWorkflow</c>).</item>
 ///   <item><c>authenticated-realtime</c> — voice-first ACME Bank concierge with PIN (port of <c>AuthenticatedSampleWorkflows.BuildAuthenticatedRealtimeWorkflow</c>).</item>
+///   <item><c>nlu-with-dtmf-fallback</c> — ACME Bank concierge that classifies intents via intent-NLU and degrades to pure DTMF for PIN entry and menu routing.</item>
 /// </list>
 /// </remarks>
 public static class ShowcaseWorkflowIds
@@ -29,6 +30,7 @@ public static class ShowcaseWorkflowIds
     public const string CallerIntentBiometric = "caller-intent-biometric";
     public const string AuthenticatedDtmf = "authenticated-dtmf";
     public const string AuthenticatedRealtime = "authenticated-realtime";
+    public const string NluWithDtmfFallback = "nlu-with-dtmf-fallback";
 }
 
 /// <summary>

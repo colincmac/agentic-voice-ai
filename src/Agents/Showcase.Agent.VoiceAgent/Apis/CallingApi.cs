@@ -75,7 +75,7 @@ public static class CallingApi
                     {
                         var websocketUri = new Uri(
                             services.Options.Value.Acs.MediaStreamingUri,
-                            relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}/{incoming.ServerCallId}");
+                            relativeUri: $"{path}{MEDIA_STREAMING_PATH_WSS}");
 
                         answerOptions.MediaStreamingOptions = new MediaStreamingOptions(
                             audioChannelType: MediaStreamingAudioChannel.Mixed,
@@ -102,7 +102,7 @@ public static class CallingApi
                     // connect / first-prompt TTS overlap with ACS opening the media channel.
                     // CreateAsync below will claim this prewarmed entry by callId.
                     var prewarmCallId = $"call_{callConnection.CallConnectionId}";
-                    var prewarmTier = AgentTier.RealtimeVoice;
+                    var prewarmTier = AgentTier.IntentNlu;
                     _ = Task.Run(async () =>
                     {
                         try
@@ -189,10 +189,9 @@ public static class CallingApi
                 cancellationToken).ConfigureAwait(false);
         }).WithName("Call Automation - HandleForwardedCallEvents");
 
-        routeGroup.MapGet("/automation/media/wss/{serverCallId}", async (
+        routeGroup.MapGet("/automation/media/wss", async (
             HttpContext httpContext,
             [AsParameters] CallingServices services,
-            [FromRoute] string serverCallId,
             [FromHeader(Name = "x-ms-call-connection-id")] string callConnectionId) =>
         {
             if (!httpContext.WebSockets.IsWebSocketRequest)
@@ -211,8 +210,8 @@ public static class CallingApi
             {
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
-                    "Media WebSocket established for ServerCallId={ServerCallId}, CallConnectionId={CallConnectionId}, Tier={Tier}",
-                    serverCallId, callConnectionId, AgentTier.RealtimeVoice);
+                    "Media WebSocket established for CallConnectionId={CallConnectionId}, Tier={Tier}",
+                    callConnectionId, AgentTier.RealtimeVoice);
 
                 // Pod-pinned bi-di stream — claim streaming ownership before the
                 // session starts so the very first mid-call callback can find us.
@@ -252,7 +251,7 @@ public static class CallingApi
                     CallId = callId,
                     CallerEdge = edge,
                     Workflow = services.Workflow,
-                    PreferredTier = AgentTier.RealtimeVoice
+                    PreferredTier = AgentTier.IntentNlu
                 }, httpContext.RequestAborted);
 
                 await session.StartAsync(httpContext.RequestAborted);
@@ -262,7 +261,7 @@ public static class CallingApi
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Media WebSocket failed for ServerCallId={ServerCallId}", serverCallId);
+                logger.LogError(ex, "Media WebSocket failed for CallConnectionId={CallConnectionId}", callConnectionId);
                 if (webSocket?.State == WebSocketState.Open)
                 {
                     await webSocket.CloseAsync(

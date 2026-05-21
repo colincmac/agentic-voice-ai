@@ -1,0 +1,157 @@
+name: nlu-with-dtmf-fallback
+version: 1
+description: |
+  ACME Bank concierge that mirrors the authenticated-realtime scenario but
+  uses the intent-NLU tier as the primary mode and degrades to pure DTMF when
+  speech understanding becomes unreliable (noisy line, repeated no-match, etc).
+  The PIN entry stage is validated by the host-registered 'pin-validator' tool,
+  matching the behavior of authenticated-dtmf.
+
+strategy:
+  primary: nlu
+  fallback:
+    - dtmf
+  prewarmTiers:
+    - dtmf
+  allowMidCallDegradation: true
+
+base:
+  prompt:
+    role:
+      identity: "ACME Bank concierge agent"
+      objective: "Help callers with account inquiries after verifying identity."
+    personality:
+      personality: "warm, concise, professional"
+      tone: "friendly and confident"
+    context: "If the conversation context has a CallerName, address them by first name."
+  commonTools:
+    - transfer-to-human
+    - end-session
+  requiredAuthLevel: none
+
+stages:
+  - id: welcome
+    goal: "Greet the caller and classify their primary intent."
+    realtime:
+      instructions:
+        - "If a CallerName is present in context, greet by first name. Otherwise greet generically."
+        - "Listen for one of the declared intents: balance, billing, or agent."
+        - "Confirm the classified intent in a single short sentence before transitioning."
+      examples:
+        - "Welcome to ACME Bank. I can help with your balance, billing, or transfer you to a representative — which would you like?"
+    intents:
+      - name: balance
+        examples:
+          - "I want to check my balance"
+          - "How much money do I have"
+          - "What's my account balance"
+          - "Check my checking account"
+        nextStage: verify
+      - name: billing
+        examples:
+          - "I have a billing question"
+          - "There's a charge I don't recognize"
+          - "Help me with my bill"
+          - "Question about a payment"
+        nextStage: verify
+      - name: agent
+        examples:
+          - "Talk to a person"
+          - "Speak with a representative"
+          - "Get me an agent"
+          - "I want a human"
+        nextStage: transfer
+    dtmf:
+      ssmlPrompt: |
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+          <voice name="en-US-Ava:DragonHDLatestNeural">
+            <prosody rate="-5%">
+              Welcome to ACME Bank.
+              <break time="300ms"/>
+              For account balance, press 1.
+              <break time="200ms"/>
+              For billing, press 2.
+              <break time="200ms"/>
+              To speak with an agent, press 0.
+            </prosody>
+          </voice>
+        </speak>
+      onErrorPrompt: "Sorry, that isn't a valid option. Press 1 for balance, 2 for billing, or 0 for an agent."
+      options:
+        - { digit: '1', label: balance, nextStage: verify }
+        - { digit: '2', label: billing, nextStage: verify }
+        - { digit: '0', label: agent,   nextStage: transfer }
+    exitWhen: "Caller has stated their primary intent"
+    transitions:
+      - to: verify
+        onCondition: "Caller wants account-specific information"
+      - to: transfer
+        onCondition: "Caller asked for an agent"
+
+  - id: verify
+    goal: "Confirm the caller's identity via PIN before sharing account info."
+    description: "Identity verification"
+    realtime:
+      instructions:
+        - "Politely ask the caller to say their four-digit PIN."
+        - "When you hear four digits, call the confirm-identity tool with those digits."
+        - "On failure, ask once more, then offer to transfer to an agent."
+      tools:
+        - confirm-identity
+    dtmf:
+      ssmlPrompt: |
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+          <voice name="en-US-Ava:DragonHDLatestNeural">
+            Please enter your four-digit PIN, followed by the pound key.
+          </voice>
+        </speak>
+      onErrorPrompt: "That PIN doesn't match our records. Transferring you to an agent."
+      collect:
+        minDigits: 4
+        maxDigits: 4
+        terminator: '#'
+        validator: pin-validator
+        digitsParameterName: digits
+        collectedStateKey: pinVerified
+        onValidNextStage: self_service
+        onInvalidPrompt: "That PIN doesn't match our records. Transferring you to an agent."
+    exitWhen: "Identity confirmed or transfer requested"
+    transitions:
+      - to: self_service
+        onCondition: "Identity confirmed"
+      - to: transfer
+        onCondition: "Identity could not be confirmed"
+
+  - id: self_service
+    goal: "Answer the caller's account-specific question."
+    description: "Verified self-service"
+    requires:
+      - type: auth
+        level: fullyAuthenticated
+    realtime:
+      instructions:
+        - "Caller is verified — answer their original request using account tools."
+        - "When they're done, ask if there's anything else."
+    exitWhen: "Caller has no more questions"
+    onExit: closing
+
+  - id: transfer
+    goal: "Transfer the caller to a live agent."
+    description: "Agent transfer"
+    realtime:
+      instructions:
+        - "Acknowledge the request, set expectations on wait time, and complete the transfer."
+        - "Use the transfer-to-agent tool with targetIdentifier set to the configured escalation number and transferKind 'phone'."
+      tools:
+        - transfer-to-agent
+    exitWhen: "Transfer initiated"
+    onExit: closing
+
+  - id: closing
+    goal: "Politely end the call."
+    terminal: true
+    realtime:
+      instructions:
+        - "Summarize what was accomplished and end the call."
+      examples:
+        - "Thanks for calling ACME Bank. Goodbye."

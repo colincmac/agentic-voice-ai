@@ -53,9 +53,10 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
         // Create shared SpeechConfig
         _speechConfig = SpeechConfig.FromEndpoint(options.Endpoint, credential: options.Credential);
         _speechConfig.SpeechRecognitionLanguage = options.RecognitionLocale;
+
         _speechConfig.SetSpeechSynthesisOutputFormat(options.OutputFormat);
         _speechConfig.SpeechSynthesisVoiceName = options.SynthesisVoiceName;
-
+        _speechConfig.SpeechSynthesisLanguage = options.SynthesisLocale;
         _logger.LogInformation(
             "Azure Speech Service initialized: Endpoint={Endpoint} RecognitionLocale={RecognitionLocale} SynthesisVoice={SynthesisVoice}",
             options.Endpoint,

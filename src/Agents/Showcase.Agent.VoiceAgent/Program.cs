@@ -24,6 +24,7 @@ using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 using Agents.AI.ContactCenter.DependencyInjection;
+using Agents.AI.ContactCenter.Coordination;
 
 var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
@@ -76,6 +77,8 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 //builder.Services.AddOpenApi();
 
+builder.AddKeyedChatClient("slm")
+    .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
 
 builder.AddKeyedChatClient("chat")
     .UseFunctionInvocation()
@@ -93,12 +96,12 @@ builder.AddKeyedConversationClient("voicelive")
 // ICallQualityReporter, and wires the realtime voice strategy on top of the existing
 // AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
 
-var azureSpeechConnectionString = builder.Configuration.GetConnectionString("AzureSpeech");
+var azureSpeechConnectionString = builder.Configuration.GetConnectionString("azurespeech");
 
 builder.Services.AddAzureSpeech(options =>
 {
     builder.Configuration.GetSection("AzureSpeech").Bind(options);
-
+    options.Credential = new AzureCliCredential();
     if (!string.IsNullOrWhiteSpace(azureSpeechConnectionString))
     {
         options.Endpoint = new Uri(azureSpeechConnectionString);
@@ -110,6 +113,8 @@ builder.Services.AddAzureSpeech(options =>
 builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
+builder.AddInMemoryCallOwnershipDirectory();
+builder.AddInMemoryWebhookForwarder();
 
 // Declarative YAML IVR framework: loads workflow definitions from
 // Workflow\Samples\*.yaml (copied to the app output via the csproj content glob),
@@ -127,20 +132,25 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
         ShowcaseWorkflowIds.DefaultEscalationNumber)));
-
 // NLU dependencies — IvrIntentAgent now owns the full intent-recognition pipeline
 // (audio preprocessing via ISpeechRecognizer + classification via the "chat" IChatClient
 // + local tool dispatch when the SLM cannot tool-call). Typically backed by
 // phi-4-mini-instruct on Azure Foundry through the keyed "chat" client registered above.
-builder.Services.AddTransient<ISpeechRecognizer, StubSpeechRecognizer>();
 builder.Services.AddIvrIntentAgent(chatClientKey: "chat");
+
+// The realtime agent that the new realtime backend wraps. Reads its config from
+// Agents:TriageAgent and uses the "voicelive" conversation client registered above.
+builder.AddRealtimeAIAgent(
+    name: AgentConfig.TriageAgent,
+    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
+    liveConversationClientKey: "voicelive");
 
 // Workflow definitions are now loaded from the YAML samples under
 // Workflow\Samples\ via IIvrWorkflowLoader (registered by AddIvrWorkflowFramework
 // above). The default registration is the authenticated DTMF flow; the keyed
 // registrations let the CallingApi pick a tier-specific workflow via ?tier=.
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
-    ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.AuthenticatedDtmf));
+    ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.NluWithDtmfFallback));
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.DtmfOnly),
@@ -152,20 +162,15 @@ builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.IntentNlu),
-    (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.AuthenticatedRealtime));
+    (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.NluWithDtmfFallback));
 
-// The realtime agent that the new realtime backend wraps. Reads its config from
-// Agents:TriageAgent and uses the "voicelive" conversation client registered above.
-builder.AddRealtimeAIAgent(
-    name: AgentConfig.TriageAgent,
-    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
-    liveConversationClientKey: "voicelive");
+
 
 builder.AddCallSessionContainer()
     // Inner factories — the composite below shadows the top tier and reuses these
     // through DI. Order matters: register the inner tiers BEFORE the composite so
     // the composite's lookup finds them.
-    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    //.AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
     .AddNluStrategy()
     .AddDtmfStrategy()
     .AddCallControlTools()
@@ -181,8 +186,8 @@ builder.AddCallSessionContainer()
     // collected data, transcript) and CallerAuthenticationState are preserved across each
     // mid-call swap so the caller doesn't have to re-authenticate when the tier degrades.
     .AddCompositeFallbackStrategy(
-        topTier: AgentTier.RealtimeVoice,
-        AgentTier.RealtimeVoice,
+        topTier: AgentTier.IntentNlu,
+        //AgentTier.RealtimeVoice,
         AgentTier.IntentNlu,
         AgentTier.DtmfOnly);
 

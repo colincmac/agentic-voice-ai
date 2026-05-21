@@ -248,15 +248,19 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
     /// </summary>
     private static string GenerateSsml(string locale, string gender, string name, string text)
     {
+        // SSML requires this namespace; without it Azure Speech rejects the payload.
+        XNamespace ssml = "http://www.w3.org/2001/10/synthesis";
+
         var ssmlDoc = new XDocument(
-                          new XElement("speak",
-                              new XAttribute("version", "1.0"),
-                              new XAttribute(XNamespace.Xml + "lang", locale),
-                              new XElement("voice",
-                                  new XAttribute(XNamespace.Xml + "lang", locale),
-                                  new XAttribute(XNamespace.Xml + "gender", gender),
-                                  new XAttribute("name", name),
-                                  text)));
-        return ssmlDoc.ToString();
+            new XElement(ssml + "speak",
+                new XAttribute("version", "1.0"),
+                new XAttribute(XNamespace.Xml + "lang", locale),
+                new XElement(ssml + "voice",
+                    new XAttribute("name", name),
+                    new XElement(ssml + "prosody",
+                        new XAttribute("rate", "-5%"),
+                        text))));
+
+        return ssmlDoc.ToString(SaveOptions.DisableFormatting);
     }
 }
