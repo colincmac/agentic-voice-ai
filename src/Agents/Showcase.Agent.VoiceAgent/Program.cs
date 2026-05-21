@@ -8,7 +8,6 @@ using Agents.AI.ContactCenter.Authorization.IdentityVerification;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
-using Agents.Intent.V1;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
@@ -25,7 +24,6 @@ using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 using Agents.AI.ContactCenter.DependencyInjection;
-using Agents.AI.ContactCenter.Media.Analysis;
 
 var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
@@ -130,40 +128,12 @@ builder.Services.AddIvrWorkflowFramework(b => b
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
         ShowcaseWorkflowIds.DefaultEscalationNumber)));
 
-// Demo NLU dependencies — keyword classifier + scripted recognizer keep the showcase
-// free of an Azure CLU / Speech-to-Text dependency while still exercising the NLU
-// strategy end-to-end. When the AppHost wires an `intentagent` resource (the GPU
-// gRPC service in the two-pool AKS topology — see docs/architecture/aks-topology.md),
-// the voice-edge talks to it over gRPC. When no gRPC endpoint is configured but the
-// "chat" IChatClient is registered, the voice-edge classifies in-process using the
-// hosted chat-completions model (typically phi-4-mini-instruct on Azure Foundry).
-// Falls back to the in-process stub keyword matcher when neither is available.
-var intentAgentEndpoint = builder.Configuration.GetConnectionString("intentagent")
-    ?? builder.Configuration["services:intentagent:grpc:0"]
-    ?? builder.Configuration["services:intentagent:https:0"]
-    ?? builder.Configuration["services:intentagent:http:0"];
-
-if (!string.IsNullOrWhiteSpace(intentAgentEndpoint))
-{
-    builder.Services.AddGrpcClient<IntentClassification.IntentClassificationClient>(options =>
-    {
-        options.Address = new Uri(intentAgentEndpoint);
-    });
-    builder.Services.AddSingleton<IIntentClassifier, GrpcIntentClassifier>();
-}
-else if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("chat")))
-{
-    // phi-4-mini-instruct (or any chat-completions model) registered as the "chat" keyed
-    // IChatClient at the top of this file. Drops the classifier directly into the NLU
-    // strategy without touching the existing realtime pipeline.
-    builder.Services.AddChatClientIntentClassifier(chatClientKey: "chat");
-}
-else
-{
-    builder.Services.AddSingleton<IIntentClassifier, StubKeywordIntentClassifier>();
-}
-
+// NLU dependencies — IvrIntentAgent now owns the full intent-recognition pipeline
+// (audio preprocessing via ISpeechRecognizer + classification via the "chat" IChatClient
+// + local tool dispatch when the SLM cannot tool-call). Typically backed by
+// phi-4-mini-instruct on Azure Foundry through the keyed "chat" client registered above.
 builder.Services.AddTransient<ISpeechRecognizer, StubSpeechRecognizer>();
+builder.Services.AddIvrIntentAgent(chatClientKey: "chat");
 
 // Workflow definitions are now loaded from the YAML samples under
 // Workflow\Samples\ via IIvrWorkflowLoader (registered by AddIvrWorkflowFramework

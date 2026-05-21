@@ -1,18 +1,18 @@
+using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
 /// <summary>
-/// Factory for the Tier 3 <see cref="NluConversationStrategy"/>. Resolves the
-/// <see cref="ISpeechRecognizer"/>, <see cref="ISpeechSynthesizer"/>, and
-/// <see cref="IIntentClassifier"/> registered in DI. The optional
-/// <see cref="TransferEscalationTarget"/> is resolved from DI as a convenience so the
-/// host can configure escalation once and have every NLU instance pick it up.
+/// Factory for the Tier 3 <see cref="NluConversationStrategy"/>. Resolves the per-call
+/// <see cref="IvrIntentAgent"/> (which owns speech recognition + JSON intent
+/// classification) and the <see cref="ISpeechSynthesizer"/> registered in DI. The
+/// optional <see cref="TransferEscalationTarget"/> is also resolved from DI so the host
+/// can configure escalation once and have every NLU instance pick it up.
 /// </summary>
 public sealed class NluConversationStrategyFactory : IConversationStrategyFactory
 {
@@ -25,17 +25,15 @@ public sealed class NluConversationStrategyFactory : IConversationStrategyFactor
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
-        var recognizer = services.GetRequiredService<ISpeechRecognizer>();
+        var intentAgent = services.GetRequiredService<IvrIntentAgent>();
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
-        var classifier = services.GetRequiredService<IIntentClassifier>();
         var escalation = services.GetService<TransferEscalationTarget>();
         var loggerFactory = services.GetService<ILoggerFactory>();
 
         IConversationStrategy strategy = new NluConversationStrategy(
             workflow,
-            recognizer,
+            intentAgent,
             synthesizer,
-            classifier,
             restoreFrom,
             escalation,
             loggerFactory);

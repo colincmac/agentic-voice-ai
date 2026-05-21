@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Authentication;
@@ -9,13 +10,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
-using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
 /// <summary>
-/// Tier 3 strategy: STT → <see cref="IIntentClassifier"/> → workflow transition → TTS.
-/// Uses the deterministic intent matcher to drive the IVR — no generative model is invoked.
+/// Tier 3 strategy: caller audio → <see cref="IvrIntentAgent"/> → workflow transition → TTS.
+/// The intent agent owns speech recognition, JSON intent classification, and any local tool
+/// dispatch; this strategy is purely an orchestration layer that drives the IVR workflow
+/// from the agent's emitted <see cref="IvrIntentEvent"/> stream.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,10 +28,11 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 /// regardless of which strategy is currently active.
 /// </para>
 /// <para>
-/// Pairs with streaming caller edges (e.g. <c>AcsCallerEdge</c>): consumes inbound PCM through
-/// the recognizer and produces synthesized PCM via <c>OutboundDirective.Audio</c>. To escalate,
-/// emits an <c>OutboundDirective.TransferCall</c> when an utterance classifies as the
-/// well-known transfer intent (<see cref="TransferIntentName"/>).
+/// Pairs with streaming caller edges (e.g. <c>AcsCallerEdge</c>): forwards inbound PCM frames
+/// to <see cref="IvrIntentAgent.ClassifyAudioStreamAsync(System.Collections.Generic.IAsyncEnumerable{System.ReadOnlyMemory{byte}}, System.Func{IvrIntentClassificationContext}, System.Threading.CancellationToken)"/>
+/// and produces synthesized PCM via <c>OutboundDirective.Audio</c>. To escalate, emits an
+/// <c>OutboundDirective.TransferCall</c> when an utterance classifies as the well-known
+/// transfer intent (<see cref="TransferIntentName"/>).
 /// </para>
 /// </remarks>
 public sealed class NluConversationStrategy : IConversationStrategy
@@ -41,9 +44,8 @@ public sealed class NluConversationStrategy : IConversationStrategy
     public const string TransferIntentName = "transfer_to_agent";
 
     private readonly RealtimeIvrWorkflowDefinition _workflow;
-    private readonly ISpeechRecognizer _recognizer;
+    private readonly IvrIntentAgent _intentAgent;
     private readonly ISpeechSynthesizer _synthesizer;
-    private readonly IIntentClassifier _classifier;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
@@ -58,9 +60,17 @@ public sealed class NluConversationStrategy : IConversationStrategy
     private readonly Channel<StrategyEvent> _events = Channel.CreateUnbounded<StrategyEvent>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
+    private readonly Channel<ReadOnlyMemory<byte>> _audioFrames = Channel.CreateBounded<ReadOnlyMemory<byte>>(
+        new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
     private readonly CancellationTokenSource _cts = new();
     private IIvrWorkflowNavigator? _navigator;
-    private Task? _recognizerWritePump;
+    private Task? _audioPump;
     private Task? _classifyLoop;
     private bool _suspended;
     private string _callId = string.Empty;
@@ -68,17 +78,15 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
     public NluConversationStrategy(
         RealtimeIvrWorkflowDefinition workflow,
-        ISpeechRecognizer recognizer,
+        IvrIntentAgent intentAgent,
         ISpeechSynthesizer synthesizer,
-        IIntentClassifier classifier,
         IvrWorkflowState? restoreFrom = null,
         TransferEscalationTarget? escalationTarget = null,
         ILoggerFactory? loggerFactory = null)
     {
         _workflow = workflow;
-        _recognizer = recognizer;
+        _intentAgent = intentAgent;
         _synthesizer = synthesizer;
-        _classifier = classifier;
         EscalationTarget = escalationTarget;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<NluConversationStrategy>()
@@ -112,22 +120,22 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _classifyLoop = Task.Run(() => RunAsync(context, linked.Token), CancellationToken.None);
-        _recognizerWritePump = Task.Run(() => PumpRecognizerAsync(context, linked.Token), CancellationToken.None);
+        _audioPump = Task.Run(() => PumpInboundAudioAsync(context, linked.Token), CancellationToken.None);
         return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await _cts.CancelAsync().ConfigureAwait(false);
-        if (_recognizerWritePump is not null)
+        _audioFrames.Writer.TryComplete();
+        if (_audioPump is not null)
         {
-            try { await _recognizerWritePump.ConfigureAwait(false); } catch { /* shutdown */ }
+            try { await _audioPump.ConfigureAwait(false); } catch { /* shutdown */ }
         }
         if (_classifyLoop is not null)
         {
             try { await _classifyLoop.ConfigureAwait(false); } catch { /* shutdown */ }
         }
-        try { await _recognizer.CompleteAsync(CancellationToken.None).ConfigureAwait(false); } catch { /* ignore */ }
         _outbound.Writer.TryComplete();
         _events.Writer.TryComplete();
     }
@@ -147,28 +155,27 @@ public sealed class NluConversationStrategy : IConversationStrategy
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
-        try { await _recognizer.DisposeAsync().ConfigureAwait(false); } catch { /* ignore */ }
         _cts.Dispose();
     }
 
-    private async Task PumpRecognizerAsync(StrategyStartContext context, CancellationToken ct)
+    private async Task PumpInboundAudioAsync(StrategyStartContext context, CancellationToken ct)
     {
         try
         {
             await foreach (var frame in context.InboundAudio.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 if (_suspended) { continue; }
-                await _recognizer.WriteAudioAsync(frame.Pcm, ct).ConfigureAwait(false);
+                await _audioFrames.Writer.WriteAsync(frame.Pcm, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "NLU recognizer write pump terminated for call {CallId}", _callId);
+            _logger.LogWarning(ex, "NLU inbound audio pump terminated for call {CallId}", _callId);
         }
         finally
         {
-            try { await _recognizer.CompleteAsync(CancellationToken.None).ConfigureAwait(false); } catch { /* ignore */ }
+            _audioFrames.Writer.TryComplete();
         }
     }
 
@@ -197,19 +204,21 @@ public sealed class NluConversationStrategy : IConversationStrategy
             await EmitStepEnteredAsync(step, ct).ConfigureAwait(false);
             await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
 
-            await foreach (var segment in _recognizer.GetTranscriptsAsync(ct).ConfigureAwait(false))
+            await foreach (var evt in _intentAgent
+                .ClassifyAudioStreamAsync(_audioFrames.Reader.ReadAllAsync(ct), BuildContext, ct)
+                .ConfigureAwait(false))
             {
-                if (!segment.IsFinal || string.IsNullOrWhiteSpace(segment.Text))
+                if (!evt.Transcript.IsFinal || string.IsNullOrWhiteSpace(evt.Transcript.Text))
                 {
                     continue;
                 }
 
                 await _events.Writer.WriteAsync(
-                    new StrategyEvent.Transcript("caller", segment.Text, IsFinal: true, DateTimeOffset.UtcNow),
+                    new StrategyEvent.Transcript("caller", evt.Transcript.Text, IsFinal: true, DateTimeOffset.UtcNow),
                     ct).ConfigureAwait(false);
 
                 if (_suspended) { continue; }
-                await ProcessUtteranceAsync(segment.Text, ct).ConfigureAwait(false);
+                await ProcessIntentEventAsync(evt, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
@@ -239,12 +248,14 @@ public sealed class NluConversationStrategy : IConversationStrategy
         return _navigator!.EnterInitialStep();
     }
 
-    private async Task ProcessUtteranceAsync(string utterance, CancellationToken ct)
+    /// <summary>
+    /// Resolves the per-utterance classification context the intent agent should use for
+    /// the next final transcript. Called once per utterance by the agent's streaming
+    /// classification loop so the candidate intent set tracks the live workflow step.
+    /// </summary>
+    private IvrIntentClassificationContext BuildContext()
     {
         var step = _navigator?.CurrentStep ?? ResumeOrEnterInitialStep();
-
-        // Build the candidate intent set: every named intent on the current step plus the
-        // well-known transfer intent (so the workflow author doesn't have to model it).
         var stepIntents = step.Intents;
         var validIntents = new List<string>(stepIntents.Count + 1);
         foreach (var intentName in stepIntents.Keys)
@@ -256,18 +267,33 @@ public sealed class NluConversationStrategy : IConversationStrategy
             validIntents.Add(TransferIntentName);
         }
 
-        if (validIntents.Count == 0)
+        // Tools are dispatched by the strategy (workflow transitions, transfer) rather than
+        // by the agent itself for the IVR path, so we hand it an empty tool catalog.
+        return new IvrIntentClassificationContext(
+            Utterance: string.Empty,
+            ValidIntents: validIntents,
+            Tools: Array.Empty<Microsoft.Extensions.AI.AITool>(),
+            IntentToolMap: null);
+    }
+
+    private async Task ProcessIntentEventAsync(IvrIntentEvent evt, CancellationToken ct)
+    {
+        var step = _navigator?.CurrentStep ?? ResumeOrEnterInitialStep();
+        var stepIntents = step.Intents;
+
+        if (stepIntents.Count == 0 && EscalationTarget is null)
         {
             _logger.LogDebug("NLU step {StepId} has no intents; storing utterance and re-prompting", step.Id);
-            WorkflowState.Set(step.Id, utterance);
+            WorkflowState.Set(step.Id, evt.Transcript.Text);
             await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
             return;
         }
 
-        var result = await _classifier.ClassifyAsync(utterance, validIntents, ct).ConfigureAwait(false);
+        var result = evt.Intent;
         if (result.IsNone)
         {
-            _logger.LogInformation("No intent matched on step {StepId} for utterance: {Utterance}", step.Id, utterance);
+            _logger.LogInformation(
+                "No intent matched on step {StepId} for utterance: {Utterance}", step.Id, evt.Transcript.Text);
             await SpeakAsync("I didn't understand that. Could you say it another way?", ct).ConfigureAwait(false);
             return;
         }

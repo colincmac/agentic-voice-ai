@@ -9,7 +9,7 @@ namespace Agents.AI.ContactCenter.Calling;
 // One IConversationStrategy per call. Implementations:
 //   RealtimeVoiceStrategy        — wraps an AuthorizingRealtimeAIAgent
 //   SttTtsStrategy               — STT → IChatClient → TTS
-//   NluStrategy                  — STT → IIntentClassifier → workflow
+//   NluStrategy                  — STT → IvrIntentAgent → workflow
 //   DtmfStrategy                 — DTMF → workflow → TTS
 //   AgentEnsembleStrategy        — primary speaker + parallel delegates (see IAgentEnsemble)
 //   CompositeFallbackStrategy    — wraps an ordered list, swaps on failure (replaces FallbackOrchestrator)

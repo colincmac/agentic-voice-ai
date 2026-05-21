@@ -4,12 +4,17 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Agents.AI.ContactCenter.Media.Analysis;
+using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.Tests;
 
-public class ChatClientIntentClassifierTests
+/// <summary>
+/// Coverage for the chat-client-based classification path inside <see cref="IvrIntentAgent"/>.
+/// Mirrors the JSON parsing, candidate validation, and prompt-construction behavior the
+/// agent inherited from the now-removed standalone classifier.
+/// </summary>
+public class IvrIntentAgentClassifierTests
 {
     private static readonly string[] _candidateIntents = ["check_balance", "pay_bill", "speak_to_agent"];
 
@@ -17,21 +22,20 @@ public class ChatClientIntentClassifierTests
     public async Task ClassifyAsync_returns_none_for_empty_utterance()
     {
         var chat = new FakeChatClient(_ => throw new InvalidOperationException("Chat client should not be invoked"));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("   ", _candidateIntents);
+        var result = await agent.ClassifyAsync("   ", _candidateIntents);
 
         Assert.True(result.IsNone);
-        Assert.Equal(IntentResult.None, result);
     }
 
     [Fact]
     public async Task ClassifyAsync_returns_none_when_candidates_empty()
     {
         var chat = new FakeChatClient(_ => throw new InvalidOperationException("Chat client should not be invoked"));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("what's my balance", []);
+        var result = await agent.ClassifyAsync("what's my balance", []);
 
         Assert.True(result.IsNone);
     }
@@ -42,9 +46,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"check_balance","confidence":0.92,"entities":{"account":"primary"}}""")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("what is my checking balance", _candidateIntents);
+        var result = await agent.ClassifyAsync("what is my checking balance", _candidateIntents);
 
         Assert.False(result.IsNone);
         Assert.Equal("check_balance", result.IntentName);
@@ -64,9 +68,9 @@ public class ChatClientIntentClassifierTests
                 {"intent": "pay_bill", "confidence": 0.81}
                 ```
                 """)));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("I want to pay my bill", _candidateIntents);
+        var result = await agent.ClassifyAsync("I want to pay my bill", _candidateIntents);
 
         Assert.Equal("pay_bill", result.IntentName);
         Assert.Equal(0.81, result.Confidence, precision: 2);
@@ -79,9 +83,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"order_pizza","confidence":0.99}""")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("I'd like a pepperoni pie", _candidateIntents);
+        var result = await agent.ClassifyAsync("I'd like a pepperoni pie", _candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -92,9 +96,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"none","confidence":0.10}""")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("hello there", _candidateIntents);
+        var result = await agent.ClassifyAsync("hello there", _candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -105,10 +109,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"check_balance","confidence":0.4}""")));
-        var classifier = new ChatClientIntentClassifier(chat,
-            new ChatClientIntentClassifierOptions { MinimumConfidence = 0.6 });
+        var agent = new IvrIntentAgent(chat, options: new IvrIntentAgentOptions { MinimumConfidence = 0.6 });
 
-        var result = await classifier.ClassifyAsync("balance?", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance?", _candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -119,9 +122,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"CHECK_BALANCE","confidence":0.9}""")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("balance please", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance please", _candidateIntents);
 
         Assert.Equal("check_balance", result.IntentName); // matches the candidate casing
     }
@@ -132,9 +135,9 @@ public class ChatClientIntentClassifierTests
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"pay_bill"}""")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("pay my bill", _candidateIntents);
+        var result = await agent.ClassifyAsync("pay my bill", _candidateIntents);
 
         Assert.Equal("pay_bill", result.IntentName);
         Assert.Equal(1.0, result.Confidence);
@@ -145,9 +148,9 @@ public class ChatClientIntentClassifierTests
     {
         var chat = new FakeChatClient(_ =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "I think you want to check your balance.")));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("how much do I have", _candidateIntents);
+        var result = await agent.ClassifyAsync("how much do I have", _candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -156,9 +159,9 @@ public class ChatClientIntentClassifierTests
     public async Task ClassifyAsync_returns_none_on_chat_client_failure()
     {
         var chat = new FakeChatClient(_ => throw new InvalidOperationException("backend down"));
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        var result = await classifier.ClassifyAsync("balance?", _candidateIntents);
+        var result = await agent.ClassifyAsync("balance?", _candidateIntents);
 
         Assert.True(result.IsNone);
     }
@@ -169,10 +172,10 @@ public class ChatClientIntentClassifierTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         var chat = new FakeChatClient(_ => throw new OperationCanceledException());
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
-            await classifier.ClassifyAsync("hello", _candidateIntents, cts.Token));
+            await agent.ClassifyAsync("hello", _candidateIntents, cts.Token));
     }
 
     [Fact]
@@ -186,7 +189,7 @@ public class ChatClientIntentClassifierTests
                 """{"intent":"check_balance","confidence":0.9}"""));
         });
 
-        var options = new ChatClientIntentClassifierOptions
+        var options = new IvrIntentAgentOptions
         {
             IntentExamples =
             {
@@ -194,9 +197,9 @@ public class ChatClientIntentClassifierTests
                 ["pay_bill"] = ["pay this", "settle my balance"],
             },
         };
-        var classifier = new ChatClientIntentClassifier(chat, options);
+        var agent = new IvrIntentAgent(chat, options: options);
 
-        _ = await classifier.ClassifyAsync("balance please", _candidateIntents);
+        _ = await agent.ClassifyAsync("balance please", _candidateIntents);
 
         Assert.NotNull(captured);
         Assert.Equal(2, captured!.Count);
@@ -222,9 +225,9 @@ public class ChatClientIntentClassifierTests
             return new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 """{"intent":"check_balance","confidence":0.9}"""));
         });
-        var classifier = new ChatClientIntentClassifier(chat);
+        var agent = new IvrIntentAgent(chat);
 
-        _ = await classifier.ClassifyAsync("balance", _candidateIntents);
+        _ = await agent.ClassifyAsync("balance", _candidateIntents);
 
         Assert.NotNull(capturedOptions);
         Assert.Equal(ChatResponseFormat.Json, capturedOptions!.ResponseFormat);
