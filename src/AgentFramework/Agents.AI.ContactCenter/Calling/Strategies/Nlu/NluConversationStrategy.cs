@@ -295,8 +295,8 @@ public sealed class NluConversationStrategy : IConversationStrategy
             _logger.LogInformation(
                 "No intent matched on step {StepId} for utterance: {Utterance}", step.Id, evt.Transcript.Text);
             await EmitConfiguredPromptAsync(
-                step.StepNluConfiguration?.OnNoMatchPrompt,
-                step.StepNluConfiguration?.OnNoMatchAudioFile,
+                step.StepScriptedConfiguration?.OnErrorPrompt,
+                step.StepScriptedConfiguration?.OnErrorAudioFile,
                 fallbackText: "I didn't understand that. Could you say it another way?",
                 ct).ConfigureAwait(false);
             return;
@@ -338,10 +338,10 @@ public sealed class NluConversationStrategy : IConversationStrategy
             // utterance before advancing.
             await SpeakAsync(intent.ConfirmPrompt!, ct).ConfigureAwait(false);
         }
-        else if (step.StepNluConfiguration is { } nluCfg
-            && (!string.IsNullOrWhiteSpace(nluCfg.OnConfirmPrompt) || nluCfg.OnConfirmAudioFile is not null))
+        else if (step.StepScriptedConfiguration is { } scriptedCfg
+            && (!string.IsNullOrWhiteSpace(scriptedCfg.OnConfirmPrompt) || scriptedCfg.OnConfirmAudioFile is not null))
         {
-            await EmitConfiguredPromptAsync(nluCfg.OnConfirmPrompt, nluCfg.OnConfirmAudioFile, fallbackText: null, ct).ConfigureAwait(false);
+            await EmitConfiguredPromptAsync(scriptedCfg.OnConfirmPrompt, scriptedCfg.OnConfirmAudioFile, fallbackText: null, ct).ConfigureAwait(false);
         }
 
         var transition = _navigator!.TransitionTo(targetStage);
@@ -373,8 +373,8 @@ public sealed class NluConversationStrategy : IConversationStrategy
             ct).ConfigureAwait(false);
         var handoffStep = _navigator?.CurrentStep;
         await EmitConfiguredPromptAsync(
-            handoffStep?.StepNluConfiguration?.OnHandoffPrompt,
-            handoffStep?.StepNluConfiguration?.OnHandoffAudioFile,
+            handoffStep?.StepScriptedConfiguration?.OnHandoffPrompt,
+            handoffStep?.StepScriptedConfiguration?.OnHandoffAudioFile,
             fallbackText: "Transferring you to an agent now. Please hold.",
             ct).ConfigureAwait(false);
         await _outbound.Writer.WriteAsync(
@@ -396,10 +396,14 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
     private async Task SpeakStepPromptAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
     {
-        if (step.StepNluConfiguration is { } nluCfg
-            && (nluCfg.AudioFile is not null || !string.IsNullOrWhiteSpace(nluCfg.SsmlPromptOverride)))
+        // Resolve entry prompt: Nlu sub-config override > shared scripted parent.
+        var scripted = step.StepScriptedConfiguration;
+        var nluCfg = scripted?.Nlu;
+        var ssml = nluCfg?.SsmlPromptOverride ?? scripted?.SsmlPrompt;
+        var audio = nluCfg?.AudioFile ?? scripted?.AudioFile;
+        if (audio is not null || !string.IsNullOrWhiteSpace(ssml))
         {
-            await EmitConfiguredPromptAsync(nluCfg.SsmlPromptOverride, nluCfg.AudioFile, fallbackText: null, ct).ConfigureAwait(false);
+            await EmitConfiguredPromptAsync(ssml, audio, fallbackText: null, ct).ConfigureAwait(false);
             return;
         }
 

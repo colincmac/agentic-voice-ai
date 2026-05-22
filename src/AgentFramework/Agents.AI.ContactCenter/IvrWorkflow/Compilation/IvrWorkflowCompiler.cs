@@ -247,18 +247,11 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             }
         }
 
-        // DTMF compile.
-        StepDtmfConfiguration? dtmfConfig = null;
-        if (stage.Dtmf is { } dtmfDoc)
+        // Scripted (DTMF + NLU) tier configuration.
+        StepScriptedConfiguration? scriptedConfig = null;
+        if (stage.Scripted is { } scriptedDoc)
         {
-            dtmfConfig = IvrDtmfMapper.Map(dtmfDoc, stage.Id, errors);
-        }
-
-        // NLU compile.
-        StepNluConfiguration? nluConfig = null;
-        if (stage.Nlu is { } nluDoc)
-        {
-            nluConfig = IvrNluMapper.Map(nluDoc, stage.Id, errors);
+            scriptedConfig = IvrScriptedMapper.Map(scriptedDoc, stage.Id, errors);
         }
 
         // ConversationState (instructions/examples/exit/transitions).
@@ -290,8 +283,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             MaxRetries = stage.MaxRetries ?? 3,
             MaxDuration = ParseDuration(stage.MaxDuration, stage.Id, errors),
             RequiredAuthLevel = ResolveStageAuthLevel(baseRequiredAuth, stage.Requires),
-            StepDtmfConfiguration = dtmfConfig,
-            StepNluConfiguration = nluConfig,
+            StepScriptedConfiguration = scriptedConfig,
             Terminal = stage.Terminal,
             Intents = compiledIntents.Count == 0
                 ? new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase)

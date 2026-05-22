@@ -136,12 +136,15 @@ public class CompositeFallbackStrategyTests
                     Instructions = ["Greet the caller"],
                     Transitions = [new StateTransition { NextStep = "billing", Condition = "billing" }]
                 },
-                StepDtmfConfiguration = new StepDtmfConfiguration
+                StepScriptedConfiguration = new StepScriptedConfiguration
                 {
-                    MenuOptions = new Dictionary<char, DtmfMenuOption>
+                    Dtmf = new StepDtmfConfiguration
                     {
-                        ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
-                        ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        MenuOptions = new Dictionary<char, DtmfMenuOption>
+                        {
+                            ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
+                            ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        }
                     }
                 }
             },

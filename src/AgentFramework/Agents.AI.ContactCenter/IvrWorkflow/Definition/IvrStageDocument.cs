@@ -5,18 +5,20 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 /// <summary>
 /// A workflow stage. Stages own conversation state, declare locally-scoped intents,
-/// and reference shared capabilities. A stage is executed by exactly one of three
-/// modalities at runtime, selected by the active <see cref="IvrStrategyDocument"/>
+/// and reference shared capabilities. A stage is executed by exactly one of two
+/// configuration categories at runtime, selected by the active <see cref="IvrStrategyDocument"/>
 /// and any composite fallback policy:
 /// <list type="bullet">
-///   <item><b>Realtime</b> (generative AI) — configured via <see cref="Realtime"/>.</item>
-///   <item><b>NLU</b> (non-generative intent recognition over speech) — configured via <see cref="Nlu"/>.</item>
-///   <item><b>DTMF</b> (non-generative digit menus / collection) — configured via <see cref="Dtmf"/>.</item>
+///   <item><b>Realtime</b> (generative AI / LLM voice agent) — configured via <see cref="Realtime"/>.</item>
+///   <item><b>Scripted</b> (non-generative DTMF menus and NLU intent recognition) — configured via
+///   <see cref="Scripted"/>. The DTMF and NLU tiers share most of their prompt surface and
+///   control knobs at the <c>scripted:</c> root, with thin per-tier override blocks
+///   (<c>scripted.nlu</c> / <c>scripted.dtmf</c>) for the values that genuinely differ.</item>
 /// </list>
 /// A stage may declare any combination of these blocks; the strategy selector picks
-/// the highest-priority tier whose block is present, then falls back to the next tier
-/// per the workflow's strategy. Stage-level <c>intents</c> are shared across the NLU
-/// and Realtime tiers (DTMF uses its own option list).
+/// the highest-priority tier whose configuration is present, then falls back to the next
+/// tier per the workflow's strategy. Stage-level <c>intents</c> are shared across the NLU
+/// and Realtime tiers (DTMF uses its own option list under <see cref="Scripted"/>).
 /// </summary>
 public sealed class IvrStageDocument
 {
@@ -44,19 +46,14 @@ public sealed class IvrStageDocument
     [YamlMember(Alias = "realtime")]
     public IvrRealtimeStageDocument? Realtime { get; set; }
 
-    /// <summary>DTMF configuration (menu options, digit collection, validators, prompts).</summary>
-    [YamlMember(Alias = "dtmf")]
-    public IvrDtmfDocument? Dtmf { get; set; }
-
     /// <summary>
-    /// NLU (intent-recognition) configuration for this stage. Carries SSML / audio
-    /// prompt overrides, confidence thresholds, no-match / no-input policy, and an
-    /// optional stage-scoped intent list. When absent, NLU stages fall back to the
-    /// stage's root-level <see cref="Intents"/> and to defaults supplied by the
-    /// active strategy.
+    /// Scripted (non-generative) configuration shared by the DTMF and NLU tiers.
+    /// Hosts the common prompt surface and policy knobs; per-tier override blocks
+    /// (<c>scripted.nlu</c> / <c>scripted.dtmf</c>) carry only what genuinely differs.
+    /// When absent, scripted-tier stages fall back to defaults supplied by the active strategy.
     /// </summary>
-    [YamlMember(Alias = "nlu")]
-    public IvrNluDocument? Nlu { get; set; }
+    [YamlMember(Alias = "scripted")]
+    public IvrScriptedStageDocument? Scripted { get; set; }
 
     /// <summary>Locally-declared intents scoped to this stage.</summary>
     [YamlMember(Alias = "intents")]

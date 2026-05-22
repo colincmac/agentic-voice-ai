@@ -80,15 +80,16 @@ stages:
         - "Ask an open-ended question about what they need help with."
       examples:
         - "Hi, thanks for calling Contoso Bank. What can I help you with today?"
-    dtmf:
-      ssmlPrompt: |
-        <speak>Thanks for calling Contoso Bank.
-        Press 1 for your balance, press 2 to activate a card, or press 0 for an agent.</speak>
+    scripted:
       onErrorPrompt: "Sorry, I didn't catch that. Press 1 for balance, 2 to activate a card, or 0 for an agent."
-      options:
-        - { digit: '1', label: Balance,         intent: balance,         nextStage: verify-account }
-        - { digit: '2', label: ActivateCard,    intent: activate-card,   nextStage: verify-identity }
-        - { digit: '0', label: HumanAgent,      tool: transfer-to-human }
+      dtmf:
+        ssmlPrompt: |
+          <speak>Thanks for calling Contoso Bank.
+          Press 1 for your balance, press 2 to activate a card, or press 0 for an agent.</speak>
+        options:
+          - { digit: '1', label: Balance,         intent: balance,         nextStage: verify-account }
+          - { digit: '2', label: ActivateCard,    intent: activate-card,   nextStage: verify-identity }
+          - { digit: '0', label: HumanAgent,      tool: transfer-to-human }
     intents:
       - name: balance
         examples: ["balance", "check my balance", "what is my balance"]
@@ -121,19 +122,20 @@ stages:
           preamblePhrases:
             - "Looking that up now."
             - "One moment while I verify."
-    dtmf:
-      ssmlPrompt: "Please enter your 10-digit account number followed by the pound key."
+    scripted:
       onErrorPrompt: "That didn't look right. Please try again, account number followed by the pound key."
-      collect:
-        minDigits: 10
-        maxDigits: 10
-        terminator: '#'
-        interDigitTimeoutMs: 5000
-        validator: verify-account-number
-        digitsParameterName: accountNumber
-        collectedStateKey: accountNumber
-        onValidNextStage: route
-        onInvalidPrompt: "I couldn't verify that account number. Let's try once more."
+      dtmf:
+        ssmlPrompt: "Please enter your 10-digit account number followed by the pound key."
+        collect:
+          minDigits: 10
+          maxDigits: 10
+          terminator: '#'
+          interDigitTimeoutMs: 5000
+          validator: verify-account-number
+          digitsParameterName: accountNumber
+          collectedStateKey: accountNumber
+          onValidNextStage: route
+          onInvalidPrompt: "I couldn't verify that account number. Let's try once more."
     collects:
       - accountNumber
     maxRetries: 3
@@ -152,16 +154,17 @@ stages:
       tools:
         - send-otp
         - verify-otp
-    dtmf:
-      ssmlPrompt: "We just sent a 6-digit code to your phone. Please enter it followed by the pound key."
-      collect:
-        minDigits: 6
-        maxDigits: 6
-        terminator: '#'
-        validator: verify-otp
-        digitsParameterName: otpCode
-        collectedStateKey: otpVerified
-        onValidNextStage: route
+    scripted:
+      dtmf:
+        ssmlPrompt: "We just sent a 6-digit code to your phone. Please enter it followed by the pound key."
+        collect:
+          minDigits: 6
+          maxDigits: 6
+          terminator: '#'
+          validator: verify-otp
+          digitsParameterName: otpCode
+          collectedStateKey: otpVerified
+          onValidNextStage: route
     requiredState:
       - accountNumber
     onExit: route

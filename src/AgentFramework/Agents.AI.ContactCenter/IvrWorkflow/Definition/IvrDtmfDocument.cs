@@ -4,26 +4,26 @@ using YamlDotNet.Serialization;
 namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 /// <summary>
-/// YAML projection of <see cref="StepDtmfConfiguration"/>. Holds the menu options and
-/// the digit-collection block.
+/// DTMF-tier override sub-block nested under <see cref="IvrScriptedStageDocument"/>.
+/// Carries only the values that are unique to DTMF — an optional entry-prompt override
+/// (e.g. "press 1 for balance" vs. the NLU "say balance"), the menu <c>options</c>
+/// binding digits to actions, and the digit <c>collect</c> block (PIN / account-number
+/// entry). Shared prompts (no-input / handoff / confirm / generic error) and policy knobs
+/// live on the parent <see cref="IvrScriptedStageDocument"/>.
 /// </summary>
+/// <remarks>
+/// When both <see cref="SsmlPrompt"/> and <see cref="AudioFile"/> are populated the audio
+/// file takes precedence at runtime.
+/// </remarks>
 public sealed class IvrDtmfDocument
 {
-    /// <summary>SSML or plain prompt spoken before the menu.</summary>
+    /// <summary>DTMF-tier entry prompt override. Falls back to <see cref="IvrScriptedStageDocument.SsmlPrompt"/>.</summary>
     [YamlMember(Alias = "ssmlPrompt")]
     public string? SsmlPrompt { get; set; }
 
-    /// <summary>Optional pre-recorded audio file URI played instead of synthesizing <see cref="SsmlPrompt"/>.</summary>
+    /// <summary>DTMF-tier entry audio override. Falls back to <see cref="IvrScriptedStageDocument.AudioFile"/>.</summary>
     [YamlMember(Alias = "audioFile")]
     public string? AudioFile { get; set; }
-
-    /// <summary>Prompt spoken on no-match / invalid digit.</summary>
-    [YamlMember(Alias = "onErrorPrompt")]
-    public string? OnErrorPrompt { get; set; }
-
-    /// <summary>Audio file played on no-match / invalid digit (alternative to <see cref="OnErrorPrompt"/>).</summary>
-    [YamlMember(Alias = "onErrorAudioFile")]
-    public string? OnErrorAudioFile { get; set; }
 
     /// <summary>Per-digit menu options. Each entry binds a digit to an intent, capability, transition, or tool.</summary>
     [YamlMember(Alias = "options")]

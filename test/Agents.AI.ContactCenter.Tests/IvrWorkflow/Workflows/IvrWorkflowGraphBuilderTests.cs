@@ -200,7 +200,7 @@ public class IvrWorkflowGraphBuilderTests
             }
         }
 
-        if (stage.RuntimeStep.StepDtmfConfiguration is { } dtmf)
+        if (stage.RuntimeStep.StepScriptedConfiguration?.Dtmf is { } dtmf)
         {
             if (dtmf.MenuOptions is { Count: > 0 } options)
             {
@@ -247,7 +247,7 @@ public class IvrWorkflowGraphBuilderTests
             MaxDuration = stage.RuntimeStep.MaxDuration,
             RequiredAuthLevel = stage.RuntimeStep.RequiredAuthLevel,
             OnCompleted = stage.RuntimeStep.OnCompleted,
-            StepDtmfConfiguration = stage.RuntimeStep.StepDtmfConfiguration,
+            StepScriptedConfiguration = stage.RuntimeStep.StepScriptedConfiguration,
         };
 
         return new CompiledIvrStage

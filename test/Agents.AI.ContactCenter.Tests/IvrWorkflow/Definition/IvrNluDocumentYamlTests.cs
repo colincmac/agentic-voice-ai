@@ -3,20 +3,18 @@ using Agents.AI.ContactCenter.IvrWorkflow.Loading;
 
 namespace Agents.AI.ContactCenter.Tests.IvrWorkflow.Definition;
 
-public class IvrNluDocumentYamlTests
+public class IvrScriptedDocumentYamlTests
 {
     [Fact]
-    public void Parses_full_nlu_block_with_ssml_overrides()
+    public void Parses_full_scripted_block_with_nlu_overrides()
     {
         const string yaml = """
             name: t
             stages:
               - id: welcome
                 goal: Greet the caller
-                nlu:
-                  ssmlPrompt: |
-                    <speak xml:lang="en-US">Welcome.</speak>
-                  onNoMatchPrompt: "Please say balance, billing, or agent."
+                scripted:
+                  onErrorPrompt: "Please say balance, billing, or agent."
                   onNoInputPrompt: "Sorry, I didn't hear anything."
                   onConfirmPrompt: "Got it."
                   onHandoffPrompt: "One moment."
@@ -26,10 +24,13 @@ public class IvrNluDocumentYamlTests
                   noInputTimeoutMs: 4000
                   examples:
                     - check my balance
-                  intents:
-                    - name: balance
-                      examples: [ "balance please" ]
-                      nextStage: closing
+                  nlu:
+                    ssmlPrompt: |
+                      <speak xml:lang="en-US">Welcome.</speak>
+                    intents:
+                      - name: balance
+                        examples: [ "balance please" ]
+                        nextStage: closing
               - id: closing
                 terminal: true
             """;
@@ -37,20 +38,23 @@ public class IvrNluDocumentYamlTests
         var doc = IvrWorkflowYamlReader.Parse(yaml);
         var stage = doc.Stages[0];
 
-        Assert.NotNull(stage.Nlu);
-        Assert.StartsWith("<speak", stage.Nlu!.SsmlPrompt!.TrimStart());
-        Assert.Equal("Please say balance, billing, or agent.", stage.Nlu.OnNoMatchPrompt);
-        Assert.Equal("Sorry, I didn't hear anything.", stage.Nlu.OnNoInputPrompt);
-        Assert.Equal("Got it.", stage.Nlu.OnConfirmPrompt);
-        Assert.Equal("One moment.", stage.Nlu.OnHandoffPrompt);
-        Assert.Equal(3, stage.Nlu.MaxNoMatch);
-        Assert.Equal(1, stage.Nlu.MaxNoInput);
-        Assert.Equal(0.7, stage.Nlu.ConfidenceThreshold);
-        Assert.Equal(4000, stage.Nlu.NoInputTimeoutMs);
-        Assert.Single(stage.Nlu.Examples);
-        Assert.Single(stage.Nlu.Intents);
-        Assert.Equal("balance", stage.Nlu.Intents[0].Name);
-        Assert.Equal("closing", stage.Nlu.Intents[0].NextStage);
+        Assert.NotNull(stage.Scripted);
+        var scripted = stage.Scripted!;
+        Assert.Equal("Please say balance, billing, or agent.", scripted.OnErrorPrompt);
+        Assert.Equal("Sorry, I didn't hear anything.", scripted.OnNoInputPrompt);
+        Assert.Equal("Got it.", scripted.OnConfirmPrompt);
+        Assert.Equal("One moment.", scripted.OnHandoffPrompt);
+        Assert.Equal(3, scripted.MaxNoMatch);
+        Assert.Equal(1, scripted.MaxNoInput);
+        Assert.Equal(0.7, scripted.ConfidenceThreshold);
+        Assert.Equal(4000, scripted.NoInputTimeoutMs);
+        Assert.Single(scripted.Examples);
+
+        Assert.NotNull(scripted.Nlu);
+        Assert.StartsWith("<speak", scripted.Nlu!.SsmlPrompt!.TrimStart());
+        Assert.Single(scripted.Nlu.Intents);
+        Assert.Equal("balance", scripted.Nlu.Intents[0].Name);
+        Assert.Equal("closing", scripted.Nlu.Intents[0].NextStage);
     }
 
     [Fact]
@@ -64,11 +68,11 @@ public class IvrNluDocumentYamlTests
                 new IvrStageDocument
                 {
                     Id = "welcome",
-                    Nlu = new IvrNluDocument
+                    Scripted = new IvrScriptedStageDocument
                     {
                         ConfidenceThreshold = 1.5,
-                        OnNoMatchPrompt = "say again",
-                        OnNoMatchAudioFile = "https://cdn/x.wav",
+                        OnErrorPrompt = "say again",
+                        OnErrorAudioFile = "https://cdn/x.wav",
                     },
                     Transitions = { new IvrTransitionDocument { To = "closing" } },
                 },
@@ -80,11 +84,11 @@ public class IvrNluDocumentYamlTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Contains("confidenceThreshold"));
-        Assert.Contains(result.Errors, e => e.Contains("nlu.noMatch"));
+        Assert.Contains(result.Errors, e => e.Contains("scripted.error"));
     }
 
     [Fact]
-    public void Stage_without_nlu_block_round_trips_cleanly()
+    public void Stage_without_scripted_block_round_trips_cleanly()
     {
         const string yaml = """
             name: t
@@ -96,7 +100,8 @@ public class IvrNluDocumentYamlTests
             """;
         var doc = IvrWorkflowYamlReader.Parse(yaml);
 
-        Assert.Null(doc.Stages[0].Nlu);
+        Assert.Null(doc.Stages[0].Scripted);
         Assert.NotNull(doc.Stages[0].Realtime);
     }
 }
+

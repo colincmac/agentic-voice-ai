@@ -4,6 +4,13 @@ using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
 
+/// <summary>
+/// DTMF-tier sub-configuration nested under <see cref="StepScriptedConfiguration"/>.
+/// Carries the values that are unique to DTMF — an optional entry-prompt override
+/// (e.g. "press 1 for balance"), the menu options, and the digit-collection block.
+/// Shared prompts (error / no-input / handoff / confirm) and counters live on the parent
+/// <see cref="StepScriptedConfiguration"/>.
+/// </summary>
 public sealed class StepDtmfConfiguration(
     char terminationDigit = '#',
     int interDigitTimeoutMs = 5000,
@@ -11,11 +18,10 @@ public sealed class StepDtmfConfiguration(
     int maxNumberOfDigits = 1,
     string? promptOverride = null)
 {
-
+    /// <summary>DTMF-tier entry audio override. Falls back to <see cref="StepScriptedConfiguration.AudioFile"/>.</summary>
     public Uri? AudioFile { get; set; } = null;
-    public Uri? OnErrorAudioFile { get; set; } = null;
-    public string? OnErrorPrompt { get; set; } = null;
 
+    /// <summary>DTMF-tier entry prompt override (SSML or plain). Falls back to <see cref="StepScriptedConfiguration.SsmlPrompt"/>.</summary>
     public string? SsmlPromptOverride { get; set; } = promptOverride;
 
     /// <summary>

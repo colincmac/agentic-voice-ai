@@ -77,25 +77,28 @@ strategy:
   primary: dtmf
 stages:
   - id: menu
-    dtmf:
-      ssmlPrompt: "Press 1 to pay your bill, press 2 to check your balance."
-      options:
-        - { digit: '1', label: PayBill, nextStage: collect-account }
-        - { digit: '2', label: Balance, nextStage: collect-account }
+    scripted:
+      dtmf:
+        ssmlPrompt: "Press 1 to pay your bill, press 2 to check your balance."
+        options:
+          - { digit: '1', label: PayBill, nextStage: collect-account }
+          - { digit: '2', label: Balance, nextStage: collect-account }
   - id: collect-account
-    dtmf:
-      ssmlPrompt: "Enter your 8-digit account number, followed by pound."
-      collect:
-        minDigits: 8
-        maxDigits: 8
-        validator: verify-account-number
-        onValidNextStage: confirm
+    scripted:
+      dtmf:
+        ssmlPrompt: "Enter your 8-digit account number, followed by pound."
+        collect:
+          minDigits: 8
+          maxDigits: 8
+          validator: verify-account-number
+          onValidNextStage: confirm
   - id: confirm
-    dtmf:
-      ssmlPrompt: "Press 1 to confirm, press 2 to start over."
-      options:
-        - { digit: '1', label: Confirm, nextStage: complete }
-        - { digit: '2', label: Restart, nextStage: menu }
+    scripted:
+      dtmf:
+        ssmlPrompt: "Press 1 to confirm, press 2 to start over."
+        options:
+          - { digit: '1', label: Confirm, nextStage: complete }
+          - { digit: '2', label: Restart, nextStage: menu }
   - id: complete
     terminal: true
 ```

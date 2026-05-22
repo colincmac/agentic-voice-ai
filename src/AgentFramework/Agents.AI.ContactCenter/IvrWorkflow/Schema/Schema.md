@@ -43,12 +43,14 @@ stages:
         - "Welcome the caller by name when available."
       examples:
         - "Hi, thanks for calling Contoso Bank. How can I help today?"
-    dtmf:
-      ssmlPrompt: "Press 1 for balance, press 2 for transfers, or press 0 for an agent."
-      options:
-        - { digit: '1', label: Balance, intent: balance, nextStage: verify-account }
-        - { digit: '2', label: Transfers, intent: transfer-funds, nextStage: verify-account }
-        - { digit: '0', label: Agent, capability: transfer.to.human }
+    scripted:
+      onErrorPrompt: "Sorry, that wasn't a valid option."
+      dtmf:
+        ssmlPrompt: "Press 1 for balance, press 2 for transfers, or press 0 for an agent."
+        options:
+          - { digit: '1', label: Balance, intent: balance, nextStage: verify-account }
+          - { digit: '2', label: Transfers, intent: transfer-funds, nextStage: verify-account }
+          - { digit: '0', label: Agent, capability: transfer.to.human }
     intents:
       - { name: balance, examples: [ "balance", "account balance" ], nextStage: verify-account }
       - { name: transfer-funds, examples: [ "transfer", "send money" ], nextStage: verify-account }
@@ -88,8 +90,10 @@ A stage is the unit of interaction. It may declare:
 
 - `requires` — entry guards (auth level, required state, previous stage, predicate)
 - `strategy` — overrides the root strategy for this stage only
-- `realtime` — instructions/examples/tools/toolRules surfaced to the realtime agent
-- `dtmf` — digit menu, audio prompts, and optional digit-collection block
+- `realtime` — instructions/examples/tools/toolRules surfaced to the realtime (generative AI) agent
+- `scripted` — non-generative configuration shared by the DTMF and NLU tiers
+  (shared prompts/knobs at the root, plus optional `scripted.nlu` and `scripted.dtmf`
+  sub-blocks for tier-specific overrides; see [Scripted Block](#scripted-block) below)
 - `intents` — locally-scoped intents (utterance + routing)
 - `capabilities` — capability ids exposed at this stage
 - `exitWhen`, `onExit`, `transitions` — declarative routing
@@ -97,19 +101,51 @@ A stage is the unit of interaction. It may declare:
 - `maxRetries`, `maxDuration` — operational limits
 - `terminal: true` — completes the workflow upon entry/exit
 
+### Scripted Block
+
+The `scripted:` block hosts the configuration shared by the two non-generative tiers
+(DTMF and NLU). Authors keep the common prompt surface and policy knobs at the root
+of `scripted:` so the same wording can be reused across both tiers, and only the
+values that genuinely differ live in the `scripted.nlu` / `scripted.dtmf` sub-blocks.
+
+Shared at the root of `scripted:`:
+
+- `ssmlPrompt` / `audioFile` — stage entry prompt
+- `onErrorPrompt` / `onErrorAudioFile` — input rejection (DTMF invalid digit or NLU no-match)
+- `onNoInputPrompt` / `onNoInputAudioFile` — caller silence past `noInputTimeoutMs`
+- `onHandoffPrompt` / `onHandoffAudioFile` — escalation to fallback tier or human agent
+- `onConfirmPrompt` / `onConfirmAudioFile` — confirmation before transition
+- `maxNoMatch`, `maxNoInput`, `noInputTimeoutMs` — retry/timeout counters
+- `confidenceThreshold`, `examples` — NLU-only knobs (DTMF ignores them)
+
+`scripted.nlu`: optional entry-prompt override (`ssmlPrompt` / `audioFile`) and an
+optional stage-scoped `intents:` list.
+
+`scripted.dtmf`: optional entry-prompt override (`ssmlPrompt` / `audioFile`),
+the digit-menu `options:` list, and the buffered-digit `collect:` block.
+
+**Prompt resolution precedence (lowest to highest):** `null` → shared `scripted` value
+→ tier-specific override. For paired `...Prompt` / `...AudioFile` slots, when both
+are populated the audio file wins at runtime.
+
 ### DTMF Options
 
-Each `dtmf.options[]` entry binds a single digit (`0`-`9`, `*`, `#`) to a routing
+Each `scripted.dtmf.options[]` entry binds a single digit (`0`-`9`, `*`, `#`) to a routing
 decision: an intent, a capability, a direct stage transition, or a tool invocation.
 The compiler chooses the strongest signal in that order — an explicit `nextStage` wins
 ties with `intent`/`capability`.
 
 ### Digit Collection
 
-`dtmf.collect` activates buffered digit collection (e.g., account number). It declares
-min/max digits, terminator, an inter-digit timeout, and a `validator` tool name resolved
-through the registry. On success the buffer is stored under `collectedStateKey` and the
-workflow transitions to `onValidNextStage`.
+`scripted.dtmf.collect` activates buffered digit collection (e.g., account number). It
+declares min/max digits, terminator, an inter-digit timeout, and a `validator` tool
+name resolved through the registry. On success the buffer is stored under
+`collectedStateKey` and the workflow transitions to `onValidNextStage`.
+
+### Intents
+
+Intent declarations look the same at root and stage level. Stage intents extend (not
+shadow) root intents. Each intent maps to `nextStage`, `capability`, or both.
 
 ### Intents
 
@@ -130,7 +166,7 @@ Custom guard kinds are dispatched to registered `IIvrGuardFactory` implementatio
 
 ## Tools
 
-Tool names in `commonTools`, `tools`, `dtmf.options[].tool`, and `dtmf.collect.validator`
+Tool names in `commonTools`, `tools`, `scripted.dtmf.options[].tool`, and `scripted.dtmf.collect.validator`
 are resolved at compile time against the DI-registered `IIvrToolRegistry`. Production
 hosts typically register tools through `[McpServerTool]` discovery or by calling
 `AddIvrTool(...)` during DI setup.
