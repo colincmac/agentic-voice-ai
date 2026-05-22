@@ -68,7 +68,9 @@ public class AcsCallAutomationEdgeTests
         await using var edge = new AcsCallAutomationEdge(
             "call-conn-1",
             media,
-            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550001" });
+            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550001" },
+            TestTelemetry.LoggerFor<AcsCallAutomationEdge>(),
+            TestTelemetry.Calling);
 
         await edge.ConnectAsync();
 
@@ -96,7 +98,9 @@ public class AcsCallAutomationEdgeTests
         await using var edge = new AcsCallAutomationEdge(
             "call-conn-2",
             media,
-            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550002" });
+            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550002" },
+            TestTelemetry.LoggerFor<AcsCallAutomationEdge>(),
+            TestTelemetry.Calling);
 
         await edge.ConnectAsync();
 
@@ -121,17 +125,21 @@ public class AcsCallAutomationEdgeTests
         var edge = new AcsCallAutomationEdge(
             "call-conn-e2e",
             media,
-            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550003" });
+            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550003" },
+            TestTelemetry.LoggerFor<AcsCallAutomationEdge>(),
+            TestTelemetry.Calling);
 
         var services = new ServiceCollection().BuildServiceProvider();
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
             [new DtmfVerbStrategyFactory()],
             registry,
             quality,
-            defaultObservers: [new DashboardProjectionObserver()]);
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
+            defaultObservers: [new DashboardProjectionObserver(TestTelemetry.Calling)]);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
@@ -180,9 +188,11 @@ public class AcsCallAutomationEdgeTests
         var edge = new AcsCallAutomationEdge(
             "call-conn-mismatch",
             media,
-            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550004" });
+            new CallEdgeMetadata { DisplayName = "Caller", RawIdentifier = "+15555550004" },
+            TestTelemetry.LoggerFor<AcsCallAutomationEdge>(),
+            TestTelemetry.Calling);
 
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
 
         // Pair the streaming-DTMF strategy (emits Audio) with a verb edge (drops Audio).
@@ -191,7 +201,9 @@ public class AcsCallAutomationEdgeTests
             [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
-            defaultObservers: [new DashboardProjectionObserver()]);
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
+            defaultObservers: [new DashboardProjectionObserver(TestTelemetry.Calling)]);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {

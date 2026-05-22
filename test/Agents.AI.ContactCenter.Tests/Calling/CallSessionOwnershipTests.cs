@@ -98,7 +98,9 @@ public class CallSessionOwnershipTests
             services.GetRequiredService<IServiceScopeFactory>(),
             [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter());
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
@@ -146,7 +148,9 @@ public class CallSessionOwnershipTests
             services.GetRequiredService<IServiceScopeFactory>(),
             [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter(),
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             ownership: throwingOwnership,
             heartbeat: heartbeat);
 
@@ -175,7 +179,9 @@ public class CallSessionOwnershipTests
             services.GetRequiredService<IServiceScopeFactory>(),
             [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter());
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
@@ -210,7 +216,9 @@ public class CallSessionOwnershipTests
             services.GetRequiredService<IServiceScopeFactory>(),
             [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter(),
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             ownership: ownership,
             heartbeat: heartbeat);
 

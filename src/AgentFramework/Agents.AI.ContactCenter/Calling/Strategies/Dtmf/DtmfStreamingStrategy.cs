@@ -176,10 +176,9 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
                 _callId,
                 _callerMetadata,
                 _events.Writer,
+                _logger,
                 WorkflowState,
-                telemetry: null,
-                logger: _logger,
-                cancellationToken: ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
 
             if (_prewarmed && _prewarmedInitialStep is not null)
             {

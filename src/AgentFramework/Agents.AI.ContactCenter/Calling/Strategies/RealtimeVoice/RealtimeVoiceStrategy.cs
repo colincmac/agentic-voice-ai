@@ -8,7 +8,6 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
@@ -21,7 +20,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 {
     private readonly IRealtimeVoiceBackend _backend;
     private readonly RealtimeIvrWorkflowDefinition _workflow;
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly CallingTelemetry _telemetry;
     private string _callId = string.Empty;
@@ -49,15 +48,18 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     public RealtimeVoiceStrategy(
         IRealtimeVoiceBackend backend,
         RealtimeIvrWorkflowDefinition workflow,
-        IvrWorkflowState? restoreFrom = null,
-        ILoggerFactory? loggerFactory = null,
-        CallingTelemetry? telemetry = null)
+        ILoggerFactory loggerFactory,
+        CallingTelemetry telemetry,
+        IvrWorkflowState? restoreFrom = null)
     {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(telemetry);
+
         _backend = backend;
         _workflow = workflow;
         _loggerFactory = loggerFactory;
-        _logger = loggerFactory?.CreateLogger<RealtimeVoiceStrategy>() ?? NullLogger<RealtimeVoiceStrategy>.Instance;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
+        _logger = loggerFactory.CreateLogger<RealtimeVoiceStrategy>();
+        _telemetry = telemetry;
 
         WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
@@ -143,9 +145,8 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             _callId,
             _callerMetadata,
             _events.Writer,
-            WorkflowState,
-            _telemetry,
             _logger,
+            WorkflowState,
             cancellationToken).ConfigureAwait(false);
 
         // Seed the agent with the system prompt for the current workflow step.

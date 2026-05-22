@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Telemetry;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
 
@@ -21,12 +20,13 @@ public sealed class InMemoryCallQualityReporter : ICallQualityReporter
     private readonly ILogger<InMemoryCallQualityReporter> _logger;
 
     public InMemoryCallQualityReporter(
-        ILoggerFactory? loggerFactory = null,
-        CallingTelemetry? telemetry = null)
+        ILoggerFactory loggerFactory,
+        CallingTelemetry telemetry)
     {
-        _telemetry = telemetry ?? CallingTelemetry.Default;
-        _logger = loggerFactory?.CreateLogger<InMemoryCallQualityReporter>()
-                  ?? NullLogger<InMemoryCallQualityReporter>.Instance;
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(telemetry);
+        _telemetry = telemetry;
+        _logger = loggerFactory.CreateLogger<InMemoryCallQualityReporter>();
     }
 
     /// <summary>

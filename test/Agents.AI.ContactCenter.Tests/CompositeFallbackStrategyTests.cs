@@ -34,9 +34,11 @@ public class CompositeFallbackStrategyTests
         var services = new ServiceCollection()
             .AddSingleton<ISpeechSynthesizer, FakeSpeechSynthesizer>()
             .AddSingleton<IRealtimeVoiceBackend>(backend)
+            .AddSingleton(TestTelemetry.Calling)
+            .AddLogging()
             .BuildServiceProvider();
 
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
         var fakeEdge = new FakeCallerEdge("call-fb");
 
@@ -53,7 +55,9 @@ public class CompositeFallbackStrategyTests
             [compositeFactory],
             registry,
             quality,
-            defaultObservers: [new DashboardProjectionObserver()]);
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
+            defaultObservers: [new DashboardProjectionObserver(TestTelemetry.Calling)]);
 
         var session = await sessionFactory.CreateAsync(new CallSessionRequest
         {

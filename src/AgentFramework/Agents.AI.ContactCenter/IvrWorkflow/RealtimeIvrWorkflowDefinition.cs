@@ -21,10 +21,10 @@ public sealed class RealtimeIvrWorkflowDefinition
     /// strategy resolution (the matching <c>IConversationStrategyFactory</c> is selected as
     /// the entry point) and the ACS answer mode chosen by the incoming-call endpoint
     /// (<see cref="AgentTier.RealtimeVoice"/> → bidirectional media WebSocket; all other tiers
-    /// → verb-mode answer). Defaults to <see cref="AgentTier.IntentNlu"/> for back-compat with
+    /// → verb-mode answer). Defaults to <see cref="AgentTier.RealtimeVoice"/> for back-compat with
     /// workflows that don't declare a tier explicitly.
     /// </summary>
-    public AgentTier Tier { get; init; } = AgentTier.IntentNlu;
+    public AgentTier Tier { get; init; } = AgentTier.RealtimeVoice;
 
     /// <summary>
     /// Gets the base prompt configuration shared across all steps.

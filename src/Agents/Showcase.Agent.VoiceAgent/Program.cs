@@ -27,7 +27,6 @@ using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.Coordination;
 
 var builder = WebApplication.CreateBuilder(args);
-AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 //builder.Services.AddGrpc();
 var azureSection = builder.Configuration.GetSection("Azure");
 var tenantId = azureSection["TenantId"];
@@ -38,23 +37,11 @@ builder.Services.AddAzureClients(clientBuilder =>
     // Make this the default for clients created by the factory
     clientBuilder.UseCredential(credential);
 });
+builder.AddServiceDefaults();
 
 
-if (builder.Environment.IsDevelopment())
-{
-    var resourceAttributes = new Dictionary<string, object> {
-    { "service.name", "artagent" },
-    { "service.namespace", "dev" },
-    { "service.instance.id", "local" }};
-
-    builder.AddServiceDefaults(opt => opt.AddAttributes(resourceAttributes));
-}
-else
-{
-    builder.AddServiceDefaults();
-}
 builder.Services.AddHttpClient();
-builder.Services.AddHttpLogging(o => { });
+
 // Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
 
@@ -171,6 +158,7 @@ builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
 
 
 builder.AddCallSessionContainer()
+    .AddDistributedCallState(DistributedCallStateBackend.InMemory)
     // Inner factories — the composite below shadows the top tier and reuses these
     // through DI. Order matters: register the inner tiers BEFORE the composite so
     // the composite's lookup finds them.
@@ -190,8 +178,8 @@ builder.AddCallSessionContainer()
     // collected data, transcript) and CallerAuthenticationState are preserved across each
     // mid-call swap so the caller doesn't have to re-authenticate when the tier degrades.
     .AddCompositeFallbackStrategy(
-        topTier: AgentTier.IntentNlu,
-        //AgentTier.RealtimeVoice,
+        topTier: AgentTier.RealtimeVoice,
+        AgentTier.RealtimeVoice,
         AgentTier.IntentNlu,
         AgentTier.DtmfOnly);
 

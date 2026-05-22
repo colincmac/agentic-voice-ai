@@ -226,7 +226,8 @@ public static class CallingApi
                     callProperties,
                     httpContext.RequestAborted,
                     services.CallAutomationClient,
-                    loggerFactory.CreateLogger<AcsCallerStreamEdge>());
+                    loggerFactory.CreateLogger<AcsCallerStreamEdge>(),
+                    services.Telemetry);
 
                 var callId = $"call_{callConnectionId}";
                 var session = await StartCallSessionAsync(
@@ -426,8 +427,9 @@ public static class CallingApi
             callConnection.CallConnectionId,
             media,
             metadata,
-            control,
-            services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>());
+            services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>(),
+            services.Telemetry,
+            control);
 
         var callId = $"call_{callConnection.CallConnectionId}";
         await StartCallSessionAsync(

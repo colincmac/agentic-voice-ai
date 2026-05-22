@@ -194,10 +194,9 @@ public sealed class NluConversationStrategy : IConversationStrategy
                 _callId,
                 _callerMetadata,
                 _events.Writer,
+                _logger,
                 WorkflowState,
-                telemetry: null,
-                logger: _logger,
-                cancellationToken: ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
 
             // If the composite restored mid-workflow, re-enter the current step. Otherwise start fresh.
             var step = ResumeOrEnterInitialStep();

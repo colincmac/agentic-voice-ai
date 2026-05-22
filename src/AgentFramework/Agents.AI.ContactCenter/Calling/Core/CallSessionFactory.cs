@@ -3,7 +3,6 @@ using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Exceptions;
 
@@ -25,7 +24,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
     private readonly ICallQualityReporter _quality;
     private readonly CallingTelemetry _telemetry;
     private readonly IEnumerable<ICallObserver> _defaultObservers;
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly ICallOwnershipDirectory? _ownership;
     private readonly IPodHeartbeat? _heartbeat;
@@ -36,22 +35,25 @@ public sealed class CallSessionFactory : ICallSessionFactory
         IEnumerable<IConversationStrategyFactory> strategyFactories,
         ICallSessionRegistry registry,
         ICallQualityReporter quality,
+        ILoggerFactory loggerFactory,
+        CallingTelemetry telemetry,
         IEnumerable<ICallObserver>? defaultObservers = null,
-        ILoggerFactory? loggerFactory = null,
-        CallingTelemetry? telemetry = null,
         ICallOwnershipDirectory? ownership = null,
         IPodHeartbeat? heartbeat = null)
     {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(telemetry);
+
         _scopeFactory = scopeFactory;
         _strategyFactories = strategyFactories
             .GroupBy(f => f.Tier)
             .ToDictionary(g => g.Key, g => g.Last());
         _registry = (CallSessionRegistry)registry;
         _quality = quality;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
+        _telemetry = telemetry;
         _defaultObservers = defaultObservers ?? [];
         _loggerFactory = loggerFactory;
-        _logger = loggerFactory?.CreateLogger<CallSessionFactory>() ?? NullLogger<CallSessionFactory>.Instance;
+        _logger = loggerFactory.CreateLogger<CallSessionFactory>();
         _ownership = ownership;
         _heartbeat = heartbeat;
     }
@@ -194,7 +196,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
             _quality,
             scope,
             _registry,
-            _loggerFactory?.CreateLogger<CallSession>(),
+            _loggerFactory.CreateLogger<CallSession>(),
             _telemetry,
             _ownership,
             _heartbeat);

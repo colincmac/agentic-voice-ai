@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,9 +29,10 @@ public sealed class RealtimeVoiceStrategyFactory : IConversationStrategyFactory
         CancellationToken cancellationToken = default)
     {
         var backend = services.GetRequiredService<IRealtimeVoiceBackend>();
-        var loggerFactory = services.GetService<ILoggerFactory>();
+        var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+        var telemetry = services.GetRequiredService<CallingTelemetry>();
 
-        IConversationStrategy strategy = new RealtimeVoiceStrategy(backend, workflow, restoreFrom, loggerFactory);
+        IConversationStrategy strategy = new RealtimeVoiceStrategy(backend, workflow, loggerFactory, telemetry, restoreFrom);
         return ValueTask.FromResult(strategy);
     }
 }

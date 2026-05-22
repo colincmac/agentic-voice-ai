@@ -216,7 +216,7 @@ internal sealed class CallFixture : IAsyncDisposable
         var strategy = new ControllableStrategy();
 
         var services = new ServiceCollection().BuildServiceProvider();
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
 
         var caller = new FakeCallerEdge("caller-1");
@@ -227,6 +227,8 @@ internal sealed class CallFixture : IAsyncDisposable
             [new ControllableStrategyFactory(strategy)],
             registry,
             quality,
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             defaultObservers: []);
 
         var session = await factory.CreateAsync(new CallSessionRequest

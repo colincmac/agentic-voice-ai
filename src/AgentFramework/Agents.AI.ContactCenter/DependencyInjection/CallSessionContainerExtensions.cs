@@ -19,8 +19,9 @@ using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Calling.Core;
+using Agents.AI.ContactCenter.Calling;
 
-namespace Agents.AI.ContactCenter.Calling;
+namespace Agents.AI.ContactCenter.DependencyInjection;
 
 // SKETCH — DI wire-up for the new Calling/Proposed shape. Replaces the
 // AddConversationHub + ConversationHubBuilder + IContactCenterConversationSessionActivator
@@ -72,9 +73,10 @@ public static class CallSessionContainerExtensions
     /// Registers the dedicated <see cref="CallingTelemetry"/> singleton for the
     /// new Calling/Proposed stack and wires its <see cref="System.Diagnostics.ActivitySource"/>
     /// / <see cref="System.Diagnostics.Metrics.Meter"/> into the host's
-    /// OpenTelemetry pipeline. Safe to call multiple times.
+    /// OpenTelemetry pipeline. Invoked automatically by
+    /// <see cref="AddCallSessionContainerCore"/>.
     /// </summary>
-    public static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
+    private static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
     {
         builder.Services.TryAddSingleton<CallingTelemetry>();
 
@@ -108,6 +110,8 @@ public static class CallSessionContainerExtensions
         services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
+
+
 
         builder.AddCallSessionContainerTelemetry();
         return new CallSessionContainerBuilder(builder);

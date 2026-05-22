@@ -30,7 +30,7 @@ public class RealtimeVoiceStrategyToolsTests
 
         var backend = new ControllableRealtimeBackend("agent-1", "Agent 1");
 
-        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow, TestTelemetry.LoggerFactory, TestTelemetry.Calling);
 
         await strategy.StartAsync(BuildStartContext());
 
@@ -73,7 +73,7 @@ public class RealtimeVoiceStrategyToolsTests
 
         var backend = new ControllableRealtimeBackend("agent-1", "Agent 1");
 
-        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow, TestTelemetry.LoggerFactory, TestTelemetry.Calling);
 
         await strategy.StartAsync(BuildStartContext());
 
@@ -97,7 +97,7 @@ public class RealtimeVoiceStrategyToolsTests
 
         var backend = new ControllableRealtimeBackend("agent-1", "Agent 1");
 
-        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow, TestTelemetry.LoggerFactory, TestTelemetry.Calling);
 
         await strategy.StartAsync(BuildStartContext());
 
@@ -131,7 +131,7 @@ public class RealtimeVoiceStrategyToolsTests
 
         var backend = new ControllableRealtimeBackend("agent-1", "Agent 1");
 
-        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow, TestTelemetry.LoggerFactory, TestTelemetry.Calling);
 
         await strategy.StartAsync(BuildStartContext());
 
@@ -185,7 +185,7 @@ public class RealtimeVoiceStrategyToolsTests
         };
 
         var backend = new ControllableRealtimeBackend("agent-adv", "Adv Agent");
-        await using var strategy = new RealtimeVoiceStrategy(backend, workflow);
+        await using var strategy = new RealtimeVoiceStrategy(backend, workflow, TestTelemetry.LoggerFactory, TestTelemetry.Calling);
 
         await strategy.StartAsync(BuildStartContext());
         Assert.True(await backend.WaitForConnectAsync(TimeSpan.FromSeconds(2)));
