@@ -294,7 +294,11 @@ public sealed class NluConversationStrategy : IConversationStrategy
         {
             _logger.LogInformation(
                 "No intent matched on step {StepId} for utterance: {Utterance}", step.Id, evt.Transcript.Text);
-            await SpeakAsync("I didn't understand that. Could you say it another way?", ct).ConfigureAwait(false);
+            await EmitConfiguredPromptAsync(
+                step.StepNluConfiguration?.OnNoMatchPrompt,
+                step.StepNluConfiguration?.OnNoMatchAudioFile,
+                fallbackText: "I didn't understand that. Could you say it another way?",
+                ct).ConfigureAwait(false);
             return;
         }
 
@@ -334,6 +338,11 @@ public sealed class NluConversationStrategy : IConversationStrategy
             // utterance before advancing.
             await SpeakAsync(intent.ConfirmPrompt!, ct).ConfigureAwait(false);
         }
+        else if (step.StepNluConfiguration is { } nluCfg
+            && (!string.IsNullOrWhiteSpace(nluCfg.OnConfirmPrompt) || nluCfg.OnConfirmAudioFile is not null))
+        {
+            await EmitConfiguredPromptAsync(nluCfg.OnConfirmPrompt, nluCfg.OnConfirmAudioFile, fallbackText: null, ct).ConfigureAwait(false);
+        }
 
         var transition = _navigator!.TransitionTo(targetStage);
         if (!transition.Succeeded || transition.NewStep is null)
@@ -362,7 +371,12 @@ public sealed class NluConversationStrategy : IConversationStrategy
         await _events.Writer.WriteAsync(
             new StrategyEvent.EscalationRequested(reason, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
-        await SpeakAsync("Transferring you to an agent now. Please hold.", ct).ConfigureAwait(false);
+        var handoffStep = _navigator?.CurrentStep;
+        await EmitConfiguredPromptAsync(
+            handoffStep?.StepNluConfiguration?.OnHandoffPrompt,
+            handoffStep?.StepNluConfiguration?.OnHandoffAudioFile,
+            fallbackText: "Transferring you to an agent now. Please hold.",
+            ct).ConfigureAwait(false);
         await _outbound.Writer.WriteAsync(
             new OutboundDirective.TransferCall(
                 EscalationTarget.TargetIdentifier,
@@ -382,6 +396,13 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
     private async Task SpeakStepPromptAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
     {
+        if (step.StepNluConfiguration is { } nluCfg
+            && (nluCfg.AudioFile is not null || !string.IsNullOrWhiteSpace(nluCfg.SsmlPromptOverride)))
+        {
+            await EmitConfiguredPromptAsync(nluCfg.SsmlPromptOverride, nluCfg.AudioFile, fallbackText: null, ct).ConfigureAwait(false);
+            return;
+        }
+
         var prompt = step.ConversationState.Description
             ?? step.ConversationState.Goal
             ?? string.Empty;
@@ -389,11 +410,40 @@ public sealed class NluConversationStrategy : IConversationStrategy
         await SpeakAsync(prompt, ct).ConfigureAwait(false);
     }
 
-    private async Task SpeakAsync(string text, CancellationToken ct)
+    /// <summary>
+    /// Emits the highest-priority directive among the supplied overrides:
+    /// pre-recorded audio file -> SSML / plain-text override -> <paramref name="fallbackText"/>.
+    /// SSML is detected by a leading <c>&lt;speak</c> token and sent to the synthesizer as
+    /// <see cref="SynthesizerInputFormat.SSML"/>.
+    /// </summary>
+    private async Task EmitConfiguredPromptAsync(string? promptOrSsml, Uri? audioFile, string? fallbackText, CancellationToken ct)
+    {
+        if (audioFile is not null)
+        {
+            await _outbound.Writer.WriteAsync(
+                new OutboundDirective.PlayFile(audioFile, DateTimeOffset.UtcNow),
+                ct).ConfigureAwait(false);
+            await _events.Writer.WriteAsync(
+                new StrategyEvent.AgentUtterance("nlu", $"[audio:{audioFile}]", DateTimeOffset.UtcNow),
+                ct).ConfigureAwait(false);
+            return;
+        }
+
+        var text = !string.IsNullOrWhiteSpace(promptOrSsml) ? promptOrSsml : fallbackText;
+        if (string.IsNullOrWhiteSpace(text)) { return; }
+
+        var format = LooksLikeSsml(text) ? SynthesizerInputFormat.SSML : SynthesizerInputFormat.Text;
+        await SpeakAsync(text!, format, ct).ConfigureAwait(false);
+    }
+
+    private Task SpeakAsync(string text, CancellationToken ct) =>
+        SpeakAsync(text, SynthesizerInputFormat.Text, ct);
+
+    private async Task SpeakAsync(string text, SynthesizerInputFormat format, CancellationToken ct)
     {
         try
         {
-            await foreach (var pcm in _synthesizer.SynthesizeAsync(text, SynthesizerInputFormat.Text, ct).ConfigureAwait(false))
+            await foreach (var pcm in _synthesizer.SynthesizeAsync(text, format, ct).ConfigureAwait(false))
             {
                 if (_suspended) { break; }
                 await _outbound.Writer.WriteAsync(
@@ -410,6 +460,13 @@ public sealed class NluConversationStrategy : IConversationStrategy
         {
             _logger.LogWarning(ex, "TTS synthesis failed in NLU strategy for call {CallId}", _callId);
         }
+    }
+
+    internal static bool LooksLikeSsml(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) { return false; }
+        var span = text.AsSpan().TrimStart();
+        return span.StartsWith("<speak", StringComparison.OrdinalIgnoreCase);
     }
 }
 

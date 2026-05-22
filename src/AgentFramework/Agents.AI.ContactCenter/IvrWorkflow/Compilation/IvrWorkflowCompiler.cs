@@ -254,6 +254,13 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             dtmfConfig = IvrDtmfMapper.Map(dtmfDoc, stage.Id, errors);
         }
 
+        // NLU compile.
+        StepNluConfiguration? nluConfig = null;
+        if (stage.Nlu is { } nluDoc)
+        {
+            nluConfig = IvrNluMapper.Map(nluDoc, stage.Id, errors);
+        }
+
         // ConversationState (instructions/examples/exit/transitions).
         var instructions = stage.Realtime?.Instructions.Count > 0
             ? stage.Realtime.Instructions
@@ -284,6 +291,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             MaxDuration = ParseDuration(stage.MaxDuration, stage.Id, errors),
             RequiredAuthLevel = ResolveStageAuthLevel(baseRequiredAuth, stage.Requires),
             StepDtmfConfiguration = dtmfConfig,
+            StepNluConfiguration = nluConfig,
             Terminal = stage.Terminal,
             Intents = compiledIntents.Count == 0
                 ? new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase)

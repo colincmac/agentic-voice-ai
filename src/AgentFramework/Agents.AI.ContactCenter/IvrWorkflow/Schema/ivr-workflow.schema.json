@@ -148,6 +148,7 @@
           }
         },
         "dtmf": { "$ref": "#/$defs/dtmf" },
+        "nlu": { "$ref": "#/$defs/nlu" },
         "intents": { "type": "array", "items": { "$ref": "#/$defs/intent" } },
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "exitWhen": { "type": "string" },
@@ -243,6 +244,28 @@
         "predicate": { "type": "string" },
         "message": { "type": "string" },
         "args": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "nlu": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ssmlPrompt": { "type": "string" },
+        "audioFile": { "type": "string", "format": "uri" },
+        "onNoMatchPrompt": { "type": "string" },
+        "onNoMatchAudioFile": { "type": "string", "format": "uri" },
+        "onNoInputPrompt": { "type": "string" },
+        "onNoInputAudioFile": { "type": "string", "format": "uri" },
+        "onConfirmPrompt": { "type": "string" },
+        "onConfirmAudioFile": { "type": "string", "format": "uri" },
+        "onHandoffPrompt": { "type": "string" },
+        "onHandoffAudioFile": { "type": "string", "format": "uri" },
+        "maxNoMatch": { "type": "integer", "minimum": 0 },
+        "maxNoInput": { "type": "integer", "minimum": 0 },
+        "confidenceThreshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "noInputTimeoutMs": { "type": "integer", "minimum": 0 },
+        "examples": { "type": "array", "items": { "type": "string" } },
+        "intents": { "type": "array", "items": { "$ref": "#/$defs/intent" } }
       }
     },
     "toolRule": {

@@ -39,6 +39,32 @@ stages:
         - "Confirm the classified intent in a single short sentence before transitioning."
       examples:
         - "Welcome to ACME Bank. I can help with your balance, billing, or transfer you to a representative — which would you like?"
+    nlu:
+      ssmlPrompt: |
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+          <voice name="en-US-Ava:DragonHDLatestNeural">
+            <prosody rate="-5%">
+              Welcome to ACME Bank.
+              <break time="250ms"/>
+              You can say things like "check my balance", "a billing question", or "agent".
+            </prosody>
+          </voice>
+        </speak>
+      onNoMatchPrompt: |
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+          <voice name="en-US-Ava:DragonHDLatestNeural">
+            I didn't quite catch that. You can say "balance", "billing", or "agent".
+          </voice>
+        </speak>
+      onNoInputPrompt: "Sorry, I didn't hear anything. Try saying balance, billing, or agent."
+      onHandoffPrompt: "One moment while I bring you to a representative."
+      maxNoMatch: 2
+      maxNoInput: 2
+      confidenceThreshold: 0.55
+      examples:
+        - "check my balance"
+        - "i have a billing question"
+        - "talk to a person"
     intents:
       - name: balance
         examples:
@@ -98,6 +124,19 @@ stages:
         - "On failure, ask once more, then offer to transfer to an agent."
       tools:
         - confirm-identity
+    nlu:
+      ssmlPrompt: |
+        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+          <voice name="en-US-Ava:DragonHDLatestNeural">
+            Please say your four-digit PIN, one digit at a time.
+          </voice>
+        </speak>
+      onNoMatchPrompt: "I need four digits. Please say your PIN one digit at a time."
+      onNoInputPrompt: "Sorry, I didn't hear anything. Please say your four-digit PIN."
+      onHandoffPrompt: "I'm having trouble verifying your PIN. Transferring you to an agent."
+      maxNoMatch: 2
+      maxNoInput: 2
+      confidenceThreshold: 0.6
     dtmf:
       ssmlPrompt: |
         <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">

@@ -4,14 +4,19 @@ using YamlDotNet.Serialization;
 namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 /// <summary>
-/// A workflow stage. Stages own conversation state, may declare a DTMF menu, a realtime
-/// configuration, locally-scoped intents, and references to shared capabilities. Stage
-/// authors typically pick one of:
+/// A workflow stage. Stages own conversation state, declare locally-scoped intents,
+/// and reference shared capabilities. A stage is executed by exactly one of three
+/// modalities at runtime, selected by the active <see cref="IvrStrategyDocument"/>
+/// and any composite fallback policy:
 /// <list type="bullet">
-///   <item>Pure DTMF stage (no realtime, only <see cref="Dtmf"/>),</item>
-///   <item>Pure realtime stage (only <see cref="Realtime"/>),</item>
-///   <item>Mixed (both blocks; the strategy selector chooses at runtime).</item>
+///   <item><b>Realtime</b> (generative AI) — configured via <see cref="Realtime"/>.</item>
+///   <item><b>NLU</b> (non-generative intent recognition over speech) — configured via <see cref="Nlu"/>.</item>
+///   <item><b>DTMF</b> (non-generative digit menus / collection) — configured via <see cref="Dtmf"/>.</item>
 /// </list>
+/// A stage may declare any combination of these blocks; the strategy selector picks
+/// the highest-priority tier whose block is present, then falls back to the next tier
+/// per the workflow's strategy. Stage-level <c>intents</c> are shared across the NLU
+/// and Realtime tiers (DTMF uses its own option list).
 /// </summary>
 public sealed class IvrStageDocument
 {
@@ -42,6 +47,16 @@ public sealed class IvrStageDocument
     /// <summary>DTMF configuration (menu options, digit collection, validators, prompts).</summary>
     [YamlMember(Alias = "dtmf")]
     public IvrDtmfDocument? Dtmf { get; set; }
+
+    /// <summary>
+    /// NLU (intent-recognition) configuration for this stage. Carries SSML / audio
+    /// prompt overrides, confidence thresholds, no-match / no-input policy, and an
+    /// optional stage-scoped intent list. When absent, NLU stages fall back to the
+    /// stage's root-level <see cref="Intents"/> and to defaults supplied by the
+    /// active strategy.
+    /// </summary>
+    [YamlMember(Alias = "nlu")]
+    public IvrNluDocument? Nlu { get; set; }
 
     /// <summary>Locally-declared intents scoped to this stage.</summary>
     [YamlMember(Alias = "intents")]

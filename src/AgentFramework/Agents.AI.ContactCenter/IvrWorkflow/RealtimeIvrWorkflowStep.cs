@@ -87,6 +87,19 @@ public sealed class RealtimeIvrWorkflowStep
     public StepDtmfConfiguration? StepDtmfConfiguration { get; init; }
 
     /// <summary>
+    /// Gets the NLU (intent-recognition) configuration for this step, used when the
+    /// session is operating in the non-generative NLU tier. Carries SSML / audio
+    /// prompt overrides, confidence threshold, no-match / no-input policy, and any
+    /// stage-scoped intent transitions lowered from the YAML <c>nlu</c> block.
+    /// </summary>
+    /// <remarks>
+    /// When null, the NLU strategy uses defaults supplied by the host (default
+    /// prompts, default thresholds) and classifies against the step's general
+    /// <see cref="Intents"/> map.
+    /// </remarks>
+    public StepNluConfiguration? StepNluConfiguration { get; init; }
+
+    /// <summary>
     /// Indicates whether this step is terminal — i.e. once the workflow enters this stage
     /// no further transitions are expected. Strategies use this to decide whether to expose
     /// the synthetic advance tool to the model and when to wind the session down. Populated

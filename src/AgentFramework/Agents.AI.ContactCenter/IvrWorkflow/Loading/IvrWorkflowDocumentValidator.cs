@@ -84,6 +84,11 @@ public static class IvrWorkflowDocumentValidator
                 ValidateDtmf(stage.Id, dtmf, stageIds, capabilityIds, errors);
             }
 
+            if (stage.Nlu is { } nlu)
+            {
+                ValidateNlu(stage.Id, nlu, stageIds, capabilityIds, errors);
+            }
+
             ValidateTransitionReachability(stage, errors);
         }
 
@@ -112,7 +117,7 @@ public static class IvrWorkflowDocumentValidator
 
         // If the stage only has DTMF configured we let the DTMF-only path handle reachability —
         // the DTMF strategies can complete the call via menu options without an explicit transition.
-        var hasNonDtmfModality = stage.Realtime is not null || stage.Intents.Count > 0;
+        var hasNonDtmfModality = stage.Realtime is not null || stage.Nlu is not null || stage.Intents.Count > 0;
         if (!hasNonDtmfModality && stage.Dtmf is not null)
         {
             return;
@@ -144,6 +149,18 @@ public static class IvrWorkflowDocumentValidator
                 || !string.IsNullOrWhiteSpace(intent.Capability))
             {
                 return true;
+            }
+        }
+
+        if (stage.Nlu is { } nlu)
+        {
+            foreach (var intent in nlu.Intents)
+            {
+                if (!string.IsNullOrWhiteSpace(intent.NextStage)
+                    || !string.IsNullOrWhiteSpace(intent.Capability))
+                {
+                    return true;
+                }
             }
         }
 
@@ -226,6 +243,49 @@ public static class IvrWorkflowDocumentValidator
             && !stageIds.Contains(onValid))
         {
             errors.Add($"Stage '{stageId}' DTMF collect.onValidNextStage '{onValid}' is not defined.");
+        }
+    }
+
+    private static void ValidateNlu(
+        string stageId,
+        IvrNluDocument nlu,
+        ISet<string> stageIds,
+        ISet<string> capabilityIds,
+        List<string> errors)
+    {
+        if (nlu.ConfidenceThreshold is < 0.0 or > 1.0)
+        {
+            errors.Add($"Stage '{stageId}' nlu.confidenceThreshold '{nlu.ConfidenceThreshold}' must be between 0.0 and 1.0.");
+        }
+        if (nlu.MaxNoMatch < 0)
+        {
+            errors.Add($"Stage '{stageId}' nlu.maxNoMatch must be \u2265 0.");
+        }
+        if (nlu.MaxNoInput < 0)
+        {
+            errors.Add($"Stage '{stageId}' nlu.maxNoInput must be \u2265 0.");
+        }
+        if (nlu.NoInputTimeoutMs < 0)
+        {
+            errors.Add($"Stage '{stageId}' nlu.noInputTimeoutMs must be \u2265 0.");
+        }
+
+        // Prompt/audio exclusivity per logical slot — when both are supplied the audio
+        // wins at runtime but we warn at author time to surface likely mistakes.
+        WarnIfBoth(stageId, "entry", nlu.SsmlPrompt, nlu.AudioFile, errors);
+        WarnIfBoth(stageId, "noMatch", nlu.OnNoMatchPrompt, nlu.OnNoMatchAudioFile, errors);
+        WarnIfBoth(stageId, "noInput", nlu.OnNoInputPrompt, nlu.OnNoInputAudioFile, errors);
+        WarnIfBoth(stageId, "confirm", nlu.OnConfirmPrompt, nlu.OnConfirmAudioFile, errors);
+        WarnIfBoth(stageId, "handoff", nlu.OnHandoffPrompt, nlu.OnHandoffAudioFile, errors);
+
+        ValidateIntents(stageId, nlu.Intents, stageIds, capabilityIds, errors);
+    }
+
+    private static void WarnIfBoth(string stageId, string slot, string? text, string? audio, List<string> errors)
+    {
+        if (!string.IsNullOrWhiteSpace(text) && !string.IsNullOrWhiteSpace(audio))
+        {
+            errors.Add($"Stage '{stageId}' nlu.{slot}: both prompt text and audioFile are set; supply only one (audioFile would win at runtime).");
         }
     }
 }
