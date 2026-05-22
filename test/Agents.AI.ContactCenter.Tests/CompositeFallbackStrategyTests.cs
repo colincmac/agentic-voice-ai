@@ -251,6 +251,7 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public string? LastSystemPrompt { get; private set; }
     public List<ReadOnlyMemory<byte>> ReceivedAudio { get; } = [];
     public List<IReadOnlyList<AITool>> ToolUpdates { get; } = [];
+    public List<string> ReceivedUserText { get; } = [];
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -267,6 +268,12 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public ValueTask UpdateSystemPromptAsync(string prompt, CancellationToken cancellationToken = default)
     {
         LastSystemPrompt = prompt;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        ReceivedUserText.Add(text);
         return ValueTask.CompletedTask;
     }
 

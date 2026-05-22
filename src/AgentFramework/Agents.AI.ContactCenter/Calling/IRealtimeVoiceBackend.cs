@@ -30,6 +30,23 @@ public interface IRealtimeVoiceBackend : IAsyncDisposable
     ValueTask SendAudioAsync(ReadOnlyMemory<byte> pcm, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Inject a synthetic user text turn into the realtime session. Used by
+    /// <c>RealtimeVoiceStrategy</c> as the LLM-aware fallback for inbound DTMF digits
+    /// when the current stage has no <c>scripted.dtmf</c> configuration: the digit is
+    /// surfaced as a user message (e.g. <c>"[Caller pressed 1]"</c>) so the model can
+    /// react conversationally instead of silently dropping the input.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation is a no-op so backends that don't support live user-message
+    /// injection compile without changes; on such backends the LLM-aware DTMF path is
+    /// effectively a black hole and the strategy will log a warning at the call site.
+    /// Production backends that drive a realtime model session must override and forward
+    /// to the underlying realtime client.
+    /// </remarks>
+    ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
+    /// <summary>
     /// Update the system prompt mid-call (used when entering a new workflow step).
     /// Implementations may no-op if their backend doesn't support live prompt updates.
     /// </summary>

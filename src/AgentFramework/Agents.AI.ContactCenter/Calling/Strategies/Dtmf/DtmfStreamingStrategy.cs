@@ -236,7 +236,7 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
         }
         _logger.LogInformation("Recognized DTMF input '{Digits}' for step {StepId}", digits, stepId);
         await _events.Writer.WriteAsync(
-            new StrategyEvent.DtmfRecognized(stepId, digits, DateTimeOffset.UtcNow),
+            new StrategyEvent.DtmfRecognized(digits, stepId, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
     }
 

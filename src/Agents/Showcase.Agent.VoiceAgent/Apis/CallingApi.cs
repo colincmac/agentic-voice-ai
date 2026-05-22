@@ -42,11 +42,9 @@ public static class CallingApi
             CancellationToken cancellationToken = default) =>
         {
             // Tier comes from the registered workflow definition (driven by YAML
-            // strategy.primary). RealtimeVoice ⇒ open a bidirectional media WS so the
-            // streaming WSS handler can build an AcsCallerStreamEdge. Any other tier
-            // ⇒ answer in verb mode and build an AcsCallAutomationEdge here.
+            // strategy.primary). 
             var workflowTier = services.Workflow.Tier;
-            var useStreaming = true;
+            var useStreaming = services.Options.Value.Acs.UseWebsocketForMediaStreaming;
 
             foreach (var evt in incomingEvents)
             {

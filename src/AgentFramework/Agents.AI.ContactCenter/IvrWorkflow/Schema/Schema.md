@@ -128,6 +128,17 @@ the digit-menu `options:` list, and the buffered-digit `collect:` block.
 → tier-specific override. For paired `...Prompt` / `...AudioFile` slots, when both
 are populated the audio file wins at runtime.
 
+**Cross-tier DTMF input:** `scripted.dtmf.options` and `scripted.dtmf.collect` are
+consumed by the dedicated DTMF strategies AND by the Realtime AI strategy and the
+NLU strategy. A caller can therefore press digits at any time:
+
+- Realtime AI handles the digit deterministically when `scripted.dtmf` is present on
+  the active stage, and otherwise forwards it to the LLM as an inline user turn so the
+  model can react conversationally.
+- NLU uses digit presses as a direct intent shortcut, bypassing the speech classifier
+  for that resolution. The composite fallback to the pure DTMF tier still applies for
+  repeated speech no-match events.
+
 ### DTMF Options
 
 Each `scripted.dtmf.options[]` entry binds a single digit (`0`-`9`, `*`, `#`) to a routing

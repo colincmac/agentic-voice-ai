@@ -76,6 +76,26 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
 
     /// <inheritdoc />
     /// <remarks>
+    /// Forwards a <see cref="ChatRole.User"/> message into the realtime session via
+    /// <see cref="AuthorizingRealtimeAIAgent.SendAsync"/>, which the model receives as
+    /// a regular user turn and may respond to with speech. Used by
+    /// <c>RealtimeVoiceStrategy</c> to surface inbound DTMF digits to the LLM when the
+    /// current stage has no <c>scripted.dtmf</c> handler.
+    /// </remarks>
+    public async ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var session = EnsureSession();
+        var userMessage = new ChatMessage(ChatRole.User, text);
+        await _agent.SendAsync(session, userMessage, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Sends a <see cref="SessionUpdateRealtimeClientMessage"/> with the new tool list, cloning every other
     /// option from the live session so the realtime model retains its current instructions, voice, audio
     /// format, etc. Intended to be called by the strategy at session start and on each workflow step
