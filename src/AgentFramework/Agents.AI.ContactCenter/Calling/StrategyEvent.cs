@@ -37,7 +37,7 @@ public abstract record StrategyEvent(DateTimeOffset At)
 
     /// <summary>
     /// Emitted by the session when the active edge dropped a directive whose kind
-    /// is not in its <see cref="EdgeCapabilities"/>. Indicates a strategy/edge
+    /// is not in its <see cref="Calling.EdgeCapabilities"/>. Indicates a strategy/edge
     /// mismatch — typically a strategy paired with the wrong tier of edge.
     /// </summary>
     public sealed record DispatchUnsupported(string DirectiveKind, EdgeCapabilities EdgeCapabilities, DateTimeOffset At) : StrategyEvent(At);

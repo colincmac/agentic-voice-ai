@@ -89,6 +89,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         var runtime = new RealtimeIvrWorkflowDefinition
         {
             Name = document.Name,
+            Tier = workflowPolicy.Primary.ToTier(),
             BasePrompt = basePrompt,
             Steps = runtimeSteps,
         };

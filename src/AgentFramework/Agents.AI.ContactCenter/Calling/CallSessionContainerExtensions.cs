@@ -30,7 +30,7 @@ namespace Agents.AI.ContactCenter.Calling;
 //
 //   builder.AddCallSessionContainer()
 //       .AddRealtimeVoiceStrategy()      // Tier 0 — wraps AuthorizingRealtimeAIAgent
-//       .AddDtmfStrategy()               // Tier 4 — requires a registered ISpeechSynthesizer
+//       .AddDtmfStreamingStrategy()      // Tier 4 (streaming edge) — requires a registered ISpeechSynthesizer
 //       .AddDashboardProjectionObserver();
 //
 // Followed by:
@@ -173,19 +173,14 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers the Tier 4 DTMF strategy. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
+    /// Registers the streaming DTMF strategy. Pairs with
+    /// <see cref="AcsCallerStreamEdge"/> and emits locally synthesized PCM through the
+    /// bidirectional media WebSocket. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
     /// to be registered separately for prompt playback.
     /// </summary>
-    public CallSessionContainerBuilder AddDtmfStrategy(bool useStreaming = true)
+    public CallSessionContainerBuilder AddDtmfStreamingStrategy()
     {
-        if (useStreaming)
-        {
-            Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
-        }
-        else
-        {
-            Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
-        }
+        Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
         return this;
     }
 
@@ -264,7 +259,8 @@ public sealed class CallSessionContainerBuilder
     /// </param>
     /// <remarks>
     /// Register the inner factories (e.g. <see cref="AddRealtimeVoiceStrategy"/>,
-    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStrategy"/>) BEFORE calling this
+    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStreamingStrategy"/>,
+    /// <see cref="AddDtmfVerbStrategy"/>) BEFORE calling this
     /// method so the composite can resolve them at call-create time.
     /// </remarks>
     public CallSessionContainerBuilder AddCompositeFallbackStrategy(AgentTier topTier, params AgentTier[] orderedTiers)
