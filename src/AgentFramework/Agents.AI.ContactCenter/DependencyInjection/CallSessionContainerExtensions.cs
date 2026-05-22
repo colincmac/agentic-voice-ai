@@ -1,12 +1,18 @@
+using Agents.AI.ContactCenter.AITools;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Calling.Core;
+using Agents.AI.ContactCenter.Calling.Strategies.Composite;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
+using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
+using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
+using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
-using Agents.AI.ContactCenter.AITools;
-using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,12 +20,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
-using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
-using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
-using Agents.AI.ContactCenter.Calling.Core;
-using Agents.AI.ContactCenter.Calling;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 namespace Agents.AI.ContactCenter.DependencyInjection;
 
@@ -80,10 +82,15 @@ public static class CallSessionContainerExtensions
     {
         builder.Services.TryAddSingleton<CallingTelemetry>();
 
-        builder.Services
-            .AddOpenTelemetry()
-            .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
-            .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
+        builder.Services.ConfigureOpenTelemetryTracerProvider((sp, builder) =>
+            builder.AddSource(CallingActivitySource.ActivitySourceName));
+
+        builder.Services.ConfigureOpenTelemetryMeterProvider((sp, builder) =>
+            builder.AddMeter(CallingActivitySource.MeterName));
+        //builder.Services
+        //    .AddOpenTelemetry()
+        //    .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
+        //    .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
 
         return builder;
     }

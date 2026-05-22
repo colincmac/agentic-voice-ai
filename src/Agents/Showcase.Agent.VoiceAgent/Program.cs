@@ -101,8 +101,6 @@ builder.Services.AddAzureSpeech(options =>
 builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
-builder.AddInMemoryCallOwnershipDirectory();
-builder.AddInMemoryWebhookForwarder();
 
 // Declarative YAML IVR framework: loads workflow definitions from
 // Workflow\Samples\*.yaml (copied to the app output via the csproj content glob),
@@ -155,8 +153,6 @@ builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.IntentNlu),
     (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.NluWithDtmfFallback));
 
-
-
 builder.AddCallSessionContainer()
     .AddDistributedCallState(DistributedCallStateBackend.InMemory)
     // Inner factories — the composite below shadows the top tier and reuses these
@@ -187,7 +183,6 @@ builder.AddCallSessionContainer()
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
 // Startup-time warm-up of the per-tier strategy factories and keyed workflow definitions.
-// Replaces the inline Task.Run(... PrewarmAsync ...) the CallingApi used to run per call.
 builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
 
 // TEAMS
@@ -212,7 +207,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-app.UseHttpLogging();
 
 //app.UseHttpsRedirection();
 

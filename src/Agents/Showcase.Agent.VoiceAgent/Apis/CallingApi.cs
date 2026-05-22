@@ -46,7 +46,7 @@ public static class CallingApi
             // streaming WSS handler can build an AcsCallerStreamEdge. Any other tier
             // ⇒ answer in verb mode and build an AcsCallAutomationEdge here.
             var workflowTier = services.Workflow.Tier;
-            var useStreaming = workflowTier == AgentTier.RealtimeVoice;
+            var useStreaming = true;
 
             foreach (var evt in incomingEvents)
             {
