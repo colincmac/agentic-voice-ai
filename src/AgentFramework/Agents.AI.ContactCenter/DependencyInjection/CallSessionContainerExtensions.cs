@@ -1,3 +1,4 @@
+using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.AITools;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
@@ -7,6 +8,7 @@ using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
@@ -14,6 +16,8 @@ using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
 using Azure.Communication.CallAutomation;
+using Microsoft.Agents.AI.Hosting;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -236,9 +240,34 @@ public sealed class CallSessionContainerBuilder
     /// speech recognition + JSON intent classification) and
     /// <see cref="Media.Audio.ISpeechSynthesizer"/> to be registered separately.
     /// </summary>
-    public CallSessionContainerBuilder AddNluStrategy()
+    public CallSessionContainerBuilder AddNluStrategy(string? chatClientServiceKey = null, Action<IvrIntentAgentOptions>? configureOptions = null)
     {
+        var options = new IvrIntentAgentOptions();
+        configureOptions?.Invoke(options);
+
+        Services
+            .AddOptions<IvrIntentAgentOptions>()
+            .Configure(o => configureOptions?.Invoke(o))
+            .ValidateDataAnnotations()
+            .ValidateOnStart(); 
+
+        Builder.AddAIAgent(options.Name, (sp, key) =>
+        {
+            var chatClient = chatClientServiceKey is null
+                ? sp.GetRequiredService<IChatClient>()
+                : sp.GetRequiredKeyedService<IChatClient>(chatClientServiceKey);
+
+            var recognizer = sp.GetService<ISpeechRecognizer>();
+            var resolvedOptions = sp.GetRequiredService<IOptions<IvrIntentAgentOptions>>().Value;
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+
+            return new IvrIntentAgent(chatClient, recognizer, resolvedOptions, loggerFactory);
+        });
+
+        Services.TryAddSingleton<IvrIntentAgent>(sp => sp.GetRequiredKeyedService<IvrIntentAgent>(options.Name));
+
         Services.AddSingleton<IConversationStrategyFactory, NluConversationStrategyFactory>();
+        
         return this;
     }
 

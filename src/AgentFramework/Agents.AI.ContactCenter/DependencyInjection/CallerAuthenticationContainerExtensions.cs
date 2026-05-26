@@ -1,9 +1,9 @@
 using Agents.AI.ContactCenter.Authentication.UserIdentity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Agents.AI.ContactCenter.DependencyInjection;
+using Agents.AI.ContactCenter.Authentication;
 
-namespace Agents.AI.ContactCenter.Authentication;
+namespace Agents.AI.ContactCenter.DependencyInjection;
 
 /// <summary>
 /// DI extensions for plugging caller-authentication methods into the
@@ -63,15 +63,4 @@ public static class CallerAuthenticationContainerExtensions
         return builder.AddCallerAuthenticator<AniIdentityLookupAuthenticator>();
     }
 
-    /// <summary>
-    /// Adapter overload that bridges the existing <see cref="IUserIdentityService"/> to the
-    /// new <see cref="ICallerDirectory"/> contract. Use this when migrating a codebase that
-    /// already registers <see cref="InMemoryUserIdentityService"/> or another implementation.
-    /// </summary>
-    public static CallSessionContainerBuilder AddAniIdentityLookupAuthenticatorFromUserIdentityService(
-        this CallSessionContainerBuilder builder)
-    {
-        builder.Services.TryAddSingleton<ICallerDirectory, UserIdentityServiceCallerDirectoryAdapter>();
-        return builder.AddCallerAuthenticator<AniIdentityLookupAuthenticator>();
-    }
 }

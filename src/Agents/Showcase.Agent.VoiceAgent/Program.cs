@@ -117,15 +117,9 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
-        ShowcaseWorkflowIds.DefaultEscalationNumber)));
+        DemoWorkflowIds.DefaultEscalationNumber)));
 
 // AI Agents
-
-// NLU dependencies — IvrIntentAgent now owns the full intent-recognition pipeline
-// (audio preprocessing via ISpeechRecognizer + classification via the "chat" IChatClient
-// + local tool dispatch when the SLM cannot tool-call). Typically backed by
-// phi-4-mini-instruct on Azure Foundry through the keyed "chat" client registered above.
-builder.Services.AddIvrIntentAgent(chatClientKey: "chat");
 
 // The realtime agent that the new realtime backend wraps. Reads its config from
 // Agents:TriageAgent and uses the "voicelive" conversation client registered above.
@@ -159,7 +153,7 @@ builder.AddCallSessionContainer()
     // through DI. Order matters: register the inner tiers BEFORE the composite so
     // the composite's lookup finds them.
     .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
-    .AddNluStrategy()
+    .AddNluStrategy(chatClientServiceKey: "slm")
     .AddDtmfStreamingStrategy()
     .AddCallControlTools()
     // Caller authentication: ANI lookup against the in-memory directory plus the
