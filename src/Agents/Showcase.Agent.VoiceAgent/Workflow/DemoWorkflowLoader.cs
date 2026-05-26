@@ -19,7 +19,7 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 ///   <item><c>nlu-with-dtmf-fallback</c> — ACME Bank concierge that classifies intents via intent-NLU and degrades to pure DTMF for PIN entry and menu routing.</item>
 /// </list>
 /// </remarks>
-public static class ShowcaseWorkflowIds
+public static class DemoWorkflowIds
 {
     public const string DefaultEscalationNumber = "+15555550199";
 
@@ -40,7 +40,7 @@ public static class ShowcaseWorkflowIds
 /// as a singleton during host startup, where blocking on a synchronous file-system source
 /// is safe.
 /// </summary>
-public static class ShowcaseWorkflowLoader
+public static class DemoWorkflowLoader
 {
     public static RealtimeIvrWorkflowDefinition Load(IServiceProvider services, string workflowId)
     {
@@ -49,7 +49,7 @@ public static class ShowcaseWorkflowLoader
 
         var loader = services.GetService(typeof(IIvrWorkflowLoader)) as IIvrWorkflowLoader
             ?? throw new InvalidOperationException(
-                $"No IIvrWorkflowLoader is registered. Call services.AddIvrWorkflowFramework(builder => builder.AddFileSystemSource(\"{ShowcaseWorkflowIds.SamplesDirectory}\")) in Program.cs.");
+                $"No IIvrWorkflowLoader is registered. Call services.AddIvrWorkflowFramework(builder => builder.AddFileSystemSource(\"{DemoWorkflowIds.SamplesDirectory}\")) in Program.cs.");
 
         var compiled = loader.LoadAsync(workflowId).AsTask().GetAwaiter().GetResult();
         return compiled.Runtime;

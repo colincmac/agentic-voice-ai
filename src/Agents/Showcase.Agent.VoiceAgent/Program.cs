@@ -123,7 +123,7 @@ builder.AddInMemoryWebhookForwarder();
 // names the YAML samples reference. Showcase predicates and additional sources can
 // be appended here.
 builder.Services.AddIvrWorkflowFramework(b => b
-    .AddFileSystemSource(Path.Combine(AppContext.BaseDirectory, ShowcaseWorkflowIds.SamplesDirectory))
+    .AddFileSystemSource(Path.Combine(AppContext.BaseDirectory, DemoWorkflowIds.SamplesDirectory))
     .AddTool("pin-validator", sp => PinValidationTools.ValidatePinTool(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()))
@@ -131,7 +131,7 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
-        ShowcaseWorkflowIds.DefaultEscalationNumber)));
+        DemoWorkflowIds.DefaultEscalationNumber)));
 // NLU dependencies — IvrIntentAgent now owns the full intent-recognition pipeline
 // (audio preprocessing via ISpeechRecognizer + classification via the "chat" IChatClient
 // + local tool dispatch when the SLM cannot tool-call). Typically backed by
@@ -150,19 +150,19 @@ builder.AddRealtimeAIAgent(
 // above). The default registration is the authenticated DTMF flow; the keyed
 // registrations let the CallingApi pick a tier-specific workflow via ?tier=.
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
-    ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.NluWithDtmfFallback));
+    DemoWorkflowLoader.Load(sp, DemoWorkflowIds.NluWithDtmfFallback));
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.DtmfOnly),
-    (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.AuthenticatedDtmf));
+    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedDtmf));
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.RealtimeVoice),
-    (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.AuthenticatedRealtime));
+    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedRealtime));
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.IntentNlu),
-    (sp, _) => ShowcaseWorkflowLoader.Load(sp, ShowcaseWorkflowIds.NluWithDtmfFallback));
+    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.NluWithDtmfFallback));
 
 
 
@@ -179,7 +179,7 @@ builder.AddCallSessionContainer()
     .AddCallerAuthentication()
     .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
     // Where the composite (and any DTMF "press 0 for agent" tool) sends escalations.
-    .AddTransferEscalationTarget(ShowcaseWorkflowIds.DefaultEscalationNumber)
+    .AddTransferEscalationTarget(DemoWorkflowIds.DefaultEscalationNumber)
     // Composite chain: RealtimeVoice → IntentNlu → DtmfOnly. The composite registers as a
     // Tier 0 (RealtimeVoice) factory, shadowing the inner Realtime factory above thanks to
     // last-wins resolution in CallSessionFactory. Per-call IvrWorkflowState (workflow step,
