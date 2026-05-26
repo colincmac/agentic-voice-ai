@@ -29,8 +29,6 @@ internal static class IvrDtmfMapper
             promptOverride: doc.SsmlPrompt)
         {
             AudioFile = TryParseUri(doc.AudioFile, stageId, "audioFile", errors),
-            OnErrorPrompt = doc.OnErrorPrompt,
-            OnErrorAudioFile = TryParseUri(doc.OnErrorAudioFile, stageId, "onErrorAudioFile", errors),
             MenuOptions = menu,
         };
 

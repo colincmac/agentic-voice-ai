@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
@@ -14,6 +15,16 @@ public sealed class RealtimeIvrWorkflowDefinition
     /// Gets the workflow name.
     /// </summary>
     public required string Name { get; init; }
+
+    /// <summary>
+    /// Gets the top-level <see cref="AgentTier"/> this workflow is designed for. Drives both
+    /// strategy resolution (the matching <c>IConversationStrategyFactory</c> is selected as
+    /// the entry point) and the ACS answer mode chosen by the incoming-call endpoint
+    /// (<see cref="AgentTier.RealtimeVoice"/> → bidirectional media WebSocket; all other tiers
+    /// → verb-mode answer). Defaults to <see cref="AgentTier.RealtimeVoice"/> for back-compat with
+    /// workflows that don't declare a tier explicitly.
+    /// </summary>
+    public AgentTier Tier { get; init; } = AgentTier.RealtimeVoice;
 
     /// <summary>
     /// Gets the base prompt configuration shared across all steps.

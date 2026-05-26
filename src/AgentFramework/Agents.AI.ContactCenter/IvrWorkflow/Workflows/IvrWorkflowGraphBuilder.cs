@@ -162,7 +162,7 @@ public sealed class IvrWorkflowGraphBuilder : IIvrWorkflowGraphBuilder
             }
         }
 
-        if (stage.RuntimeStep.StepDtmfConfiguration is { } dtmf)
+        if (stage.RuntimeStep.StepScriptedConfiguration?.Dtmf is { } dtmf)
         {
             if (dtmf.MenuOptions is { Count: > 0 } options)
             {

@@ -176,10 +176,9 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
                 _callId,
                 _callerMetadata,
                 _events.Writer,
+                _logger,
                 WorkflowState,
-                telemetry: null,
-                logger: _logger,
-                cancellationToken: ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
 
             if (_prewarmed && _prewarmedInitialStep is not null)
             {
@@ -237,7 +236,7 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
         }
         _logger.LogInformation("Recognized DTMF input '{Digits}' for step {StepId}", digits, stepId);
         await _events.Writer.WriteAsync(
-            new StrategyEvent.DtmfRecognized(stepId, digits, DateTimeOffset.UtcNow),
+            new StrategyEvent.DtmfRecognized(digits, stepId, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
     }
 
@@ -252,7 +251,7 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
         await PublishDtmfRecognizedAsync(digit.ToString(), ct).ConfigureAwait(false);
 
-        var dtmf = step.StepDtmfConfiguration;
+        var dtmf = step.StepScriptedConfiguration?.Dtmf;
         var hasMenu = dtmf?.MenuOptions is { Count: > 0 };
 
         if (hasMenu)
@@ -282,7 +281,7 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
     private async Task ProcessDigitCollectionAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
     {
-        var dtmf = step.StepDtmfConfiguration;
+        var dtmf = step.StepScriptedConfiguration?.Dtmf;
         string? collected = null;
         var now = DateTime.UtcNow;
         var maxDigits = dtmf?.MaxNumberOfDigits ?? int.MaxValue;
@@ -439,13 +438,14 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
                     new AudioFrame(pcm, DateTimeOffset.UtcNow, SourceEdgeId: null)));
             }
         }
-        else if (step.StepDtmfConfiguration?.AudioFile is Uri fileUri)
+        else if ((step.StepScriptedConfiguration?.Dtmf?.AudioFile ?? step.StepScriptedConfiguration?.AudioFile) is Uri fileUri)
         {
             directives.Add(new OutboundDirective.PlayFile(FileUri: fileUri, DateTimeOffset.UtcNow));
         }
-        else if (!string.IsNullOrEmpty(step.StepDtmfConfiguration?.SsmlPromptOverride))
+        else if ((step.StepScriptedConfiguration?.Dtmf?.SsmlPromptOverride ?? step.StepScriptedConfiguration?.SsmlPrompt) is string entrySsml
+            && !string.IsNullOrEmpty(entrySsml))
         {
-            directives.Add(new OutboundDirective.SpeakText(step.StepDtmfConfiguration.SsmlPromptOverride, DateTimeOffset.UtcNow));
+            directives.Add(new OutboundDirective.SpeakText(entrySsml, DateTimeOffset.UtcNow));
         }
 
         return directives;
@@ -453,14 +453,16 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
 
     private static (string prompt, SynthesizerInputFormat format) BuildPrompt(RealtimeIvrWorkflowStep step)
     {
-        if(step.StepDtmfConfiguration?.SsmlPromptOverride is not null)
+        var entrySsml = step.StepScriptedConfiguration?.Dtmf?.SsmlPromptOverride
+            ?? step.StepScriptedConfiguration?.SsmlPrompt;
+        if (entrySsml is not null)
         {
-            return (step.StepDtmfConfiguration.SsmlPromptOverride, SynthesizerInputFormat.SSML);
+            return (entrySsml, SynthesizerInputFormat.SSML);
         }
 
         var prompt = new StringBuilder(step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty);
 
-        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
+        if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is { Count: > 0 } menu)
         {
             var menuText = string.Join(". ", menu.Select(kv => $"For {kv.Value.Label} press {kv.Key}"));
             prompt.AppendLine(menuText);
@@ -594,16 +596,16 @@ public sealed class DtmfStreamingStrategy : IConversationStrategy
                         new OutboundDirective.SpeakText(reject.ErrorPrompt, DateTimeOffset.UtcNow),
                         ct).ConfigureAwait(false);
                 }
-                else if (step.StepDtmfConfiguration?.OnErrorAudioFile is { } stepErrAudio)
+                else if (step.StepScriptedConfiguration?.OnErrorAudioFile is { } stepErrAudio)
                 {
                     await _outbound.Writer.WriteAsync(
                         new OutboundDirective.PlayFile(stepErrAudio, DateTimeOffset.UtcNow),
                         ct).ConfigureAwait(false);
                 }
-                else if (!string.IsNullOrEmpty(step.StepDtmfConfiguration?.OnErrorPrompt))
+                else if (!string.IsNullOrEmpty(step.StepScriptedConfiguration?.OnErrorPrompt))
                 {
                     await _outbound.Writer.WriteAsync(
-                        new OutboundDirective.SpeakText(step.StepDtmfConfiguration!.OnErrorPrompt!, DateTimeOffset.UtcNow),
+                        new OutboundDirective.SpeakText(step.StepScriptedConfiguration!.OnErrorPrompt!, DateTimeOffset.UtcNow),
                         ct).ConfigureAwait(false);
                 }
                 else

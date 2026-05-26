@@ -15,6 +15,23 @@ A single YAML document describes:
 The same authoring surface drives all interaction strategies, so a workflow can be
 "realtime first, degrade to DTMF" without rewriting the flow.
 
+### DTMF input is available to every tier
+
+`scripted.dtmf` is no longer the exclusive province of the dedicated DTMF strategies.
+Both the **Realtime AI** strategy and the **NLU** strategy also consume inbound DTMF
+tones during normal operation:
+
+- **Realtime AI** — if the active stage has a `scripted.dtmf` block, digits are handled
+  deterministically (menu transition or buffered `collect` → validator). Otherwise the
+  digit is forwarded to the LLM as an inline user turn (`[Caller pressed 1]`) so the
+  model can react conversationally. This covers cases like "caller cannot speak right
+  now" and "caller needs to enter a code mid-conversation".
+- **NLU** — digits act as a direct intent shortcut. A press resolves through the same
+  `scripted.dtmf.options` / `scripted.nlu.intents` table the speech classifier uses, so
+  noisy lines or unrecognized accents still have a deterministic escape hatch.
+  No tier swap required; the composite fallback (NLU → DTMF tier) still handles repeated
+  no-match events at the orchestration layer.
+
 > The full YAML reference lives at [`Schema/Schema.md`](./Schema/Schema.md). This
 > document focuses on **how the pieces fit together** and how to consume the framework
 > from a host application.
@@ -77,25 +94,28 @@ strategy:
   primary: dtmf
 stages:
   - id: menu
-    dtmf:
-      ssmlPrompt: "Press 1 to pay your bill, press 2 to check your balance."
-      options:
-        - { digit: '1', label: PayBill, nextStage: collect-account }
-        - { digit: '2', label: Balance, nextStage: collect-account }
+    scripted:
+      dtmf:
+        ssmlPrompt: "Press 1 to pay your bill, press 2 to check your balance."
+        options:
+          - { digit: '1', label: PayBill, nextStage: collect-account }
+          - { digit: '2', label: Balance, nextStage: collect-account }
   - id: collect-account
-    dtmf:
-      ssmlPrompt: "Enter your 8-digit account number, followed by pound."
-      collect:
-        minDigits: 8
-        maxDigits: 8
-        validator: verify-account-number
-        onValidNextStage: confirm
+    scripted:
+      dtmf:
+        ssmlPrompt: "Enter your 8-digit account number, followed by pound."
+        collect:
+          minDigits: 8
+          maxDigits: 8
+          validator: verify-account-number
+          onValidNextStage: confirm
   - id: confirm
-    dtmf:
-      ssmlPrompt: "Press 1 to confirm, press 2 to start over."
-      options:
-        - { digit: '1', label: Confirm, nextStage: complete }
-        - { digit: '2', label: Restart, nextStage: menu }
+    scripted:
+      dtmf:
+        ssmlPrompt: "Press 1 to confirm, press 2 to start over."
+        options:
+          - { digit: '1', label: Confirm, nextStage: complete }
+          - { digit: '2', label: Restart, nextStage: menu }
   - id: complete
     terminal: true
 ```

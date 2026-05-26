@@ -74,30 +74,17 @@ public sealed class RealtimeIvrWorkflowStep
     public Func<IvrWorkflowState, CancellationToken, Task>? OnCompleted { get; init; }
 
     /// <summary>
-    /// Gets the DTMF configuration for this step, used when the session is operating
-    /// in Tier 4 (pure DTMF) mode. Contains menu options mapping DTMF digit characters
-    /// ('0'-'9', '*', '#') to labels, plus termination digit, digit count constraints,
-    /// prompt overrides, and error audio settings.
+    /// Gets the scripted (non-generative) configuration for this step, used when the
+    /// session is operating in a DTMF or NLU tier. Hosts shared prompts and policy knobs
+    /// at the root, plus optional per-tier sub-configurations under
+    /// <see cref="StepScriptedConfiguration.Nlu"/> and <see cref="StepScriptedConfiguration.Dtmf"/>.
     /// </summary>
     /// <remarks>
-    /// When null, the DTMF transport collects free-form digit sequences instead of
-    /// presenting a menu. Steps that require natural language input will be skipped
-    /// with a warning in DTMF-only mode.
+    /// When null, the stage is generative-only (realtime tier) or relies entirely on
+    /// host-supplied strategy defaults. Steps that require natural language input will be
+    /// skipped with a warning in DTMF-only mode when their DTMF sub-configuration is also null.
     /// </remarks>
-    public StepDtmfConfiguration? StepDtmfConfiguration { get; init; }
-
-    /// <summary>
-    /// Gets the NLU (intent-recognition) configuration for this step, used when the
-    /// session is operating in the non-generative NLU tier. Carries SSML / audio
-    /// prompt overrides, confidence threshold, no-match / no-input policy, and any
-    /// stage-scoped intent transitions lowered from the YAML <c>nlu</c> block.
-    /// </summary>
-    /// <remarks>
-    /// When null, the NLU strategy uses defaults supplied by the host (default
-    /// prompts, default thresholds) and classifies against the step's general
-    /// <see cref="Intents"/> map.
-    /// </remarks>
-    public StepNluConfiguration? StepNluConfiguration { get; init; }
+    public StepScriptedConfiguration? StepScriptedConfiguration { get; init; }
 
     /// <summary>
     /// Indicates whether this step is terminal — i.e. once the workflow enters this stage

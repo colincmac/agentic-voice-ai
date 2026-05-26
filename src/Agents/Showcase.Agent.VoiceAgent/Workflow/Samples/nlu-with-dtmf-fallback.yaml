@@ -39,23 +39,9 @@ stages:
         - "Confirm the classified intent in a single short sentence before transitioning."
       examples:
         - "Welcome to ACME Bank. I can help with your balance, billing, or transfer you to a representative — which would you like?"
-    nlu:
-      ssmlPrompt: |
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-          <voice name="en-US-Ava:DragonHDLatestNeural">
-            <prosody rate="-5%">
-              Welcome to ACME Bank.
-              <break time="250ms"/>
-              You can say things like "check my balance", "a billing question", or "agent".
-            </prosody>
-          </voice>
-        </speak>
-      onNoMatchPrompt: |
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-          <voice name="en-US-Ava:DragonHDLatestNeural">
-            I didn't quite catch that. You can say "balance", "billing", or "agent".
-          </voice>
-        </speak>
+    scripted:
+      # Shared scripted knobs apply to both NLU and DTMF tiers.
+      onErrorPrompt: "Sorry, that isn't a valid option. Press 1 for balance, 2 for billing, or 0 for an agent."
       onNoInputPrompt: "Sorry, I didn't hear anything. Try saying balance, billing, or agent."
       onHandoffPrompt: "One moment while I bring you to a representative."
       maxNoMatch: 2
@@ -65,6 +51,38 @@ stages:
         - "check my balance"
         - "i have a billing question"
         - "talk to a person"
+      nlu:
+        # NLU-specific entry prompt ("say balance") that overrides the DTMF wording below.
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              <prosody rate="-5%">
+                Welcome to ACME Bank.
+                <break time="250ms"/>
+                You can say things like "check my balance", "a billing question", or "agent".
+              </prosody>
+            </voice>
+          </speak>
+      dtmf:
+        # DTMF-specific entry prompt ("press 1").
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              <prosody rate="-5%">
+                Welcome to ACME Bank.
+                <break time="300ms"/>
+                For account balance, press 1.
+                <break time="200ms"/>
+                For billing, press 2.
+                <break time="200ms"/>
+                To speak with an agent, press 0.
+              </prosody>
+            </voice>
+          </speak>
+        options:
+          - { digit: '1', label: balance, nextStage: verify }
+          - { digit: '2', label: billing, nextStage: verify }
+          - { digit: '0', label: agent,   nextStage: transfer }
     intents:
       - name: balance
         examples:
@@ -87,27 +105,7 @@ stages:
           - "Get me an agent"
           - "I want a human"
         nextStage: transfer
-    dtmf:
-      ssmlPrompt: |
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-          <voice name="en-US-Ava:DragonHDLatestNeural">
-            <prosody rate="-5%">
-              Welcome to ACME Bank.
-              <break time="300ms"/>
-              For account balance, press 1.
-              <break time="200ms"/>
-              For billing, press 2.
-              <break time="200ms"/>
-              To speak with an agent, press 0.
-            </prosody>
-          </voice>
-        </speak>
-      onErrorPrompt: "Sorry, that isn't a valid option. Press 1 for balance, 2 for billing, or 0 for an agent."
-      options:
-        - { digit: '1', label: balance, nextStage: verify }
-        - { digit: '2', label: billing, nextStage: verify }
-        - { digit: '0', label: agent,   nextStage: transfer }
-    exitWhen: "Caller has stated their primary intent"
+
     transitions:
       - to: verify
         onCondition: "Caller wants account-specific information"
@@ -124,36 +122,37 @@ stages:
         - "On failure, ask once more, then offer to transfer to an agent."
       tools:
         - confirm-identity
-    nlu:
-      ssmlPrompt: |
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-          <voice name="en-US-Ava:DragonHDLatestNeural">
-            Please say your four-digit PIN, one digit at a time.
-          </voice>
-        </speak>
-      onNoMatchPrompt: "I need four digits. Please say your PIN one digit at a time."
-      onNoInputPrompt: "Sorry, I didn't hear anything. Please say your four-digit PIN."
+    scripted:
+      # Shared scripted knobs apply to both NLU and DTMF tiers.
+      onErrorPrompt: "I need four digits. Please try again."
+      onNoInputPrompt: "Sorry, I didn't hear anything. Please provide your four-digit PIN."
       onHandoffPrompt: "I'm having trouble verifying your PIN. Transferring you to an agent."
       maxNoMatch: 2
       maxNoInput: 2
       confidenceThreshold: 0.6
-    dtmf:
-      ssmlPrompt: |
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-          <voice name="en-US-Ava:DragonHDLatestNeural">
-            Please enter your four-digit PIN, followed by the pound key.
-          </voice>
-        </speak>
-      onErrorPrompt: "That PIN doesn't match our records. Transferring you to an agent."
-      collect:
-        minDigits: 4
-        maxDigits: 4
-        terminator: '#'
-        validator: pin-validator
-        digitsParameterName: digits
-        collectedStateKey: pinVerified
-        onValidNextStage: self_service
-        onInvalidPrompt: "That PIN doesn't match our records. Transferring you to an agent."
+      nlu:
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              Please say your four-digit PIN, one digit at a time.
+            </voice>
+          </speak>
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              Please enter your four-digit PIN, followed by the pound key.
+            </voice>
+          </speak>
+        collect:
+          minDigits: 4
+          maxDigits: 4
+          terminator: '#'
+          validator: pin-validator
+          digitsParameterName: digits
+          collectedStateKey: pinVerified
+          onValidNextStage: self_service
+          onInvalidPrompt: "That PIN doesn't match our records. Transferring you to an agent."
     exitWhen: "Identity confirmed or transfer requested"
     transitions:
       - to: self_service

@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.Authentication.UserIdentity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.DependencyInjection;
 
 namespace Agents.AI.ContactCenter.Authentication;
 

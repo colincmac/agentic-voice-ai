@@ -34,9 +34,11 @@ public class CompositeFallbackStrategyTests
         var services = new ServiceCollection()
             .AddSingleton<ISpeechSynthesizer, FakeSpeechSynthesizer>()
             .AddSingleton<IRealtimeVoiceBackend>(backend)
+            .AddSingleton(TestTelemetry.Calling)
+            .AddLogging()
             .BuildServiceProvider();
 
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
         var fakeEdge = new FakeCallerEdge("call-fb");
 
@@ -53,7 +55,9 @@ public class CompositeFallbackStrategyTests
             [compositeFactory],
             registry,
             quality,
-            defaultObservers: [new DashboardProjectionObserver()]);
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
+            defaultObservers: [new DashboardProjectionObserver(TestTelemetry.Calling)]);
 
         var session = await sessionFactory.CreateAsync(new CallSessionRequest
         {
@@ -136,12 +140,15 @@ public class CompositeFallbackStrategyTests
                     Instructions = ["Greet the caller"],
                     Transitions = [new StateTransition { NextStep = "billing", Condition = "billing" }]
                 },
-                StepDtmfConfiguration = new StepDtmfConfiguration
+                StepScriptedConfiguration = new StepScriptedConfiguration
                 {
-                    MenuOptions = new Dictionary<char, DtmfMenuOption>
+                    Dtmf = new StepDtmfConfiguration
                     {
-                        ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
-                        ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        MenuOptions = new Dictionary<char, DtmfMenuOption>
+                        {
+                            ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
+                            ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        }
                     }
                 }
             },
@@ -244,6 +251,7 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public string? LastSystemPrompt { get; private set; }
     public List<ReadOnlyMemory<byte>> ReceivedAudio { get; } = [];
     public List<IReadOnlyList<AITool>> ToolUpdates { get; } = [];
+    public List<string> ReceivedUserText { get; } = [];
 
     public Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -260,6 +268,12 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
     public ValueTask UpdateSystemPromptAsync(string prompt, CancellationToken cancellationToken = default)
     {
         LastSystemPrompt = prompt;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        ReceivedUserText.Add(text);
         return ValueTask.CompletedTask;
     }
 

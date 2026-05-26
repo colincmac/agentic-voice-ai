@@ -147,8 +147,7 @@
             "toolRules": { "type": "array", "items": { "$ref": "#/$defs/toolRule" } }
           }
         },
-        "dtmf": { "$ref": "#/$defs/dtmf" },
-        "nlu": { "$ref": "#/$defs/nlu" },
+        "scripted": { "$ref": "#/$defs/scripted" },
         "intents": { "type": "array", "items": { "$ref": "#/$defs/intent" } },
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "exitWhen": { "type": "string" },
@@ -185,14 +184,37 @@
         "confirmPrompt": { "type": "string" }
       }
     },
-    "dtmf": {
+    "scripted": {
       "type": "object",
+      "description": "Shared scripted-tier (DTMF + NLU) configuration. Hosts common prompts and policy knobs; per-tier override blocks live under .nlu and .dtmf.",
       "additionalProperties": false,
       "properties": {
         "ssmlPrompt": { "type": "string" },
         "audioFile": { "type": "string", "format": "uri" },
         "onErrorPrompt": { "type": "string" },
         "onErrorAudioFile": { "type": "string", "format": "uri" },
+        "onNoInputPrompt": { "type": "string" },
+        "onNoInputAudioFile": { "type": "string", "format": "uri" },
+        "onHandoffPrompt": { "type": "string" },
+        "onHandoffAudioFile": { "type": "string", "format": "uri" },
+        "onConfirmPrompt": { "type": "string" },
+        "onConfirmAudioFile": { "type": "string", "format": "uri" },
+        "maxNoMatch": { "type": "integer", "minimum": 0 },
+        "maxNoInput": { "type": "integer", "minimum": 0 },
+        "noInputTimeoutMs": { "type": "integer", "minimum": 0 },
+        "confidenceThreshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "examples": { "type": "array", "items": { "type": "string" } },
+        "nlu": { "$ref": "#/$defs/nlu" },
+        "dtmf": { "$ref": "#/$defs/dtmf" }
+      }
+    },
+    "dtmf": {
+      "type": "object",
+      "description": "DTMF-tier override sub-block under scripted: tier-specific entry prompt plus menu options and digit-collection block.",
+      "additionalProperties": false,
+      "properties": {
+        "ssmlPrompt": { "type": "string" },
+        "audioFile": { "type": "string", "format": "uri" },
         "options": {
           "type": "array",
           "items": {
@@ -248,23 +270,11 @@
     },
     "nlu": {
       "type": "object",
+      "description": "NLU-tier override sub-block under scripted: tier-specific entry prompt and optional stage-scoped intents.",
       "additionalProperties": false,
       "properties": {
         "ssmlPrompt": { "type": "string" },
         "audioFile": { "type": "string", "format": "uri" },
-        "onNoMatchPrompt": { "type": "string" },
-        "onNoMatchAudioFile": { "type": "string", "format": "uri" },
-        "onNoInputPrompt": { "type": "string" },
-        "onNoInputAudioFile": { "type": "string", "format": "uri" },
-        "onConfirmPrompt": { "type": "string" },
-        "onConfirmAudioFile": { "type": "string", "format": "uri" },
-        "onHandoffPrompt": { "type": "string" },
-        "onHandoffAudioFile": { "type": "string", "format": "uri" },
-        "maxNoMatch": { "type": "integer", "minimum": 0 },
-        "maxNoInput": { "type": "integer", "minimum": 0 },
-        "confidenceThreshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-        "noInputTimeoutMs": { "type": "integer", "minimum": 0 },
-        "examples": { "type": "array", "items": { "type": "string" } },
         "intents": { "type": "array", "items": { "$ref": "#/$defs/intent" } }
       }
     },

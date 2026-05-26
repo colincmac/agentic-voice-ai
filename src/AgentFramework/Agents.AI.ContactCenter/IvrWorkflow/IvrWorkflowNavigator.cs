@@ -80,7 +80,7 @@ public sealed class IvrWorkflowNavigator(
     public bool TryResolveDtmfDigit(char digit, [NotNullWhen(true)] out DtmfMenuOption? option)
     {
         option = null;
-        return CurrentStep?.StepDtmfConfiguration?.MenuOptions is { } menu
+        return CurrentStep?.StepScriptedConfiguration?.Dtmf?.MenuOptions is { } menu
             && menu.TryGetValue(digit, out option);
     }
 
@@ -214,7 +214,7 @@ public sealed class IvrWorkflowNavigator(
         {
             sb.AppendLine(intro);
         }
-        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
+        if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is { Count: > 0 } menu)
         {
             foreach (var (digit, option) in menu)
             {

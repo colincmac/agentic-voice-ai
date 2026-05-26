@@ -2,6 +2,7 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.Telemetry;
 using Azure.Communication.CallAutomation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,7 +31,8 @@ public sealed class CallingServices(
     [FromServices] IWebhookForwarder webhookForwarder,
     [FromServices] IClusterIdentity clusterIdentity,
     [FromServices] ILoggerFactory loggerFactory,
-    [FromServices] ILogger<CallingServices> logger)
+    [FromServices] ILogger<CallingServices> logger,
+    [FromServices] CallingTelemetry telemetry)
 {
     public ICallSessionFactory SessionFactory { get; } = sessionFactory;
     public ICallSessionRegistry SessionRegistry { get; } = sessionRegistry;
@@ -42,4 +44,5 @@ public sealed class CallingServices(
     public IClusterIdentity ClusterIdentity { get; } = clusterIdentity;
     public ILoggerFactory LoggerFactory { get; } = loggerFactory;
     public ILogger<CallingServices> Logger { get; } = logger;
+    public CallingTelemetry Telemetry { get; } = telemetry;
 }

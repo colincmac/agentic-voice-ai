@@ -27,7 +27,6 @@ using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.Coordination;
 
 var builder = WebApplication.CreateBuilder(args);
-AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
 //builder.Services.AddGrpc();
 var azureSection = builder.Configuration.GetSection("Azure");
 var tenantId = azureSection["TenantId"];
@@ -38,23 +37,11 @@ builder.Services.AddAzureClients(clientBuilder =>
     // Make this the default for clients created by the factory
     clientBuilder.UseCredential(credential);
 });
+builder.AddServiceDefaults();
 
 
-if (builder.Environment.IsDevelopment())
-{
-    var resourceAttributes = new Dictionary<string, object> {
-    { "service.name", "artagent" },
-    { "service.namespace", "dev" },
-    { "service.instance.id", "local" }};
-
-    builder.AddServiceDefaults(opt => opt.AddAttributes(resourceAttributes));
-}
-else
-{
-    builder.AddServiceDefaults();
-}
 builder.Services.AddHttpClient();
-builder.Services.AddHttpLogging(o => { });
+
 // Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
 
@@ -77,6 +64,7 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 //builder.Services.AddOpenApi();
 
+// AI Model Clients
 builder.AddKeyedChatClient("slm")
     .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
 
@@ -113,8 +101,6 @@ builder.Services.AddAzureSpeech(options =>
 builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
-builder.AddInMemoryCallOwnershipDirectory();
-builder.AddInMemoryWebhookForwarder();
 
 // Declarative YAML IVR framework: loads workflow definitions from
 // Workflow\Samples\*.yaml (copied to the app output via the csproj content glob),
@@ -131,7 +117,10 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
-        DemoWorkflowIds.DefaultEscalationNumber)));
+        ShowcaseWorkflowIds.DefaultEscalationNumber)));
+
+// AI Agents
+
 // NLU dependencies — IvrIntentAgent now owns the full intent-recognition pipeline
 // (audio preprocessing via ISpeechRecognizer + classification via the "chat" IChatClient
 // + local tool dispatch when the SLM cannot tool-call). Typically backed by
@@ -164,15 +153,14 @@ builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.IntentNlu),
     (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.NluWithDtmfFallback));
 
-
-
 builder.AddCallSessionContainer()
+    .AddDistributedCallState(DistributedCallStateBackend.InMemory)
     // Inner factories — the composite below shadows the top tier and reuses these
     // through DI. Order matters: register the inner tiers BEFORE the composite so
     // the composite's lookup finds them.
-    //.AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
+    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
     .AddNluStrategy()
-    .AddDtmfStrategy()
+    .AddDtmfStreamingStrategy()
     .AddCallControlTools()
     // Caller authentication: ANI lookup against the in-memory directory plus the
     // anonymous fallback so unknown callers still walk the workflow as guests.
@@ -186,13 +174,16 @@ builder.AddCallSessionContainer()
     // collected data, transcript) and CallerAuthenticationState are preserved across each
     // mid-call swap so the caller doesn't have to re-authenticate when the tier degrades.
     .AddCompositeFallbackStrategy(
-        topTier: AgentTier.IntentNlu,
-        //AgentTier.RealtimeVoice,
+        topTier: AgentTier.RealtimeVoice,
+        AgentTier.RealtimeVoice,
         AgentTier.IntentNlu,
         AgentTier.DtmfOnly);
 
 // Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
+
+// Startup-time warm-up of the per-tier strategy factories and keyed workflow definitions.
+builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
 
 // TEAMS
 builder.AddAgentApplicationOptions();
@@ -216,7 +207,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-app.UseHttpLogging();
 
 //app.UseHttpsRedirection();
 

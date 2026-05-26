@@ -1,12 +1,18 @@
+using Agents.AI.ContactCenter.AITools;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Calling.Core;
+using Agents.AI.ContactCenter.Calling.Strategies.Composite;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
+using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
+using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
+using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
-using Agents.AI.ContactCenter.AITools;
-using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.ContactCenter.Configuration;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,13 +20,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
-using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
-using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
-using Agents.AI.ContactCenter.Calling.Core;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
-namespace Agents.AI.ContactCenter.Calling;
+namespace Agents.AI.ContactCenter.DependencyInjection;
 
 // SKETCH — DI wire-up for the new Calling/Proposed shape. Replaces the
 // AddConversationHub + ConversationHubBuilder + IContactCenterConversationSessionActivator
@@ -30,7 +33,7 @@ namespace Agents.AI.ContactCenter.Calling;
 //
 //   builder.AddCallSessionContainer()
 //       .AddRealtimeVoiceStrategy()      // Tier 0 — wraps AuthorizingRealtimeAIAgent
-//       .AddDtmfStrategy()               // Tier 4 — requires a registered ISpeechSynthesizer
+//       .AddDtmfStreamingStrategy()      // Tier 4 (streaming edge) — requires a registered ISpeechSynthesizer
 //       .AddDashboardProjectionObserver();
 //
 // Followed by:
@@ -72,16 +75,22 @@ public static class CallSessionContainerExtensions
     /// Registers the dedicated <see cref="CallingTelemetry"/> singleton for the
     /// new Calling/Proposed stack and wires its <see cref="System.Diagnostics.ActivitySource"/>
     /// / <see cref="System.Diagnostics.Metrics.Meter"/> into the host's
-    /// OpenTelemetry pipeline. Safe to call multiple times.
+    /// OpenTelemetry pipeline. Invoked automatically by
+    /// <see cref="AddCallSessionContainerCore"/>.
     /// </summary>
-    public static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
+    private static IHostApplicationBuilder AddCallSessionContainerTelemetry(this IHostApplicationBuilder builder)
     {
         builder.Services.TryAddSingleton<CallingTelemetry>();
 
-        builder.Services
-            .AddOpenTelemetry()
-            .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
-            .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
+        builder.Services.ConfigureOpenTelemetryTracerProvider((sp, builder) =>
+            builder.AddSource(CallingActivitySource.ActivitySourceName));
+
+        builder.Services.ConfigureOpenTelemetryMeterProvider((sp, builder) =>
+            builder.AddMeter(CallingActivitySource.MeterName));
+        //builder.Services
+        //    .AddOpenTelemetry()
+        //    .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
+        //    .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
 
         return builder;
     }
@@ -108,6 +117,8 @@ public static class CallSessionContainerExtensions
         services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
+
+
 
         builder.AddCallSessionContainerTelemetry();
         return new CallSessionContainerBuilder(builder);
@@ -173,19 +184,14 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers the Tier 4 DTMF strategy. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
+    /// Registers the streaming DTMF strategy. Pairs with
+    /// <see cref="AcsCallerStreamEdge"/> and emits locally synthesized PCM through the
+    /// bidirectional media WebSocket. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
     /// to be registered separately for prompt playback.
     /// </summary>
-    public CallSessionContainerBuilder AddDtmfStrategy(bool useStreaming = true)
+    public CallSessionContainerBuilder AddDtmfStreamingStrategy()
     {
-        if (useStreaming)
-        {
-            Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
-        }
-        else
-        {
-            Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
-        }
+        Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
         return this;
     }
 
@@ -264,7 +270,8 @@ public sealed class CallSessionContainerBuilder
     /// </param>
     /// <remarks>
     /// Register the inner factories (e.g. <see cref="AddRealtimeVoiceStrategy"/>,
-    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStrategy"/>) BEFORE calling this
+    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStreamingStrategy"/>,
+    /// <see cref="AddDtmfVerbStrategy"/>) BEFORE calling this
     /// method so the composite can resolve them at call-create time.
     /// </remarks>
     public CallSessionContainerBuilder AddCompositeFallbackStrategy(AgentTier topTier, params AgentTier[] orderedTiers)

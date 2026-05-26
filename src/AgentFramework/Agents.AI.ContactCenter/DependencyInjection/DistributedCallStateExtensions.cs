@@ -1,7 +1,7 @@
 using Agents.AI.ContactCenter.Coordination;
 using Microsoft.Extensions.Hosting;
 
-namespace Agents.AI.ContactCenter.Calling;
+namespace Agents.AI.ContactCenter.DependencyInjection;
 
 /// <summary>
 /// Backing store for the hyperscale call-state plane. Selects whether the

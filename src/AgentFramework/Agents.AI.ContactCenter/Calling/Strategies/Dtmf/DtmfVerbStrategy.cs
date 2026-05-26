@@ -162,10 +162,9 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                 _callId,
                 _callerMetadata,
                 _events.Writer,
+                _logger,
                 WorkflowState,
-                telemetry: null,
-                logger: _logger,
-                cancellationToken: ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
 
             if (_prewarmed && _prewarmedInitialDirectives is { Count: > 0 } buffered)
             {
@@ -221,7 +220,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), step.Id, tone.Timestamp),
             ct).ConfigureAwait(false);
 
-        if (step.StepDtmfConfiguration?.MenuOptions is not null)
+        if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is not null)
         {
             await ProcessMenuSelectionAsync(step, tone.Digit, ct).ConfigureAwait(false);
         }
@@ -302,7 +301,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                 {
                     await SpeakAsync(BuildPrompt(step), ct).ConfigureAwait(false);
                 }
-                if (step.StepDtmfConfiguration?.MenuOptions is not null)
+                if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is not null)
                 {
                     await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
                 }
@@ -310,10 +309,10 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
 
             case DtmfActionResult.Reject reject:
                 var errorPrompt = reject.ErrorPrompt
-                    ?? step.StepDtmfConfiguration?.OnErrorPrompt
+                    ?? step.StepScriptedConfiguration?.OnErrorPrompt
                     ?? "That is not a valid option. Please try again.";
                 await SpeakAsync(errorPrompt, ct).ConfigureAwait(false);
-                if (step.StepDtmfConfiguration?.MenuOptions is not null)
+                if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is not null)
                 {
                     await RecognizeMenuAsync(step, ct).ConfigureAwait(false);
                 }
@@ -398,7 +397,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             directives.Add(new OutboundDirective.SpeakText(prompt, DateTimeOffset.UtcNow, OperationContext: step.Id));
         }
 
-        if (step.StepDtmfConfiguration?.MenuOptions is not null)
+        if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is not null)
         {
             directives.Add(new OutboundDirective.CollectDtmf(
                 MaxTones: 1,
@@ -446,7 +445,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     {
         var prompt = step.ConversationState.Description ?? step.ConversationState.Goal ?? string.Empty;
 
-        if (step.StepDtmfConfiguration?.MenuOptions is { Count: > 0 } menu)
+        if (step.StepScriptedConfiguration?.Dtmf?.MenuOptions is { Count: > 0 } menu)
         {
             var menuText = string.Join(". ", menu.Select(kv => $"Press {kv.Key} for {kv.Value.Label}"));
             prompt = $"{prompt}. {menuText}.";

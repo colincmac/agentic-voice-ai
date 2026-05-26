@@ -3,7 +3,6 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 using Agents.AI.ContactCenter.Calling;
 
@@ -34,8 +33,7 @@ public static class CallerAuthenticationRunner
     /// Optional. When supplied, the resolved <see cref="AuthenticationLevel"/> is also written to
     /// <see cref="IvrWorkflowState"/> so step transitions / guards that read it pick up the value.
     /// </param>
-    /// <param name="telemetry">Telemetry source for the auth span; defaults to <see cref="CallingTelemetry.Default"/>.</param>
-    /// <param name="logger">Logger; defaults to <see cref="NullLogger.Instance"/>.</param>
+    /// <param name="logger">Logger. Required.</param>
     /// <param name="cancellationToken">Token observed throughout.</param>
     /// <returns>
     /// A <see cref="ConversationContext"/> with caller name / id / auth level filled in (using the
@@ -48,16 +46,13 @@ public static class CallerAuthenticationRunner
         string callId,
         CallEdgeMetadata? callerMetadata,
         ChannelWriter<StrategyEvent> events,
+        ILogger logger,
         IvrWorkflowState? workflowState = null,
-        CallingTelemetry? telemetry = null,
-        ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(events);
-
-        logger ??= NullLogger.Instance;
-        telemetry ??= CallingTelemetry.Default;
+        ArgumentNullException.ThrowIfNull(logger);
 
         var orchestrator = services.GetService<IAuthenticationOrchestrator>();
         var state = services.GetService<CallerAuthenticationState>();
@@ -71,6 +66,8 @@ public static class CallerAuthenticationRunner
             logger.LogDebug("Skipping caller authentication: no caller metadata for call {CallId}", callId);
             return BuildConversationContext(services, state.Identity);
         }
+
+        var telemetry = services.GetRequiredService<CallingTelemetry>();
 
         using var authSpan = telemetry.StartChildActivity("contact_center.strategy.authenticate", callId);
 

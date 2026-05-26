@@ -33,14 +33,16 @@ public class DtmfCallSessionEndToEndTests
             .BuildServiceProvider();
 
         await using var scope = services.CreateAsyncScope();
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
             [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
-            defaultObservers: [new DashboardProjectionObserver()]);
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
+            defaultObservers: [new DashboardProjectionObserver(TestTelemetry.Calling)]);
 
         var fakeEdge = new FakeCallerEdge("call-1");
 
@@ -93,13 +95,15 @@ public class DtmfCallSessionEndToEndTests
             .AddSingleton<ISpeechSynthesizer, FakeSpeechSynthesizer>()
             .BuildServiceProvider();
 
-        var quality = new InMemoryCallQualityReporter();
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
             [new DtmfStreamingStrategyFactory()],
             registry,
             quality,
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             defaultObservers: []);
 
         var fakeEdge = new FakeCallerEdge("call-2");
@@ -161,12 +165,15 @@ public class DtmfCallSessionEndToEndTests
                         new StateTransition { NextStep = "billing", Condition = "selected billing" }
                     ]
                 },
-                StepDtmfConfiguration = new StepDtmfConfiguration
+                StepScriptedConfiguration = new StepScriptedConfiguration
                 {
-                    MenuOptions = new Dictionary<char, DtmfMenuOption>
+                    Dtmf = new StepDtmfConfiguration
                     {
-                        ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
-                        ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        MenuOptions = new Dictionary<char, DtmfMenuOption>
+                        {
+                            ['1'] = new() { Digit = '1', Label = "support", NextStepId = "support" },
+                            ['2'] = new() { Digit = '2', Label = "billing", NextStepId = "billing" },
+                        }
                     }
                 }
             },

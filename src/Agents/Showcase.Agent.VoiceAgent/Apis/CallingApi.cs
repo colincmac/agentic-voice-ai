@@ -16,13 +16,14 @@ using Microsoft.AspNetCore.Mvc;
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 /// <summary>
-/// ACS Call Automation endpoints. Supports two answer modes:
+/// ACS Call Automation endpoints. The answer mode is selected by the registered
+/// <see cref="RealtimeIvrWorkflowDefinition"/>'s <see cref="AgentTier"/>:
 /// <list type="bullet">
-///   <item><b>streaming</b> (default) — answers with bidirectional media WebSocket;
-///         WS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
-///   <item><b>verb</b> (?mode=verb) — answers with no media WS; IncomingCall handler
-///         builds <see cref="AcsCallAutomationEdge"/> and starts the session immediately.
-///         Subsequent caller actions arrive on the callback webhook below.</item>
+///   <item><see cref="AgentTier.RealtimeVoice"/> — answers with a bidirectional media WebSocket;
+///         the WSS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
+///   <item>All other tiers — answers with no media WS; the IncomingCall handler builds
+///         <see cref="AcsCallAutomationEdge"/> and starts the session immediately. Subsequent
+///         caller actions arrive on the callback webhook below.</item>
 /// </list>
 /// </summary>
 public static class CallingApi
@@ -38,9 +39,13 @@ public static class CallingApi
         routeGroup.MapPost(HANDLE_INCOMING_PATH, async (
             [AsParameters] CallingServices services,
             [FromBody] EventGridEvent[] incomingEvents,
-            [FromQuery] string? mode = "streaming",
             CancellationToken cancellationToken = default) =>
         {
+            // Tier comes from the registered workflow definition (driven by YAML
+            // strategy.primary). 
+            var workflowTier = services.Workflow.Tier;
+            var useStreaming = services.Options.Value.Acs.UseWebsocketForMediaStreaming;
+
             foreach (var evt in incomingEvents)
             {
                 if (!evt.TryGetSystemEventData(out var eventData))
@@ -59,11 +64,12 @@ public static class CallingApi
                 if (eventData is AcsIncomingCallEventData incoming)
                 {
                     services.Logger.LogInformation(
-                        "Incoming call from {From} to {To} (server call {ServerCallId}); mode={Mode}",
+                        "Incoming call from {From} to {To} (server call {ServerCallId}); workflow={Workflow} tier={Tier}",
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
                         incoming.ServerCallId,
-                        mode);
+                        services.Workflow.Name,
+                        workflowTier);
 
                     var callbackUri = new Uri(
                         services.Options.Value.Acs.CallBackUri,
@@ -71,7 +77,7 @@ public static class CallingApi
 
                     var answerOptions = new AnswerCallOptions(incoming.IncomingCallContext, callbackUri);
 
-                    if (mode != "verb")
+                    if (useStreaming)
                     {
                         var websocketUri = new Uri(
                             services.Options.Value.Acs.MediaStreamingUri,
@@ -98,31 +104,7 @@ public static class CallingApi
                         "Answered call. CallConnectionId: {CallConnectionId}",
                         callConnection.CallConnectionId);
 
-                    // Kick off strategy prewarm right after answering so the realtime backend
-                    // connect / first-prompt TTS overlap with ACS opening the media channel.
-                    // CreateAsync below will claim this prewarmed entry by callId.
-                    var prewarmCallId = $"call_{callConnection.CallConnectionId}";
-                    var prewarmTier = AgentTier.IntentNlu;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await services.SessionFactory.PrewarmAsync(new CallSessionPrewarmRequest
-                            {
-                                CallId = prewarmCallId,
-                                Workflow = services.Workflow,
-                                PreferredTier = prewarmTier
-                            }, CancellationToken.None);
-                        }
-                        catch (Exception ex)
-                        {
-                            services.Logger.LogWarning(ex,
-                                "Strategy prewarm failed for call {CallId}; CreateAsync will build a fresh strategy",
-                                prewarmCallId);
-                        }
-                    }, CancellationToken.None);
-
-                    if (mode == "verb")
+                    if (!useStreaming)
                     {
                         // Claim ownership before the verb edge starts so the very first
                         // mid-call callback can find this pod (ADR-0011).
@@ -211,7 +193,7 @@ public static class CallingApi
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
                     "Media WebSocket established for CallConnectionId={CallConnectionId}, Tier={Tier}",
-                    callConnectionId, AgentTier.RealtimeVoice);
+                    callConnectionId, services.Workflow.Tier);
 
                 // Pod-pinned bi-di stream — claim streaming ownership before the
                 // session starts so the very first mid-call callback can find us.
@@ -242,20 +224,13 @@ public static class CallingApi
                     callProperties,
                     httpContext.RequestAborted,
                     services.CallAutomationClient,
-                    loggerFactory.CreateLogger<AcsCallerStreamEdge>());
+                    loggerFactory.CreateLogger<AcsCallerStreamEdge>(),
+                    services.Telemetry);
 
                 var callId = $"call_{callConnectionId}";
-
-                var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
-                {
-                    CallId = callId,
-                    CallerEdge = edge,
-                    Workflow = services.Workflow,
-                    PreferredTier = AgentTier.IntentNlu
-                }, httpContext.RequestAborted);
-
-                await session.StartAsync(httpContext.RequestAborted);
-                logger.LogInformation("Streaming call session {CallId} started ({Tier})", callId, AgentTier.RealtimeVoice);
+                var session = await StartCallSessionAsync(
+                    services, callId, edge, logger, "Streaming", httpContext.RequestAborted)
+                    .ConfigureAwait(false);
 
                 await WaitForCallEndAsync(session, httpContext.RequestAborted);
             }
@@ -450,21 +425,44 @@ public static class CallingApi
             callConnection.CallConnectionId,
             media,
             metadata,
-            control,
-            services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>());
+            services.LoggerFactory.CreateLogger<AcsCallAutomationEdge>(),
+            services.Telemetry,
+            control);
 
         var callId = $"call_{callConnection.CallConnectionId}";
+        await StartCallSessionAsync(
+            services, callId, edge, services.Logger, "Verb-mode", cancellationToken)
+            .ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// Shared session-start path for both verb and streaming modes. Builds a
+    /// <see cref="CallSessionRequest"/> whose <see cref="CallSessionRequest.PreferredTier"/>
+    /// matches the registered workflow's <see cref="RealtimeIvrWorkflowDefinition.Tier"/>,
+    /// so the DI-resolved <c>IConversationStrategyFactory</c> for that tier (typically the
+    /// composite chain registered last) is selected automatically.
+    /// </summary>
+    private static async Task<ICallSession> StartCallSessionAsync(
+        CallingServices services,
+        string callId,
+        ICallEdge edge,
+        ILogger logger,
+        string modeLabel,
+        CancellationToken cancellationToken)
+    {
+        var tier = services.Workflow.Tier;
         var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
         {
             CallId = callId,
             CallerEdge = edge,
             Workflow = services.Workflow,
-            PreferredTier = AgentTier.RealtimeVoice,
-        }, cancellationToken);
+            PreferredTier = tier,
+        }, cancellationToken).ConfigureAwait(false);
 
-        await session.StartAsync(cancellationToken);
-        services.Logger.LogInformation("Verb-mode call session {CallId} started ({Tier})", callId, AgentTier.RealtimeVoice);
+        await session.StartAsync(cancellationToken).ConfigureAwait(false);
+        logger.LogInformation(
+            "{Mode} call session {CallId} started ({Tier})", modeLabel, callId, tier);
+        return session;
     }
 
     private static void DispatchToVerbEdge(AcsCallAutomationEdge edge, CallAutomationEventBase evt)

@@ -1,5 +1,4 @@
 using Azure.Identity;
-using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
@@ -7,12 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.OpenTelemetry;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using StackExchange.Redis;
 using StackExchange.Redis.Configuration;
 
@@ -26,9 +20,9 @@ public static class Extensions
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
 
-    public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
+    public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        builder.ConfigureOpenTelemetry(configureOtel);
+        builder.ConfigureOpenTelemetry();
 
         builder.AddDefaultHealthChecks();
 
@@ -52,67 +46,13 @@ public static class Extensions
         return builder;
     }
 
-    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
+    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        builder.Logging.AddOpenTelemetry(logging =>
-        {
-            logging.IncludeFormattedMessage = true;
-            logging.IncludeScopes = true;
-        });
-
-        builder.Services.AddOpenTelemetry()
-            .WithMetrics(metrics =>
-            {
-                metrics.AddAspNetCoreInstrumentation()
-                    .AddMeter("*") // Our custom meter
-                    .AddMeter("*Microsoft.Agents.AI") // Agent Framework metrics
-                    
-                    .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation();
-            })
-            .WithTracing(tracing =>
-            {
-                tracing.AddSource(builder.Environment.ApplicationName)
-                    .AddSource("*")
-                    .AddSource("*Microsoft.Agents.AI")
-                    .AddAspNetCoreInstrumentation(tracing =>
-                        // Don't trace requests to the health endpoint to avoid filling the dashboard with noise
-                        tracing.Filter = httpContext =>
-                            !(httpContext.Request.Path.StartsWithSegments(HealthEndpointPath)
-                              || httpContext.Request.Path.StartsWithSegments(AlivenessEndpointPath))
-                    )
-                    .AddGrpcClientInstrumentation()
-                    .AddHttpClientInstrumentation();
-            });
-
-        builder.AddOpenTelemetryExporters(configureOtel);
+        builder.UseMicrosoftOpenTelemetry();
 
         return builder;
     }
 
-    private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder, Action<ResourceBuilder>? configureOtel = null) where TBuilder : IHostApplicationBuilder
-    {
-
-        var otelBuilder = builder.Services.AddOpenTelemetry();
-        if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
-        {
-            otelBuilder.UseOtlpExporter();
-        }
-        if (configureOtel != null)
-        {
-            otelBuilder.ConfigureResource(configureOtel);
-        }
-        if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
-        {
-            otelBuilder.UseAzureMonitor();
-            builder.UseMicrosoftOpenTelemetry(o =>
-            {
-                o.Exporters = ExportTarget.AzureMonitor;
-            });
-        }
-
-        return builder;
-    }
 
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {

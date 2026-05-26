@@ -7,7 +7,6 @@ using Agents.AI.ContactCenter.Telemetry;
 using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
 
@@ -57,16 +56,18 @@ public sealed class AcsCallerStreamEdge : ICallEdge, ICallControl
         CallConnectionProperties callConnection,
         CancellationToken httpContextCancellation,
         CallAutomationClient callAutomationClient,
-
-        ILogger<AcsCallerStreamEdge>? logger = null,
-        CallingTelemetry? telemetry = null)
+        ILogger<AcsCallerStreamEdge> logger,
+        CallingTelemetry telemetry)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(telemetry);
+
         _webSocket = webSocket;
         _call = callConnection;
         _callAutomationClient = callAutomationClient;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(httpContextCancellation);
-        _logger = logger ?? NullLogger<AcsCallerStreamEdge>.Instance;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
+        _logger = logger;
+        _telemetry = telemetry;
 
         Metadata = new CallEdgeMetadata
         {
