@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
+using Agents.AI.ContactCenter.Authentication;
+
 namespace Agents.AI.ContactCenter.IvrWorkflow;
 
 /// <summary>
@@ -152,7 +154,7 @@ public interface IIvrWorkflowStep
     /// <summary>
     /// Whether authentication is required for this stage.
     /// </summary>
-    AuthenticationLevel RequiredAuthLevel { get; }
+    CallerVerificationLevel RequiredAuthLevel { get; }
 
     /// <summary>
     /// Gets the prompt to show if this step fails.

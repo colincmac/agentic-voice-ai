@@ -30,13 +30,13 @@ public static class CallerAuthenticationRunner
     /// </param>
     /// <param name="events">Channel writer the strategy uses to surface events to the call session.</param>
     /// <param name="workflowState">
-    /// Optional. When supplied, the resolved <see cref="AuthenticationLevel"/> is also written to
+    /// Optional. When supplied, the resolved <see cref="CallerVerificationLevel"/> is also written to
     /// <see cref="IvrWorkflowState"/> so step transitions / guards that read it pick up the value.
     /// </param>
     /// <param name="logger">Logger. Required.</param>
     /// <param name="cancellationToken">Token observed throughout.</param>
     /// <returns>
-    /// A <see cref="ConversationContext"/> with caller name / id / auth level filled in (using the
+    /// A <see cref="ConversationContext"/> with caller name / id / verification level filled in (using the
     /// instance registered in DI when present, otherwise a new instance). Strategies forward this
     /// to <see cref="IIvrWorkflowNavigator.BuildCurrentStepPrompt"/> so prompts can address the
     /// caller by name.
@@ -72,11 +72,15 @@ public static class CallerAuthenticationRunner
         using var authSpan = telemetry.StartChildActivity("contact_center.strategy.authenticate", callId);
 
         var previousLevel = state.Identity.VerificationLevel;
+        var tags = workflowState?.CurrentStepName is { Length: > 0 } stepName
+            ? (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["ivr.step"] = stepName }
+            : null;
         var context = new AuthenticationContext(
             CallId: callId,
             CallerMetadata: callerMetadata,
             CurrentIdentity: state.Identity,
-            Services: services);
+            Services: services,
+            Tags: tags);
 
         AuthenticationRunResult result;
         try
@@ -125,7 +129,7 @@ public static class CallerAuthenticationRunner
 
         if (workflowState is not null)
         {
-            workflowState.SetAuthLevel(MapAuthLevel(state.Identity.VerificationLevel));
+            workflowState.SetVerificationLevel(state.Identity.VerificationLevel);
         }
 
         authSpan?.SetTag("caller.verification_level", state.Identity.VerificationLevel.ToString());
@@ -139,24 +143,7 @@ public static class CallerAuthenticationRunner
         var context = services.GetService<ConversationContext>() ?? new ConversationContext();
         context.CallerName = identity.DisplayName;
         context.CallerId = identity.UserId;
-        context.AuthLevel = MapAuthLevel(identity.VerificationLevel);
+        context.VerificationLevel = identity.VerificationLevel;
         return context;
     }
-
-    /// <summary>
-    /// Bridges the strongly-typed <see cref="CallerVerificationLevel"/> used by the new
-    /// orchestrator to the legacy <see cref="AuthenticationLevel"/> exposed on
-    /// <see cref="ConversationContext"/> and <see cref="IvrWorkflowState"/>.
-    /// </summary>
-    public static AuthenticationLevel MapAuthLevel(CallerVerificationLevel level) => level switch
-    {
-        CallerVerificationLevel.None => AuthenticationLevel.None,
-        CallerVerificationLevel.AniMatch => AuthenticationLevel.PhoneRecognized,
-        CallerVerificationLevel.KnowledgeBased => AuthenticationLevel.SecurityQuestionPassed,
-        CallerVerificationLevel.MultiFactor => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.VoiceBiometric => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.EntraVerifiedId => AuthenticationLevel.FullyAuthenticated,
-        CallerVerificationLevel.Strong => AuthenticationLevel.FullyAuthenticated,
-        _ => AuthenticationLevel.None
-    };
 }

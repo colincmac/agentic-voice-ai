@@ -48,7 +48,7 @@ capabilities:
     description: "Read the caller's current account balance."
     requires:
       - type: auth
-        level: accountVerified
+        level: aniMatch
     tools:
       - balance-lookup
     toolRules:
@@ -62,7 +62,7 @@ capabilities:
     description: "Activate a newly issued debit card."
     requires:
       - type: auth
-        level: fullyAuthenticated
+        level: multiFactor
     tools:
       - activate-card
 

@@ -2,6 +2,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
+using Agents.AI.ContactCenter.Authentication;
 namespace Agents.AI.ContactCenter.IvrWorkflow;
 
 /// <summary>
@@ -66,7 +67,7 @@ public sealed class RealtimeIvrWorkflowStep
     /// <summary>
     /// Gets the required authentication level for this step.
     /// </summary>
-    public AuthenticationLevel RequiredAuthLevel { get; init; } = AuthenticationLevel.None;
+    public CallerVerificationLevel RequiredAuthLevel { get; init; } = CallerVerificationLevel.None;
 
     /// <summary>
     /// Gets an optional callback executed when this step completes successfully.

@@ -58,4 +58,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Agents.AI.ContactCenter.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Authentication\UserIdentity\" />
+  </ItemGroup>
 </Project>

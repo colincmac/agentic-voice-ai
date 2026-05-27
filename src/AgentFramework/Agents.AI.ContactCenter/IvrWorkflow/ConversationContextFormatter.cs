@@ -15,7 +15,7 @@ internal static class ConversationContextFormatter
         builder.AppendLine("## Pinned Conversation Context (structured, always current)");
         builder.AppendLine($"- caller_name: {FormatValue(context.CallerName)}");
         builder.AppendLine($"- caller_id: {FormatValue(context.CallerId)}");
-        builder.AppendLine($"- auth_level: {context.AuthLevel}");
+        builder.AppendLine($"- verification_level: {context.VerificationLevel}");
         builder.AppendLine($"- primary_intent: {FormatValue(context.PrimaryIntent)}");
         builder.AppendLine($"- secondary_intents: {FormatSequence(context.SecondaryIntents)}");
         builder.AppendLine($"- intent_confirmed: {context.IntentConfirmed}");

@@ -17,7 +17,7 @@ public sealed class IvrGuardDocument
     [YamlMember(Alias = "type")]
     public string Type { get; set; } = string.Empty;
 
-    /// <summary>For <c>auth</c>: the required minimum <see cref="AuthenticationLevel"/>.</summary>
+    /// <summary>For <c>auth</c>: the required minimum <see cref="CallerVerificationLevel"/>.</summary>
     [YamlMember(Alias = "level")]
     public string? Level { get; set; }
 

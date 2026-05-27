@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Media.Analysis;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
@@ -14,7 +15,7 @@ public sealed class ConversationContext
     // Participant identity
     public string? CallerName { get; set; }
     public string? CallerId { get; set; }
-    public AuthenticationLevel AuthLevel { get; set; } = AuthenticationLevel.None;
+    public CallerVerificationLevel VerificationLevel { get; set; } = CallerVerificationLevel.None;
 
     // Intent tracking
     public string? PrimaryIntent { get; set; }

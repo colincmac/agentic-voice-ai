@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.IvrWorkflow.Definition;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow.Guards;
@@ -37,24 +38,26 @@ internal sealed class AuthGuardFactory : IIvrGuardFactory
         return new RequiredAuthLevelGuard(level, document.Message);
     }
 
-    private static bool TryParseAuthLevel(string? value, out AuthenticationLevel level)
+    private static bool TryParseAuthLevel(string? value, out CallerVerificationLevel level)
     {
-        level = AuthenticationLevel.None;
+        level = CallerVerificationLevel.None;
         if (string.IsNullOrWhiteSpace(value))
         {
             return false;
         }
         return value.Trim().ToLowerInvariant() switch
         {
-            "none" => Set(out level, AuthenticationLevel.None),
-            "phonerecognized" or "phone" or "ani" => Set(out level, AuthenticationLevel.PhoneRecognized),
-            "accountverified" or "account" => Set(out level, AuthenticationLevel.AccountVerified),
-            "securityquestionpassed" or "security" => Set(out level, AuthenticationLevel.SecurityQuestionPassed),
-            "fullyauthenticated" or "mfa" or "full" => Set(out level, AuthenticationLevel.FullyAuthenticated),
+            "none" => Set(out level, CallerVerificationLevel.None),
+            "animatch" or "ani" or "phone" => Set(out level, CallerVerificationLevel.AniMatch),
+            "knowledgebased" or "knowledge" or "kba" or "pin" => Set(out level, CallerVerificationLevel.KnowledgeBased),
+            "multifactor" or "mfa" => Set(out level, CallerVerificationLevel.MultiFactor),
+            "voicebiometric" or "biometric" or "voice" => Set(out level, CallerVerificationLevel.VoiceBiometric),
+            "entraverifiedid" or "verifiedid" => Set(out level, CallerVerificationLevel.EntraVerifiedId),
+            "strong" => Set(out level, CallerVerificationLevel.Strong),
             _ => false,
         };
 
-        static bool Set(out AuthenticationLevel l, AuthenticationLevel v)
+        static bool Set(out CallerVerificationLevel l, CallerVerificationLevel v)
         {
             l = v;
             return true;

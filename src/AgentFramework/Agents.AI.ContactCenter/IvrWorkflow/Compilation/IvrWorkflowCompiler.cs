@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.IvrWorkflow.Definition;
 using Agents.AI.ContactCenter.IvrWorkflow.Guards;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
@@ -118,7 +119,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         IvrStageDocument stage,
         RealtimePrompt basePrompt,
         IReadOnlyList<string> baseToolNames,
-        AuthenticationLevel baseRequiredAuth,
+        CallerVerificationLevel baseRequiredAuth,
         IReadOnlyDictionary<string, CompiledIvrCapability> capabilities,
         IvrStrategyPolicy workflowPolicy,
         Dictionary<string, List<string>> intentExamples,
@@ -138,7 +139,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
 
         // Guards: stage-level requires + base required auth.
         var guards = new List<IIvrStepGuard>();
-        if (baseRequiredAuth > AuthenticationLevel.None)
+        if (baseRequiredAuth > CallerVerificationLevel.None)
         {
             guards.Add(new RequiredAuthLevelGuard(baseRequiredAuth));
         }
@@ -380,7 +381,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         return factory.Create(doc, ctx);
     }
 
-    private static AuthenticationLevel ResolveStageAuthLevel(AuthenticationLevel baseLevel, IEnumerable<IvrGuardDocument> requires)
+    private static CallerVerificationLevel ResolveStageAuthLevel(CallerVerificationLevel baseLevel, IEnumerable<IvrGuardDocument> requires)
     {
         var level = baseLevel;
         foreach (var guard in requires)
@@ -441,20 +442,22 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         return transitions.Count == 0 ? null : transitions;
     }
 
-    private static AuthenticationLevel ParseAuthLevel(string? value)
+    private static CallerVerificationLevel ParseAuthLevel(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return AuthenticationLevel.None;
+            return CallerVerificationLevel.None;
         }
         return value.Trim().ToLowerInvariant() switch
         {
-            "none" => AuthenticationLevel.None,
-            "phonerecognized" or "phone" or "ani" => AuthenticationLevel.PhoneRecognized,
-            "accountverified" or "account" => AuthenticationLevel.AccountVerified,
-            "securityquestionpassed" or "security" => AuthenticationLevel.SecurityQuestionPassed,
-            "fullyauthenticated" or "mfa" or "full" => AuthenticationLevel.FullyAuthenticated,
-            _ => AuthenticationLevel.None,
+            "none" => CallerVerificationLevel.None,
+            "animatch" or "ani" or "phone" => CallerVerificationLevel.AniMatch,
+            "knowledgebased" or "knowledge" or "kba" or "pin" => CallerVerificationLevel.KnowledgeBased,
+            "multifactor" or "mfa" => CallerVerificationLevel.MultiFactor,
+            "voicebiometric" or "biometric" or "voice" => CallerVerificationLevel.VoiceBiometric,
+            "entraverifiedid" or "verifiedid" => CallerVerificationLevel.EntraVerifiedId,
+            "strong" => CallerVerificationLevel.Strong,
+            _ => CallerVerificationLevel.None,
         };
     }
 

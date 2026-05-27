@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Media.Analysis;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -124,7 +125,7 @@ public sealed class IvrWorkflowState
     /// </summary>
     public IvrWorkflowStatus Status { get; set; } = IvrWorkflowStatus.NotStarted;
 
-    public AuthenticationLevel AuthLevel { get; set; } = AuthenticationLevel.None;
+    public CallerVerificationLevel VerificationLevel { get; set; } = CallerVerificationLevel.None;
 
 
     public bool IsComplete => Status is IvrWorkflowStatus.Completed or IvrWorkflowStatus.Failed or IvrWorkflowStatus.Cancelled;
@@ -422,19 +423,19 @@ public static class IvrWorkflowStateExtensions
     }
 
     /// <summary>
-    /// Gets the authentication level from the workflow state.
+    /// Gets the caller verification level from the workflow state.
     /// </summary>
-    public static AuthenticationLevel GetAuthLevel(this IvrWorkflowState state)
+    public static CallerVerificationLevel GetVerificationLevel(this IvrWorkflowState state)
     {
-        return state.Get<AuthenticationLevel>(AuthLevelKey);
+        return state.VerificationLevel;
     }
 
     /// <summary>
-    /// Sets the authentication level in the workflow state.
+    /// Sets the caller verification level in the workflow state.
     /// </summary>
-    public static void SetAuthLevel(this IvrWorkflowState state, AuthenticationLevel level)
+    public static void SetVerificationLevel(this IvrWorkflowState state, CallerVerificationLevel level)
     {
-        state.Set(AuthLevelKey, level);
+        state.VerificationLevel = level;
     }
 
     /// <summary>

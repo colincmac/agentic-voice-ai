@@ -30,6 +30,11 @@ public sealed class AniIdentityLookupAuthenticator : ICallerAuthenticator
 
     public async Task<AuthenticationOutcome> AuthenticateAsync(AuthenticationContext context, CancellationToken cancellationToken = default)
     {
+        if (context.CallerMetadata is null)
+        {
+            return new AuthenticationOutcome.NotApplicable("No caller-edge metadata available for ANI lookup.");
+        }
+
         var phone = NormalizePhoneNumber(context.CallerMetadata.RawIdentifier);
         if (string.IsNullOrEmpty(phone))
         {

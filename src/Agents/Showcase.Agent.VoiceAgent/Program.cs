@@ -4,7 +4,6 @@ using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.ContactCenter.Azure;
 using Agents.AI.Hosting;
-using Agents.AI.ContactCenter.Authorization.IdentityVerification;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
@@ -157,9 +156,12 @@ builder.AddCallSessionContainer()
     .AddDtmfStreamingStrategy()
     .AddCallControlTools()
     // Caller authentication: ANI lookup against the in-memory directory plus the
-    // anonymous fallback so unknown callers still walk the workflow as guests.
+    // anonymous fallback so unknown callers still walk the workflow as guests. PIN
+    // elevation routes through the orchestrator via PinAuthenticator + IPinValidator
+    // so PIN-collecting tools mutate state through the same pipeline as ANI.
     .AddCallerAuthentication()
     .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
+    .AddPinAuthenticator<InMemoryPinValidator>()
     // Where the composite (and any DTMF "press 0 for agent" tool) sends escalations.
     .AddTransferEscalationTarget(DemoWorkflowIds.DefaultEscalationNumber)
     // Composite chain: RealtimeVoice → IntentNlu → DtmfOnly. The composite registers as a
@@ -213,7 +215,6 @@ app.MapGet("/", async ([FromServices] AuthorizingRealtimeAIAgent agent, Cancella
     var session = await agent.CreateRealtimeSessionAsync(null, cancellationToken);
     return "Testing";
 });
-app.MapWellKnownDidDocument();
 //app.MapTeams();
 
 

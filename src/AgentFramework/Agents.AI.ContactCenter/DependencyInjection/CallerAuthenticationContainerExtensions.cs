@@ -1,7 +1,7 @@
-using Agents.AI.ContactCenter.Authentication.UserIdentity;
+using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.Extensions.ToolApproval;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Agents.AI.ContactCenter.Authentication;
 
 namespace Agents.AI.ContactCenter.DependencyInjection;
 
@@ -27,9 +27,15 @@ public static class CallerAuthenticationContainerExtensions
 
         services.TryAddScoped<CallerAuthenticationState>();
         services.TryAddScoped<IAuthenticationOrchestrator, AuthenticationOrchestrator>();
+        services.TryAddScoped<ICallerElevationDispatcher, CallerElevationDispatcher>();
+        services.TryAddSingleton<IChallengeStore, InMemoryChallengeStore>();
 
         // Always-present fallback so the orchestrator never enumerates an empty list.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ICallerAuthenticator, AnonymousCallerAuthenticator>());
+
+        // Per-tool gating: the ToolApproval handler that evaluates [RequiresCallerVerification(level)]
+        // attributes against the per-call CallerAuthenticationState.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IToolApprovalHandler, CallerVerificationApprovalHandler>());
 
         return builder;
     }
@@ -63,4 +69,21 @@ public static class CallerAuthenticationContainerExtensions
         return builder.AddCallerAuthenticator<AniIdentityLookupAuthenticator>();
     }
 
+    /// <summary>
+    /// Registers the <see cref="PinAuthenticator"/> together with the supplied
+    /// <typeparamref name="TPinValidator"/> and a per-call <see cref="PinAttempt"/>. Tools
+    /// (DTMF collectors, realtime function calls, etc.) set <see cref="PinAttempt.Digits"/>
+    /// and then invoke <see cref="IAuthenticationOrchestrator"/> to elevate the caller to
+    /// <see cref="CallerVerificationLevel.KnowledgeBased"/>.
+    /// </summary>
+    public static CallSessionContainerBuilder AddPinAuthenticator<TPinValidator>(
+        this CallSessionContainerBuilder builder,
+        ServiceLifetime validatorLifetime = ServiceLifetime.Singleton)
+        where TPinValidator : class, IPinValidator
+    {
+        builder.Services.TryAdd(ServiceDescriptor.Describe(typeof(IPinValidator), typeof(TPinValidator), validatorLifetime));
+        builder.Services.TryAddScoped<PinAttempt>();
+        return builder.AddCallerAuthenticator<PinAuthenticator>();
+    }
 }
+

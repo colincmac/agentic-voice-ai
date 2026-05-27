@@ -2,26 +2,28 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Agents.AI.ContactCenter.Authentication;
+
 namespace Agents.AI.ContactCenter.IvrWorkflow.Guards;
 
 /// <summary>
 /// Guard that requires the caller to have reached at least a specified
-/// <see cref="AuthenticationLevel"/>.
+/// <see cref="CallerVerificationLevel"/>.
 /// </summary>
 public sealed class RequiredAuthLevelGuard : IIvrStepGuard
 {
-    private readonly AuthenticationLevel _required;
+    private readonly CallerVerificationLevel _required;
     private readonly string _failureMessage;
 
-    public RequiredAuthLevelGuard(AuthenticationLevel required, string? failureMessage = null)
+    public RequiredAuthLevelGuard(CallerVerificationLevel required, string? failureMessage = null)
     {
         _required = required;
-        _failureMessage = failureMessage ?? $"Authentication level {required} is required.";
+        _failureMessage = failureMessage ?? $"Verification level {required} is required.";
     }
 
     public Task<IvrGuardResult> EvaluateAsync(IvrWorkflowState state, CancellationToken cancellationToken = default)
     {
-        var result = state.AuthLevel >= _required
+        var result = state.VerificationLevel >= _required
             ? IvrGuardResult.Pass()
             : IvrGuardResult.Fail(_failureMessage);
         return Task.FromResult(result);

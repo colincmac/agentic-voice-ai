@@ -406,10 +406,10 @@ public sealed class RealtimeIvrWorkflowController : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         // Check authentication level
-        if (step.RequiredAuthLevel > state.AuthLevel)
+        if (step.RequiredAuthLevel > state.VerificationLevel)
         {
             return IvrGuardResult.Fail(
-                $"Insufficient authentication level. Required: {step.RequiredAuthLevel}, Current: {state.AuthLevel}");
+                $"Insufficient verification level. Required: {step.RequiredAuthLevel}, Current: {state.VerificationLevel}");
         }
 
         // Evaluate step guards

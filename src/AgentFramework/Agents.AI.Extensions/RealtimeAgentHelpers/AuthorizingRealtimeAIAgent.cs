@@ -208,26 +208,38 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
 
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            //if (ToolRequirements is null or { Count: 0 } || GetService<IToolApprovalHandlerProvider>() is not IToolApprovalHandlerProvider toolApprovalHandlerProvider)
-            //{
-            //    return await base.InvokeCoreAsync(arguments, cancellationToken);
-            //}
+            if (ToolRequirements is { Count: > 0 })
+            {
+                var toolApprovalHandlerProvider = arguments.Services?.GetService<IToolApprovalHandlerProvider>()
+                    ?? GetService<IToolApprovalHandlerProvider>() as IToolApprovalHandlerProvider;
 
-            //var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>() ?? GetService<ClaimsPrincipal>();
-            //var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
-            //var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
+                if (toolApprovalHandlerProvider is not null)
+                {
+                    var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>()
+                        ?? GetService<ClaimsPrincipal>() as ClaimsPrincipal;
+                    var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
+                    var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
 
-            //foreach (var handler in handlers)
-            //{
-            //    await handler.HandleAsync(approvalContext).ConfigureAwait(false);
-            //}
+                    foreach (var handler in handlers)
+                    {
+                        await handler.HandleAsync(approvalContext).ConfigureAwait(false);
+                    }
 
-            //if (!approvalContext.HasSucceeded)
-            //{
-            //    var failure = new ToolApprovalFailure(InnerFunction, arguments, [.. approvalContext.PendingRequirements], [.. approvalContext.FailureResponses], approvalContext.PendingRequirements is { Count: 0 });
-            //    _logger?.LogWarning("Function '{FunctionName}' invocation denied due to failed tool approval requirements.", InnerFunction.Name);
-            //    return failure.FailureResponseMessage.Text;
-            //}
+                    if (!approvalContext.HasSucceeded)
+                    {
+                        var failure = new ToolApprovalFailure(
+                            InnerFunction,
+                            arguments,
+                            [.. approvalContext.PendingRequirements],
+                            [.. approvalContext.FailureResponses],
+                            approvalContext.PendingRequirements is { Count: 0 });
+                        _logger?.LogWarning(
+                            "Function '{FunctionName}' invocation denied due to failed tool approval requirements.",
+                            InnerFunction.Name);
+                        return failure.FailureResponseMessage.Text;
+                    }
+                }
+            }
 
             if (_next is not null)
             {
