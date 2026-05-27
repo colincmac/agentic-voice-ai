@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.ToolApproval;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -84,6 +85,25 @@ public static class CallerAuthenticationContainerExtensions
         builder.Services.TryAdd(ServiceDescriptor.Describe(typeof(IPinValidator), typeof(TPinValidator), validatorLifetime));
         builder.Services.TryAddScoped<PinAttempt>();
         return builder.AddCallerAuthenticator<PinAuthenticator>();
+    }
+
+    /// <summary>
+    /// Registers the canonical <see cref="CallerAuthenticationTools"/> as a scoped
+    /// <see cref="IAIToolCollection"/> so the realtime / chat agent picks them up automatically.
+    /// </summary>
+    /// <remarks>
+    /// Tools self-gate on what's registered: <c>validate-pin</c> only surfaces when a
+    /// <see cref="PinAttempt"/> is registered (i.e. you called <see cref="AddPinAuthenticator{T}"/>);
+    /// <c>request-sms-otp</c>/<c>submit-sms-otp</c> only surface when a <see cref="SmsOtpAttempt"/>
+    /// is registered. Call this after the authenticators you want to expose.
+    /// </remarks>
+    public static CallSessionContainerBuilder AddCallerAuthenticationTools(this CallSessionContainerBuilder builder)
+    {
+        // SmsOtpAttempt is registered here too so the OTP authenticator's scoped state
+        // is available when AddCallerAuthenticator<SmsOtpAuthenticator>() is used directly.
+        builder.Services.TryAddScoped<SmsOtpAttempt>();
+        builder.Services.AddScoped<IAIToolCollection, CallerAuthenticationTools>();
+        return builder;
     }
 }
 

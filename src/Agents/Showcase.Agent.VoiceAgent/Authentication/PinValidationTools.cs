@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,7 +20,7 @@ namespace Showcase.Agent.VoiceAgent.Authentication;
 /// mutated directly. The <see cref="RequiresCallerVerificationAttribute"/> ensures the caller
 /// has already cleared ANI lookup before a PIN attempt is even accepted.
 /// </remarks>
-public static class PinValidationTools
+public class PinValidationTools 
 {
     /// <summary>
     /// Build the validator tool the DTMF strategy invokes when the caller has finished

@@ -148,34 +148,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
         return options;
     }
 
-    //private RealtimeAgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
-    //{
-    //    var runOptions = options as RealtimeAgentRunOptions ?? new();
 
-    //    runOptions.SessionOptions ??= new LiveConversationSessionOptions();
-    //    runOptions.SessionOptions.Tools ??= [];
-
-    //    runOptions.SessionOptions.Tools = [.. ProcessTools(runOptions.SessionOptions.Tools), .. ProcessTools(_additionalTools)];
-
-
-    //    IEnumerable<AITool> ProcessTools(IEnumerable<AITool> tools)
-    //    {
-    //        foreach (var tool in tools)
-    //        {
-    //            if (tool is AIFunction funcTool)
-    //            {
-    //                var authorizedFunc = new AuthorizingAgentFunction(this, funcTool, _delegateFunc);
-    //                yield return authorizedFunc;
-    //            }
-    //            else
-    //            {
-    //                yield return tool;
-    //            }
-    //        }
-    //    }
-    //    ;
-    //    return runOptions;
-    //}
 
 
     public override object? GetService(Type serviceType, object? serviceKey = null) =>

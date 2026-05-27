@@ -56,10 +56,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Agents.AI.ContactCenter.Tests" />
+    <Compile Remove="Authentication\UserIdentity\**" />
+    <EmbeddedResource Remove="Authentication\UserIdentity\**" />
+    <None Remove="Authentication\UserIdentity\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Authentication\UserIdentity\" />
+    <InternalsVisibleTo Include="Agents.AI.ContactCenter.Tests" />
   </ItemGroup>
 </Project>

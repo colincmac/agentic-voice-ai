@@ -92,7 +92,7 @@ stages:
     description: "Balance self-service"
     requires:
       - type: auth
-        level: fullyAuthenticated
+        level: multiFactor
     realtime:
       instructions:
         - "Caller is fully verified at this point. Read account balance and offer next actions."

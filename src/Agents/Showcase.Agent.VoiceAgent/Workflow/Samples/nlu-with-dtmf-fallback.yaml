@@ -165,7 +165,7 @@ stages:
     description: "Verified self-service"
     requires:
       - type: auth
-        level: fullyAuthenticated
+        level: multiFactor
     realtime:
       instructions:
         - "Caller is verified — answer their original request using account tools."
