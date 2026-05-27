@@ -137,6 +137,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         try
         {
             await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
         }
         catch (Exception ex)
         {
@@ -188,10 +189,12 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             }
         }
 
-        await _backend.UpdateToolsAsync(tools, cancellationToken).ConfigureAwait(false);
+        //await _backend.UpdateToolsAsync(tools, cancellationToken).ConfigureAwait(false);
 
         var prompt = _navigator.BuildCurrentStepPrompt(_conversationContext);
-        await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+
+        //await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+        await _backend.StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
 
         await _events.Writer.WriteAsync(
             new StrategyEvent.WorkflowStepEntered(step.Id, DateTimeOffset.UtcNow),

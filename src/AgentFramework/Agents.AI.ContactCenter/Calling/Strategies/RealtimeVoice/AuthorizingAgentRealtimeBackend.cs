@@ -94,6 +94,26 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
         await _agent.SendAsync(session, userMessage, cancellationToken).ConfigureAwait(false);
     }
 
+    public async ValueTask StartResponseAsync(IEnumerable<AITool>? tools = null, string? instruction = null, CancellationToken cancellationToken = default)
+    {
+        var session = EnsureSession();
+        if(tools is not null || !string.IsNullOrEmpty(instruction))
+        {
+            var clientSession = session.ClientSession
+                ?? throw new InvalidOperationException(
+                    $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
+
+            var updated = CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools ?? []], instruction);
+            await _agent.SendAsync(
+                session,
+                new SessionUpdateRealtimeClientMessage(updated),
+                cancellationToken).ConfigureAwait(false);
+        }
+        await _agent.SendAsync(session, new CreateResponseRealtimeClientMessage(), cancellationToken).ConfigureAwait(false);
+
+    }
+
+
     /// <inheritdoc />
     /// <remarks>
     /// Sends a <see cref="SessionUpdateRealtimeClientMessage"/> with the new tool list, cloning every other
@@ -116,27 +136,28 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
             ?? throw new InvalidOperationException(
                 $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
 
-        var updated = CloneOptionsWithTools(clientSession.Options, [.. tools]);
-        await clientSession.SendAsync(
-            new SessionUpdateRealtimeClientMessage(updated),
+        var updated = CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools]);
+        //await clientSession.SendAsync(
+        //    new SessionUpdateRealtimeClientMessage(updated),
+        //    cancellationToken).ConfigureAwait(false);
+        await _agent.SendAsync(session, new SessionUpdateRealtimeClientMessage(updated),
             cancellationToken).ConfigureAwait(false);
-
         _logger.LogDebug("Realtime backend tools updated for agent {AgentId} (tool count {Count})",
             AgentId, updated.Tools?.Count ?? 0);
     }
 
-    private static RealtimeSessionOptions CloneOptionsWithTools(RealtimeSessionOptions? source, IReadOnlyList<AITool> tools)
+    private static RealtimeSessionOptions CloneOptionsWithToolsAndPrompt(RealtimeSessionOptions? source, IReadOnlyList<AITool> tools, string? promptOverride = null)
     {
         if (source is null)
         {
-            return new RealtimeSessionOptions { Tools = tools };
+            return new RealtimeSessionOptions { Tools = tools, Instructions = promptOverride };
         }
 
         return new RealtimeSessionOptions
         {
             Tools = tools,
             InputAudioFormat = source.InputAudioFormat,
-            Instructions = source.Instructions,
+            Instructions = promptOverride ?? source.Instructions,
             MaxOutputTokens = source.MaxOutputTokens,
             Model = source.Model,
             OutputAudioFormat = source.OutputAudioFormat,

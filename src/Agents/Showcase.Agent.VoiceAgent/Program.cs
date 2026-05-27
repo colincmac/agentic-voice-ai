@@ -1,12 +1,16 @@
+using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.ContactCenter.Azure;
+using Agents.AI.ContactCenter.Calling;
+using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.DependencyInjection;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.ContactCenter.Azure;
 using Agents.AI.Hosting;
-using Agents.AI.ContactCenter.Calling;
-using Agents.AI.ContactCenter.Authentication;
-using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.Realtime;
+using Azure.AI.VoiceLive;
 using Azure.Identity;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
@@ -16,14 +20,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Azure;
 using OpenTelemetry.Resources;
+using Pipelines.Sockets.Unofficial.Arenas;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Authentication;
 using Showcase.Agent.VoiceAgent.Configuration;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
-using Agents.AI.ContactCenter.DependencyInjection;
-using Agents.AI.ContactCenter.Coordination;
 
 var builder = WebApplication.CreateBuilder(args);
 //builder.Services.AddGrpc();
@@ -119,20 +122,39 @@ builder.Services.AddIvrWorkflowFramework(b => b
         DemoWorkflowIds.DefaultEscalationNumber)));
 
 // AI Agents
+var triageSection = builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}");
 
 // The realtime agent that the new realtime backend wraps. Reads its config from
 // Agents:TriageAgent and uses the "voicelive" conversation client registered above.
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
-    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
-    liveConversationClientKey: "voicelive");
+    configurationSection: triageSection,
+    liveConversationClientKey: "voicelive",
+    configureOptions: agentOptions =>
+    {
+        agentOptions.SessionOptions = agentOptions.SessionOptions.With(
+            rawRepresentationFactory: () => new VoiceLiveSessionOptions
+            {
+                TurnDetection = new AzureSemanticVadTurnDetection
+                {
+                    Threshold = 0.3f,
+                    PrefixPadding = TimeSpan.FromMilliseconds(100),
+                    SilenceDuration = TimeSpan.FromMilliseconds(200),
+                    RemoveFillerWords = true,
+                },
+                Voice = new AzureStandardVoice("en-US-Ava:DragonHDLatestNeural") { Temperature = 0.3f },
+                InputAudioNoiseReduction = new AudioNoiseReduction(AudioNoiseReductionType.NearField),
+                InputAudioEchoCancellation = new AudioEchoCancellation(),
+                Temperature = 0.8f,
+            });
+    });
 
 // Workflow definitions are now loaded from the YAML samples under
 // Workflow\Samples\ via IIvrWorkflowLoader (registered by AddIvrWorkflowFramework
 // above). The default registration is the authenticated DTMF flow; the keyed
 // registrations let the CallingApi pick a tier-specific workflow via ?tier=.
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
-    DemoWorkflowLoader.Load(sp, DemoWorkflowIds.NluWithDtmfFallback));
+    DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedRealtime));
 
 builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
     nameof(AgentTier.DtmfOnly),

@@ -72,6 +72,8 @@ public interface IRealtimeVoiceBackend : IAsyncDisposable
     /// rather than throwing inside the enumeration so the strategy can degrade gracefully.
     /// </summary>
     IAsyncEnumerable<RealtimeBackendUpdate> RunAsync(CancellationToken cancellationToken = default);
+
+    ValueTask StartResponseAsync(IEnumerable<AITool>? tools = null, string? instruction = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

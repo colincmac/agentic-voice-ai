@@ -48,25 +48,26 @@ public sealed class AzureVoiceLiveClient : IRealtimeClient
     /// <inheritdoc />
     public async Task<IRealtimeClientSession> CreateSessionAsync(RealtimeSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        //var sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, cancellationToken);
-        var sessionClient = await _realtimeClient.StartSessionAsync("gpt-realtime", cancellationToken);
-
-        var session = new AzureVoiceLiveClientSession(sessionClient, _sessionTarget);
-
-        try
+        // Voice Live applies the supplied VoiceLiveSessionOptions during the connection
+        // handshake, so pass the caller's options through StartSessionAsync rather than
+        // sending a follow-up session.update. This is also the only opportunity to set
+        // the session model — the API rejects model changes via session.update once the
+        // session has been initialized.
+        VoiceLiveSession sessionClient;
+        if (options is not null)
         {
-            if (options is not null)
-            {
-                await session.SendAsync(new SessionUpdateRealtimeClientMessage(options), cancellationToken).ConfigureAwait(false);
-            }
-
-            return session;
+            var initialSessionOptions = AzureVoiceLiveClientSession.BuildInitialSessionOptions(options, _sessionTarget);
+            sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, initialSessionOptions, cancellationToken).ConfigureAwait(false);
         }
-        catch
+        else
         {
-            await session.DisposeAsync().ConfigureAwait(false);
-            throw;
+            sessionClient = await _realtimeClient.StartSessionAsync(_sessionTarget, cancellationToken).ConfigureAwait(false);
         }
+
+        // Seed the session's Options with whatever the caller supplied. The first
+        // session.created / session.updated server event will reconcile it with the
+        // authoritative server-side state via AzureVoiceLiveClientSession.HandleSessionEvent.
+        return new AzureVoiceLiveClientSession(sessionClient, _sessionTarget, options);
     }
 
     /// <inheritdoc />
