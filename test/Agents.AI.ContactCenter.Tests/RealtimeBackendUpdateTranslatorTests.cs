@@ -94,6 +94,19 @@ public class RealtimeBackendUpdateTranslatorTests
         Assert.True(transcript.IsFinal);
     }
 
+
+    [Fact]
+    public void RealtimeVadContent_is_dropped()
+    {
+        var update = new AgentResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents = [new RealtimeVadContent(VadEventType.InputSpeechStarted)]
+        };
+        var result = RealtimeBackendUpdateTranslator.Translate(update).ToList();
+        Assert.IsType<RealtimeBackendUpdate.UserSpeechStarted>(Assert.Single(result));
+    }
+
     [Fact]
     public void Whitespace_text_is_dropped()
     {
@@ -106,17 +119,6 @@ public class RealtimeBackendUpdateTranslatorTests
         Assert.Empty(RealtimeBackendUpdateTranslator.Translate(update));
     }
 
-    [Fact]
-    public void RealtimeVadContent_is_dropped()
-    {
-        var update = new AgentResponseUpdate
-        {
-            Role = ChatRole.Assistant,
-            Contents = [new RealtimeVadContent(VadEventType.InputSpeechStarted)]
-        };
-
-        Assert.Empty(RealtimeBackendUpdateTranslator.Translate(update));
-    }
 
     [Fact]
     public void Mixed_contents_translate_in_order()

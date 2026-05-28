@@ -374,7 +374,24 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
         if (!step.Terminal)
         {
-            var advance = IvrAdvanceTool.TryCreate(step);
+            // Build an invoker scoped to the current primary so the advance tool re-arms
+            // the same backend it was pushed onto. The invoker runs under the realtime
+            // client's UseFunctionInvocation() pipeline and returns AdvanceToolResult to
+            // the model, replacing the old out-of-band FunctionCalled handler.
+            var invoker = new IvrAdvanceToolInvoker(
+                _navigator,
+                async (nextStep, innerCt) =>
+                {
+                    await ApplyStageOnAsync(primary, nextStep, innerCt).ConfigureAwait(false);
+                    if (nextStep.Terminal)
+                    {
+                        _navigator.Complete();
+                        await _cts.CancelAsync().ConfigureAwait(false);
+                    }
+                },
+                _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
+
+            var advance = IvrAdvanceTool.TryCreate(step, invoker);
             if (advance is not null)
             {
                 tools.Add(advance);
@@ -390,63 +407,20 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Dispatch a function call from <paramref name="primary"/>'s backend. Today only the
-    /// synthesized advance tool is handled here; other calls are surfaced as
-    /// <see cref="StrategyEvent.FunctionCalled"/> and left to the backend's own pipeline.
+    /// Surface backend tool invocations to observers. The IVR <c>advance</c> tool runs
+    /// inline via <see cref="IvrAdvanceToolInvoker"/> under the realtime client's
+    /// function-invocation pipeline, so this method no longer mutates the navigator.
     /// </summary>
-    private async Task HandleFunctionCallAsync(IConversationalAgent primary, RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
+    private Task HandleFunctionCallAsync(IConversationalAgent primary, RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
     {
-        if (!string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
+        if (string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
         {
-            return;
-        }
-        if (_navigator?.CurrentStep is not { } currentStep)
-        {
-            return;
+            _logger.LogDebug(
+                "Advance tool fired on ensemble primary {AgentId}; transition handled inline by IvrAdvanceToolInvoker.",
+                primary.AgentId);
         }
 
-        var chosen = ExtractAdvanceChoice(call.Arguments);
-        if (chosen is null)
-        {
-            _logger.LogWarning("Advance tool fired on ensemble stage {StepId} without an argument", currentStep.Id);
-            return;
-        }
-
-        var resolution = IvrAdvanceTool.Resolve(currentStep, chosen);
-        if (!resolution.IsTransition || resolution.TargetStageId is not { Length: > 0 } target)
-        {
-            return;
-        }
-
-        var result = _navigator.TransitionTo(target);
-        if (!result.Succeeded || result.NewStep is null)
-        {
-            _logger.LogWarning(
-                "Ensemble advance to '{Target}' from '{Current}' rejected: {Reason}",
-                target, currentStep.Id, result.Reason);
-            return;
-        }
-
-        await ApplyStageOnAsync(primary, result.NewStep, ct).ConfigureAwait(false);
-
-        if (result.NewStep.Terminal)
-        {
-            _navigator.Complete();
-            await _cts.CancelAsync().ConfigureAwait(false);
-        }
-    }
-
-    private static string? ExtractAdvanceChoice(IReadOnlyDictionary<string, object?> arguments)
-    {
-        if (arguments.TryGetValue(IvrAdvanceTool.NextStageArgumentName, out var value) && value is not null)
-        {
-            return value.ToString();
-        }
-        if (arguments.Count == 1)
-        {
-            return arguments.Values.First()?.ToString();
-        }
-        return null;
+        return Task.CompletedTask;
     }
 
     /// <summary>

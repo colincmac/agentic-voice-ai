@@ -137,9 +137,7 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
                 $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
 
         var updated = CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools]);
-        //await clientSession.SendAsync(
-        //    new SessionUpdateRealtimeClientMessage(updated),
-        //    cancellationToken).ConfigureAwait(false);
+
         await _agent.SendAsync(session, new SessionUpdateRealtimeClientMessage(updated),
             cancellationToken).ConfigureAwait(false);
         _logger.LogDebug("Realtime backend tools updated for agent {AgentId} (tool count {Count})",

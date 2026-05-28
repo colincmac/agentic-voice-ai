@@ -1,6 +1,7 @@
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.ContactCenter.Tests.IvrWorkflow.Registry;
 
@@ -14,7 +15,7 @@ public class IvrAdvanceToolTests
             transitions: [],
             intents: []);
 
-        Assert.Null(IvrAdvanceTool.TryCreate(step));
+        Assert.Null(IvrAdvanceTool.TryCreate(step, BuildInvoker(step)));
     }
 
     [Fact]
@@ -25,11 +26,27 @@ public class IvrAdvanceToolTests
             transitions: ["verify", "transfer"],
             intents: []);
 
-        var tool = IvrAdvanceTool.TryCreate(step);
+        var tool = IvrAdvanceTool.TryCreate(step, BuildInvoker(step));
         Assert.NotNull(tool);
         Assert.Equal(IvrAdvanceTool.AdvanceToolName, tool!.Name);
         Assert.Contains("verify", tool.Description);
         Assert.Contains("transfer", tool.Description);
+    }
+
+    private static IvrAdvanceToolInvoker BuildInvoker(RealtimeIvrWorkflowStep step)
+    {
+        var workflow = new RealtimeIvrWorkflowDefinition
+        {
+            Name = "advance-tool-test",
+            BasePrompt = new RealtimePrompt(),
+            Steps = [step]
+        };
+        var sp = new ServiceCollection().BuildServiceProvider();
+        var navigator = new IvrWorkflowNavigator(
+            workflow,
+            new IvrWorkflowState { Status = IvrWorkflowStatus.Running },
+            sp);
+        return new IvrAdvanceToolInvoker(navigator, (_, _) => Task.CompletedTask);
     }
 
     [Fact]

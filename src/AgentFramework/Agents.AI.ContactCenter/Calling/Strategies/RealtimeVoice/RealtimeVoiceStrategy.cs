@@ -39,6 +39,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     private readonly CancellationTokenSource _cts = new();
     private IIvrWorkflowNavigator? _navigator;
+    private IvrAdvanceToolInvoker? _advanceInvoker;
     private Task? _agentLoop;
     private Task? _audioPump;
     private Task? _dtmfPump;
@@ -133,6 +134,22 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             services,
             _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
 
+        // The invoker reads CurrentStep lazily on each invocation so it can be created
+        // once per call and shared across stage transitions. The apply-stage callback
+        // serializes against the DTMF pump via _navigatorLock and ends the session when
+        // the model advances into a terminal stage (parity with the DTMF dispatch path).
+        _advanceInvoker = new IvrAdvanceToolInvoker(
+            _navigator,
+            async (step, ct) =>
+            {
+                await ApplyStageAsyncLocked(step, ct).ConfigureAwait(false);
+                if (step.Terminal)
+                {
+                    await EndSessionAsync($"terminal stage '{step.Id}' reached", ct).ConfigureAwait(false);
+                }
+            },
+            _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
+
         using var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId);
         try
         {
@@ -199,18 +216,16 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         if (!step.Terminal)
         {
-            var advance = IvrAdvanceTool.TryCreate(step);
+            var advance = IvrAdvanceTool.TryCreate(step, _advanceInvoker!);
             if (advance is not null)
             {
                 tools.Add(advance);
             }
         }
 
-        //await _backend.UpdateToolsAsync(tools, cancellationToken).ConfigureAwait(false);
 
         var prompt = _navigator.BuildCurrentStepPrompt(_conversationContext);
 
-        //await _backend.UpdateSystemPromptAsync(prompt, cancellationToken).ConfigureAwait(false);
         await _backend.StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
 
         await _events.Writer.WriteAsync(
@@ -313,6 +328,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
     #endregion
 
+    #region DTMF Handling
     private async Task HandleDtmfToneAsync(DtmfTone tone, CancellationToken ct)
     {
         var step = _navigator?.CurrentStep;
@@ -553,7 +569,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                 break;
         }
     }
-
+    #endregion
 
 
     private async Task RunAgentLoopAsync(CancellationToken ct)
@@ -622,76 +638,23 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Dispatch a tool invocation that came back from the realtime backend. Today the
-    /// only orchestration tool we own is <see cref="IvrAdvanceTool"/>; other tool calls
-    /// are surfaced as <see cref="StrategyEvent.FunctionCalled"/> and otherwise left to
-    /// the backend's own function-invocation pipeline (the model will receive a
-    /// <c>FunctionResultContent</c> by the time it observes them here).
+    /// Surface backend tool invocations to observers. The IVR <c>advance</c> tool runs
+    /// inline under <c>UseFunctionInvocation()</c> via <see cref="IvrAdvanceToolInvoker"/>,
+    /// which performs the navigator transition and re-arms the realtime backend itself —
+    /// so this method no longer mutates the workflow state machine. Other tool calls are
+    /// owned by the backend's function-invocation pipeline; the strategy only emits a
+    /// <see cref="StrategyEvent.FunctionCalled"/> event for tracing.
     /// </summary>
-    private async Task HandleFunctionCallAsync(RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
+    private Task HandleFunctionCallAsync(RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
     {
-        if (!string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
+        if (string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
         {
-            return;
+            _logger.LogDebug(
+                "Advance tool fired on call {CallId}; transition handled inline by IvrAdvanceToolInvoker.",
+                _callId);
         }
 
-        if (_navigator?.CurrentStep is not { } currentStep)
-        {
-            _logger.LogWarning("Advance tool fired but no current step is set on call {CallId}", _callId);
-            return;
-        }
-
-        var chosen = ExtractAdvanceChoice(call.Arguments);
-        if (chosen is null)
-        {
-            _logger.LogWarning(
-                "Advance tool fired on step {StepId} without a '{Arg}' argument; arguments: {Args}",
-                currentStep.Id, IvrAdvanceTool.NextStageArgumentName, string.Join(",", call.Arguments.Keys));
-            return;
-        }
-
-        var resolution = IvrAdvanceTool.Resolve(currentStep, chosen);
-        if (!resolution.IsTransition || resolution.TargetStageId is not { Length: > 0 } target)
-        {
-            _logger.LogInformation(
-                "Advance choice '{Chosen}' on step {StepId} resolved to {Kind}; not transitioning",
-                chosen, currentStep.Id, resolution.Kind);
-            return;
-        }
-
-        var result = _navigator.TransitionTo(target);
-        if (!result.Succeeded || result.NewStep is null)
-        {
-            _logger.LogWarning(
-                "Realtime advance to '{Target}' from '{Current}' rejected: {Reason}",
-                target, currentStep.Id, result.Reason);
-            return;
-        }
-
-        await ApplyStageAsyncLocked(result.NewStep, ct).ConfigureAwait(false);
-
-        if (result.NewStep.Terminal)
-        {
-            await EndSessionAsync($"terminal stage '{result.NewStep.Id}' reached", ct).ConfigureAwait(false);
-        }
-    }
-
-    private static string? ExtractAdvanceChoice(IReadOnlyDictionary<string, object?> arguments)
-    {
-        if (arguments.TryGetValue(IvrAdvanceTool.NextStageArgumentName, out var value) && value is not null)
-        {
-            return value.ToString();
-        }
-
-        // Defensive: some providers serialize arguments with quoting nuances; if the
-        // dictionary holds exactly one argument fall back to that single value.
-        if (arguments.Count == 1)
-        {
-            var single = arguments.Values.First();
-            return single?.ToString();
-        }
-
-        return null;
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -32,16 +32,19 @@ public static class IvrAdvanceTool
     /// need an advance tool because the runtime drives termination directly).
     /// </summary>
     /// <remarks>
-    /// The returned <see cref="AIFunction"/> echoes the chosen value back as its result so
-    /// the realtime model receives a deterministic acknowledgement; the actual transition
-    /// is performed by the strategy when it observes the corresponding
-    /// <see cref="Calling.RealtimeBackendUpdate.FunctionCalled"/> update. This split keeps
-    /// the tool free of strategy / navigator references so it can be safely serialized
-    /// across the realtime session boundary.
+    /// The returned <see cref="AIFunction"/> delegates to
+    /// <paramref name="invoker"/>.<see cref="IvrAdvanceToolInvoker.InvokeAsync(string, CancellationToken)"/>,
+    /// which runs the resolve → guard-aware transition → backend re-arm sequence inline
+    /// and returns a structured <see cref="AdvanceToolResult"/>. Because the function
+    /// body executes under the realtime client's <c>UseFunctionInvocation()</c> pipeline,
+    /// the model receives the structured result as a tool response and can self-correct
+    /// on validation failures (unknown choice, rejected transition, …) instead of
+    /// speaking as if the workflow advanced.
     /// </remarks>
-    public static AIFunction? TryCreate(RealtimeIvrWorkflowStep step)
+    public static AIFunction? TryCreate(RealtimeIvrWorkflowStep step, IvrAdvanceToolInvoker invoker)
     {
         ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(invoker);
 
         var targets = CollectAdvanceTargets(step);
         if (targets.Count == 0)
@@ -52,11 +55,15 @@ public static class IvrAdvanceTool
         var allowed = string.Join(", ", targets);
         var description =
             $"Advance the IVR workflow to the next stage. Set '{NextStageArgumentName}' to one of: {allowed}. " +
-            "Call this immediately once the caller's intent for the current stage is clear; do not call it before that.";
+            "Call this immediately once the caller's intent for the current stage is clear; do not call it before that. " +
+            "The tool returns a structured result with a 'status' field ('advanced', 'advanced_terminal', " +
+            "'unknown_choice', 'intent_without_transition', 'transition_rejected', 'no_current_step') and a " +
+            "human-readable 'message'. If status is not 'advanced' or 'advanced_terminal', do not assume the " +
+            "workflow moved on — read the message and react accordingly.";
 
         return AIFunctionFactory.Create(
-            ([Description("The next stage or intent name to transition to. Must be one of the allowed values listed in the tool description.")] string next_stage) =>
-                $"advance: {next_stage}",
+            ([Description("The next stage or intent name to transition to. Must be one of the allowed values listed in the tool description.")] string next_stage,
+             CancellationToken cancellationToken) => invoker.InvokeAsync(next_stage, cancellationToken),
             name: AdvanceToolName,
             description: description);
     }

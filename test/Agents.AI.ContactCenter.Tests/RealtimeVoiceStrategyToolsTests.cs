@@ -144,7 +144,7 @@ public class RealtimeVoiceStrategyToolsTests
     }
 
     [Fact]
-    public async Task FunctionCalled_advance_transitions_navigator_and_refreshes_stage()
+    public async Task Advance_tool_invocation_transitions_navigator_and_refreshes_stage()
     {
         var initialTool = AIFunctionFactory.Create((Func<object?>)(() => null), "menu_tool");
         var confirmTool = AIFunctionFactory.Create((Func<object?>)(() => null), "confirm_tool");
@@ -194,22 +194,27 @@ public class RealtimeVoiceStrategyToolsTests
         // assertions below observe only the transition-driven events.
         await DrainEventsAsync(strategy, expected: 2);
 
-        // Simulate the realtime model invoking the advance tool with the next stage id.
-        await backend.EmitAsync(new RealtimeBackendUpdate.FunctionCalled(
-            Name: IvrAdvanceTool.AdvanceToolName,
-            Arguments: new Dictionary<string, object?> { ["next_stage"] = "confirm" },
-            CallId: "call-1",
-            At: DateTimeOffset.UtcNow));
+        // The advance tool now runs inline under UseFunctionInvocation() — invoke it directly
+        // on the pushed tool surface to exercise the IvrAdvanceToolInvoker path.
+        var pushed = backend.ToolUpdates[0];
+        var advance = Assert.IsAssignableFrom<AIFunction>(
+            pushed.Single(t => t.Name == IvrAdvanceTool.AdvanceToolName));
 
-        // Wait for the strategy to: emit FunctionCalled, perform the transition (which pushes
-        // a new tools and prompt update), and emit WorkflowStepEntered + AgentSpeakingChanged.
-        var events = await DrainEventsAsync(strategy, expected: 3, timeoutMs: 2000);
+        var raw = await advance.InvokeAsync(
+            new AIFunctionArguments { ["next_stage"] = "confirm" },
+            TestContext.Current.CancellationToken);
 
-        Assert.Contains(events, e => e is StrategyEvent.FunctionCalled fc && fc.Name == "advance");
+        // AIFunctionFactory serializes the returned AdvanceToolResult through JSON so the
+        // realtime model gets a structured payload it can read. Inspect the JsonElement.
+        var json = Assert.IsType<System.Text.Json.JsonElement>(raw);
+        Assert.Equal(AdvanceToolResult.StatusAdvancedTerminal, json.GetProperty("status").GetString());
+        Assert.Equal("confirm", json.GetProperty("to").GetString());
+        Assert.True(json.GetProperty("terminal").GetBoolean());
+
+        // Wait for the apply-stage callback to push the new tools / emit transition events.
+        var events = await DrainEventsAsync(strategy, expected: 2, timeoutMs: 2000);
         Assert.Contains(events, e => e is StrategyEvent.WorkflowStepEntered w && w.StepId == "confirm");
 
-        // Navigator should now be on "confirm" and the backend should have received a second
-        // tools update (no advance tool this time because confirm is terminal).
         Assert.Equal("confirm", strategy.WorkflowState.CurrentStepName);
         Assert.True(backend.ToolUpdates.Count >= 2, $"expected >= 2 tool updates, got {backend.ToolUpdates.Count}");
         var lastTools = backend.ToolUpdates[^1];
