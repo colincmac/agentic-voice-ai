@@ -71,6 +71,13 @@ public static class RealtimeBackendUpdateTranslator
                         At: at);
                     break;
 
+                case FunctionResultContent frc:
+                    yield return new RealtimeBackendUpdate.FunctionResult(
+                        CallId: frc.CallId,
+                        Result: frc.Result,
+                        At: at);
+                    break;
+
                 case RealtimeVadContent:
                     // TODO: Update to emit VAD events. They drive scenarios like presence detection.
                     // No current strategy consumes them through the backend update stream.

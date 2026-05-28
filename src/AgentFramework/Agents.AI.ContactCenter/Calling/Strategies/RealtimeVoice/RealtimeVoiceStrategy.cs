@@ -168,6 +168,23 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         var step = _navigator.EnterInitialStep();
         await ApplyStageAsyncLocked(step, cancellationToken).ConfigureAwait(false);
     }
+    /// <summary>
+    /// Serialized wrapper around <see cref="ApplyStageAsync"/> so the two concurrent
+    /// producers (advance-tool function calls and the inbound DTMF pump) never race
+    /// on the navigator + backend prompt/tool update sequence.
+    /// </summary>
+    private async Task ApplyStageAsyncLocked(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        await _navigatorLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ApplyStageAsync(step, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _navigatorLock.Release();
+        }
+    }
 
     /// <summary>
     /// Push the current step's prompt and guard-wrapped tool surface (including the
@@ -535,23 +552,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         }
     }
 
-    /// <summary>
-    /// Serialized wrapper around <see cref="ApplyStageAsync"/> so the two concurrent
-    /// producers (advance-tool function calls and the inbound DTMF pump) never race
-    /// on the navigator + backend prompt/tool update sequence.
-    /// </summary>
-    private async Task ApplyStageAsyncLocked(RealtimeIvrWorkflowStep step, CancellationToken ct)
-    {
-        await _navigatorLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await ApplyStageAsync(step, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _navigatorLock.Release();
-        }
-    }
+
 
     private async Task RunAgentLoopAsync(CancellationToken ct)
     {

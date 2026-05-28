@@ -385,3 +385,79 @@ mockSynthesizer
 - [AzureSpeechSynthesizer.cs](./AzureSpeechSynthesizer.cs)
 - [AzureSpeechServiceExample.cs](../Samples/AzureSpeechServiceExample.cs)
 - [Azure Speech SDK Documentation](https://learn.microsoft.com/azure/cognitive-services/speech-service/)
+
+## Resiliency & Multi-Region Failover
+
+`AddAzureSpeech(...)` always registers the resilient decorators
+(`ResilientSpeechRecognizer` and `ResilientSpeechSynthesizer`) for the public
+`ISpeechRecognizer` / `ISpeechSynthesizer` interfaces. Each underlying
+`AzureSpeechService` instance is constructed per configured endpoint and wrapped
+with a Polly v8 pipeline of **Timeout → Retry → Circuit Breaker** per
+`(endpoint, operation)`, plus an explicit fallback loop across endpoints.
+
+### Configuration
+
+Supply an ordered list of endpoints (each can have its own credential) and tune
+the resilience parameters under `AzureSpeech:Resilience`. The legacy single
+`Endpoint` property is still honored and is promoted into a single-entry
+`Endpoints` list at validation time.
+
+```json
+{
+  "AzureSpeech": {
+    "Endpoints": [
+      { "Name": "eastus", "Endpoint": "https://eastus.cognitiveservices.azure.com", "Region": "eastus" },
+      { "Name": "westus2", "Endpoint": "https://westus2.cognitiveservices.azure.com", "Region": "westus2" }
+    ],
+    "RecognitionLocale": "en-US",
+    "SynthesisVoiceName": "en-US-Ava:DragonHDLatestNeural",
+    "Resilience": {
+      "AttemptTimeout": "00:00:08",
+      "MaxRetryAttempts": 2,
+      "BaseRetryDelay": "00:00:00.250",
+      "MaxRetryDelay": "00:00:05",
+      "BreakerFailureRatio": 0.5,
+      "BreakerSamplingDuration": "00:00:30",
+      "BreakerMinimumThroughput": 5,
+      "BreakerDuration": "00:00:30",
+      "EnableFallback": true
+    }
+  }
+}
+```
+
+With a single endpoint configured the decorators still apply
+**Timeout/Retry/Circuit Breaker**; fallback is a no-op until a second endpoint is added.
+
+### Streaming-vs-retry boundary for synthesis
+
+`ISpeechSynthesizer.SynthesizeAsync` returns `IAsyncEnumerable<ReadOnlyMemory<byte>>`,
+so resilience can only be applied to the **start phase** (acquire enumerator +
+advance to the first audio chunk). Retry and endpoint fallback happen
+transparently before any byte is yielded to the caller. Once the first chunk
+crosses the API boundary, subsequent errors propagate to the caller unmodified
+- transports must not be asked to re-play audio mid-utterance.
+
+### No-replay recognition restarts
+
+`ResilientSpeechRecognizer` owns one logical session that is composed from one
+or more inner recognizer sessions over time. On a transient failure, the
+decorator will restart on the next endpoint **only if no final transcript
+segment (`TranscriptSegment.IsFinal == true`) has been emitted to the caller
+yet**; after that boundary, any failure is surfaced as-is on the transcript
+stream. Audio frames that arrive while the inner recognizer is being recycled
+are dropped (no PCM replay) and counted in the
+`speech.resilience.audio_frames_dropped_total` metric so the operational
+impact remains observable.
+
+### Observability
+
+- **ActivitySource**: `Agents.AI.ContactCenter.Speech.Resilience` (per-attempt
+  spans with `speech.endpoint.name`, `speech.attempt`, `outcome`, and `error.code` tags)
+- **Meter**: `Agents.AI.ContactCenter.Speech`
+  - `speech.resilience.retries_total`
+  - `speech.resilience.fallbacks_total`
+  - `speech.resilience.circuit_breaker_transitions_total`
+  - `speech.resilience.audio_frames_dropped_total`
+  - `speech.resilience.attempt.duration` (histogram, ms)
+

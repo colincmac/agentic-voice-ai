@@ -25,6 +25,7 @@ namespace Agents.AI.ContactCenter.Azure;
 public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
 {
     private readonly AzureSpeechServiceOptions _options;
+    private readonly AzureSpeechEndpointOptions _endpoint;
     private readonly ILogger<AzureSpeechService> _logger;
     private readonly SpeechConfig _speechConfig;
 
@@ -39,29 +40,72 @@ public sealed class AzureSpeechService : ISpeechRecognizer, ISpeechSynthesizer
     public AzureSpeechService(
         IOptions<AzureSpeechServiceOptions> options,
         ILogger<AzureSpeechService>? logger = null)
-        : this(options.Value, logger)
+        : this(options.Value, endpoint: null, logger)
     {
     }
 
     public AzureSpeechService(
         AzureSpeechServiceOptions options,
         ILogger<AzureSpeechService>? logger = null)
+        : this(options, endpoint: null, logger)
+    {
+    }
+
+    /// <summary>
+    /// Creates an <see cref="AzureSpeechService"/> bound to a single endpoint
+    /// from the configured <see cref="AzureSpeechServiceOptions.Endpoints"/> list.
+    /// </summary>
+    /// <remarks>
+    /// When <paramref name="endpoint"/> is <c>null</c> the service falls back to
+    /// the legacy single-endpoint shim (<see cref="AzureSpeechServiceOptions.Endpoint"/>
+    /// + <see cref="AzureSpeechServiceOptions.Credential"/>) so existing callers
+    /// continue to work unchanged.
+    /// </remarks>
+    public AzureSpeechService(
+        AzureSpeechServiceOptions options,
+        AzureSpeechEndpointOptions? endpoint,
+        ILogger<AzureSpeechService>? logger = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? NullLogger<AzureSpeechService>.Instance;
 
+        _endpoint = endpoint ?? ResolveLegacyEndpoint(options);
+
         // Create shared SpeechConfig
-        _speechConfig = SpeechConfig.FromEndpoint(options.Endpoint, credential: options.Credential);
+        _speechConfig = SpeechConfig.FromEndpoint(_endpoint.Endpoint, credential: _endpoint.Credential);
         _speechConfig.SpeechRecognitionLanguage = options.RecognitionLocale;
 
         _speechConfig.SetSpeechSynthesisOutputFormat(options.OutputFormat);
         _speechConfig.SpeechSynthesisVoiceName = options.SynthesisVoiceName;
         _speechConfig.SpeechSynthesisLanguage = options.SynthesisLocale;
         _logger.LogInformation(
-            "Azure Speech Service initialized: Endpoint={Endpoint} RecognitionLocale={RecognitionLocale} SynthesisVoice={SynthesisVoice}",
-            options.Endpoint,
+            "Azure Speech Service initialized: Endpoint={Endpoint} Name={EndpointName} Region={Region} RecognitionLocale={RecognitionLocale} SynthesisVoice={SynthesisVoice}",
+            _endpoint.Endpoint,
+            _endpoint.Name,
+            _endpoint.Region,
             options.RecognitionLocale,
             options.SynthesisVoiceName);
+    }
+
+    private static AzureSpeechEndpointOptions ResolveLegacyEndpoint(AzureSpeechServiceOptions options)
+    {
+        if (options.Endpoints.Count > 0)
+        {
+            return options.Endpoints[0];
+        }
+
+        if (options.Endpoint is null)
+        {
+            throw new InvalidOperationException(
+                "AzureSpeechServiceOptions requires either 'Endpoint' or 'Endpoints' to be configured.");
+        }
+
+        return new AzureSpeechEndpointOptions
+        {
+            Name = "primary",
+            Endpoint = options.Endpoint,
+            Credential = options.Credential,
+        };
     }
 
     /// <summary>

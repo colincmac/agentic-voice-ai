@@ -100,5 +100,10 @@ public abstract record RealtimeBackendUpdate(DateTimeOffset At)
         string? CallId,
         DateTimeOffset At) : RealtimeBackendUpdate(At);
 
+    public sealed record FunctionResult(
+        string CallId,
+        object? Result,
+        DateTimeOffset At) : RealtimeBackendUpdate(At);
+
     public sealed record Faulted(Exception Exception, string Message, DateTimeOffset At) : RealtimeBackendUpdate(At);
 }

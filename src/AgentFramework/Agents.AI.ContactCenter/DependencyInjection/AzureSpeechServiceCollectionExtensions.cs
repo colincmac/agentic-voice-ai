@@ -1,20 +1,29 @@
 using Agents.AI.ContactCenter.Azure;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Audio.Resilience;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Agents.AI.ContactCenter.DependencyInjection;
 
 /// <summary>
 /// Extension methods for registering Azure Speech services with dependency injection.
 /// </summary>
+/// <remarks>
+/// The registered <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>
+/// are the resilient decorators (<see cref="ResilientSpeechRecognizer"/> /
+/// <see cref="ResilientSpeechSynthesizer"/>) wrapping one
+/// <see cref="AzureSpeechService"/> per entry in
+/// <see cref="AzureSpeechServiceOptions.Endpoints"/>. With a single endpoint the
+/// decorators still apply Timeout/Retry/CircuitBreaker; Fallback only kicks in
+/// when more than one endpoint is configured.
+/// </remarks>
 public static class AzureSpeechServiceCollectionExtensions
 {
-
-
     /// <summary>
     /// Registers the Azure Speech Service with the service collection as both
     /// <see cref="ISpeechRecognizer"/> and <see cref="ISpeechSynthesizer"/>.
@@ -45,7 +54,7 @@ public static class AzureSpeechServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        RegisterService(services);
+        RegisterResilientPipeline(services);
 
         return services;
     }
@@ -66,7 +75,7 @@ public static class AzureSpeechServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        RegisterService(services);
+        RegisterResilientPipeline(services);
 
         return services;
     }
@@ -84,26 +93,91 @@ public static class AzureSpeechServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        services.TryAddSingleton(sp =>
-        {
-            var logger = sp.GetService<ILogger<AzureSpeechService>>();
-            return new AzureSpeechService(options, logger);
-        });
+        services.AddOptions<AzureSpeechServiceOptions>()
+            .Configure(o =>
+            {
+                o.Endpoint = options.Endpoint;
+                o.Credential = options.Credential;
+                o.Endpoints.Clear();
+                foreach (var ep in options.Endpoints)
+                {
+                    o.Endpoints.Add(ep);
+                }
 
-        // Register as both interfaces, forwarding to the concrete service
-        services.TryAddSingleton<ISpeechRecognizer>(sp => sp.GetRequiredService<AzureSpeechService>());
-        services.TryAddSingleton<ISpeechSynthesizer>(sp => sp.GetRequiredService<AzureSpeechService>());
+                o.RecognitionLocale = options.RecognitionLocale;
+                o.SynthesisVoiceName = options.SynthesisVoiceName;
+                o.SynthesisLocale = options.SynthesisLocale;
+                o.SynthesisGender = options.SynthesisGender;
+                o.OutputFormat = options.OutputFormat;
+                o.Concurrency = options.Concurrency;
+                o.MaximumRetainedCapacity = options.MaximumRetainedCapacity;
+                o.Resilience = options.Resilience;
+            });
+
+        RegisterResilientPipeline(services);
 
         return services;
     }
 
-    private static void RegisterService(IServiceCollection services)
+    private static void RegisterResilientPipeline(IServiceCollection services)
     {
-        // Register the concrete service
-        services.TryAddSingleton<AzureSpeechService>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AzureSpeechServiceOptions>, AzureSpeechServiceOptionsValidator>());
 
-        // Register as both interfaces, forwarding to the concrete service
-        services.TryAddSingleton<ISpeechRecognizer>(sp => sp.GetRequiredService<AzureSpeechService>());
-        services.TryAddSingleton<ISpeechSynthesizer>(sp => sp.GetRequiredService<AzureSpeechService>());
+        services.TryAddSingleton<AzureSpeechServiceEndpointRegistry>();
+
+        services.TryAddSingleton<ResilientSpeechSynthesizer>(static sp =>
+        {
+            var registry = sp.GetRequiredService<AzureSpeechServiceEndpointRegistry>();
+            var options = sp.GetRequiredService<IOptions<AzureSpeechServiceOptions>>().Value;
+            var logger = sp.GetService<ILogger<ResilientSpeechSynthesizer>>();
+
+            var endpoints = registry.Services
+                .Select(entry => (entry.Name, (ISpeechSynthesizer)entry.Service))
+                .ToArray();
+
+            return new ResilientSpeechSynthesizer(endpoints, options.Resilience, logger);
+        });
+
+        services.TryAddSingleton<ResilientSpeechRecognizer>(static sp =>
+        {
+            var registry = sp.GetRequiredService<AzureSpeechServiceEndpointRegistry>();
+            var options = sp.GetRequiredService<IOptions<AzureSpeechServiceOptions>>().Value;
+            var logger = sp.GetService<ILogger<ResilientSpeechRecognizer>>();
+
+            var endpoints = registry.Services
+                .Select(entry => (entry.Name, new Func<ISpeechRecognizer>(() => entry.Service.CreateRecognizer())))
+                .ToArray();
+
+            return new ResilientSpeechRecognizer(endpoints, options.Resilience, logger);
+        });
+
+        services.TryAddSingleton<ISpeechSynthesizer>(static sp => sp.GetRequiredService<ResilientSpeechSynthesizer>());
+        services.TryAddSingleton<ISpeechRecognizer>(static sp => sp.GetRequiredService<ResilientSpeechRecognizer>());
+    }
+
+    /// <summary>
+    /// Internal registry that materializes one <see cref="AzureSpeechService"/>
+    /// instance per configured endpoint. Resolved lazily so options validation
+    /// runs first.
+    /// </summary>
+    internal sealed class AzureSpeechServiceEndpointRegistry
+    {
+        public AzureSpeechServiceEndpointRegistry(
+            IOptions<AzureSpeechServiceOptions> options,
+            ILoggerFactory loggerFactory)
+        {
+            var value = options.Value;
+            Services = value.Endpoints
+                .Select(endpoint => new EndpointEntry(
+                    endpoint.Name ?? endpoint.Endpoint.ToString(),
+                    new AzureSpeechService(value, endpoint, loggerFactory.CreateLogger<AzureSpeechService>())))
+                .ToArray();
+        }
+
+        public IReadOnlyList<EndpointEntry> Services { get; }
+
+        internal sealed record EndpointEntry(string Name, AzureSpeechService Service);
     }
 }
+

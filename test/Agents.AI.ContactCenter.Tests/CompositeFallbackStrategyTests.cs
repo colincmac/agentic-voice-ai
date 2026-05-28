@@ -283,6 +283,24 @@ internal sealed class ControllableRealtimeBackend : IRealtimeVoiceBackend
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask StartResponseAsync(
+        IEnumerable<AITool>? tools = null,
+        string? instruction = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (tools is not null)
+        {
+            ToolUpdates.Add(tools.ToList().AsReadOnly());
+        }
+
+        if (instruction is not null)
+        {
+            LastSystemPrompt = instruction;
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
     public async IAsyncEnumerable<RealtimeBackendUpdate> RunAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

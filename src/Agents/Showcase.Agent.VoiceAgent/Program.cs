@@ -146,6 +146,7 @@ builder.AddRealtimeAIAgent(
                 InputAudioNoiseReduction = new AudioNoiseReduction(AudioNoiseReductionType.NearField),
                 InputAudioEchoCancellation = new AudioEchoCancellation(),
                 Temperature = 0.8f,
+                ToolChoice = ToolChoiceLiteral.Auto
             });
     });
 

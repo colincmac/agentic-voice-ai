@@ -162,6 +162,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.15.3" />
+    <PackageVersion Include="Polly.Core" Version="8.6.6" />
     <PackageVersion Include="StackExchange.Redis" Version="2.11.0" />
     <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerUI" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Linq.Async" Version="6.0.3" />

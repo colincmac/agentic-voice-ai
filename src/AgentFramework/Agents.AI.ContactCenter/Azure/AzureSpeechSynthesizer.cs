@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Audio.Resilience;
 using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
@@ -167,6 +168,12 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
                             details.Reason,
                             details.ErrorCode,
                             details.ErrorDetails);
+
+                        if (details.Reason == CancellationReason.Error)
+                        {
+                            faulted = true;
+                            throw new SpeechSdkException(details.ErrorCode, details.ErrorDetails);
+                        }
                     }
 
                     yield break;
