@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Extensions.AI.Contents;
+using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -332,6 +333,27 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                             && transcriptionMessage.Usage is not null)
                         {
                             wrapped.Contents.Add(new UsageContent(transcriptionMessage.Usage));
+                        }
+                        break;
+
+                    case InputAudioBufferSpeechRealtimeServerMessage speechMessage:
+                        if (wrapped.MessageId is null && speechMessage.ItemId is { } speechItemId)
+                        {
+                            wrapped.MessageId = speechItemId;
+                        }
+                        if (speechMessage.Type == InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStarted)
+                        {
+                            wrapped.Contents.Add(new RealtimeVadContent(VadEventType.InputSpeechStarted)
+                            {
+                                StartTime = speechMessage.AudioStart,
+                            });
+                        }
+                        else if (speechMessage.Type == InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStopped)
+                        {
+                            wrapped.Contents.Add(new RealtimeVadContent(VadEventType.InputSpeechEnded)
+                            {
+                                EndTime = speechMessage.AudioEnd,
+                            });
                         }
                         break;
 
