@@ -150,6 +150,12 @@ public sealed class AcsCallerStreamEdge : ICallEdge, ICallControl
                     break;
 
                 case OutboundDirective.StopPlayback:
+                    // Drain any queued PCM frames first so the send loop doesn't flush
+                    // stale agent audio after we signal stop (barge-in correctness).
+                    while (_outbound.Reader.TryRead(out _))
+                    {
+                    }
+
                     if (_webSocket.State == WebSocketState.Open)
                     {
                         var stop = OutStreamingData.GetStopAudioForOutbound();

@@ -590,6 +590,14 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                         await HandleFunctionCallAsync(call, ct).ConfigureAwait(false);
                         break;
 
+                    case RealtimeBackendUpdate.UserSpeechStarted speech when !_suspended:
+                        // Caller started speaking. Tell the caller edge to stop playing any
+                        // queued agent audio so we don't talk over the caller (barge-in).
+                        await _outbound.Writer.WriteAsync(
+                            new OutboundDirective.StopPlayback(speech.At),
+                            ct).ConfigureAwait(false);
+                        break;
+
                     case RealtimeBackendUpdate.Faulted fault:
                         _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
                         await _events.Writer.WriteAsync(

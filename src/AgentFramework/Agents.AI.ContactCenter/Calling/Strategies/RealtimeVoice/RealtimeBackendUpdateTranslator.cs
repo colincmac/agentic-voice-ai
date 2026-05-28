@@ -78,9 +78,14 @@ public static class RealtimeBackendUpdateTranslator
                         At: at);
                     break;
 
-                case RealtimeVadContent:
-                    // TODO: Update to emit VAD events. They drive scenarios like presence detection.
-                    // No current strategy consumes them through the backend update stream.
+                case RealtimeVadContent vad:
+                    // Surface caller speech-start so the strategy can barge-in
+                    // (cancel any in-flight agent audio). Speech-ended is currently
+                    // not actionable at the backend layer.
+                    if (vad.VadEvent == VadEventType.InputSpeechStarted)
+                    {
+                        yield return new RealtimeBackendUpdate.UserSpeechStarted(at);
+                    }
                     break;
             }
         }
