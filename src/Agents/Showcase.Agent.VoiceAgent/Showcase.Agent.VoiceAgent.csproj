@@ -59,7 +59,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Workflow\Samples\*.yaml">
+    <Content Include="Workflow\Samples\**\*.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

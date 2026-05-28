@@ -37,6 +37,21 @@ public sealed class RealtimeIvrWorkflowDefinition
     public required IReadOnlyList<RealtimeIvrWorkflowStep> Steps { get; init; }
 
     /// <summary>
+    /// Phase 3: workflow-level table mapping guard patterns to sub-workflows that
+    /// satisfy them. Consulted by <c>IvrWorkflowNavigator.EvaluateTransitionAsync</c>
+    /// whenever a transition's <c>requires:</c> guard fails. Order matters — first
+    /// matching resolver wins.
+    /// </summary>
+    public IReadOnlyList<Compilation.CompiledAuthResolver> AuthResolvers { get; init; } = [];
+
+    /// <summary>
+    /// Phase 3: workflow-default stage to enter when a transition's guards cannot be
+    /// satisfied by any resolver chain. <see langword="null"/> ends the call when
+    /// nothing else can be done. Per-stage <c>OnUnauthorizedStepId</c> overrides this.
+    /// </summary>
+    public string? UnauthorizedFailureStepId { get; init; }
+
+    /// <summary>
     /// Gets the initial step ID.
     /// </summary>
     public string InitialStepId => Steps[0]?.Id ?? throw new InvalidOperationException("Workflow has no steps");

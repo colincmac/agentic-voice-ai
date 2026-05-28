@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using Agents.AI.ContactCenter.IvrWorkflow.Guards;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
@@ -100,7 +101,12 @@ public static class IvrWorkflowServiceCollectionExtensions
             return new IvrWorkflowCompiler(
                 sp.GetRequiredService<IIvrToolRegistry>(),
                 predicates,
-                sp.GetServices<IIvrGuardFactory>());
+                sp.GetServices<IIvrGuardFactory>(),
+                // Phase 2: stage imports need a catalog to resolve other workflows by id.
+                // Pass a deferred accessor so we don't create a DI cycle (Compiler →
+                // Loader → Catalog → Compiler); the catalog is resolved lazily on first
+                // use by the time the compiler is actually invoked.
+                catalogAccessor: () => sp.GetRequiredService<IIvrWorkflowCatalog>());
         });
 
         services.TryAddSingleton<IIvrWorkflowLoader>(sp =>
@@ -116,6 +122,11 @@ public static class IvrWorkflowServiceCollectionExtensions
             };
             return new IvrWorkflowLoader(source, sp.GetRequiredService<IIvrWorkflowCompiler>());
         });
+
+        // Catalog: lazily compiles + caches workflows by id so the navigator can resolve
+        // sub-workflow stages (Phase 1) and, later, version-pinned imports (Phase 2).
+        services.TryAddSingleton<IIvrWorkflowCatalog>(sp =>
+            new IvrWorkflowCatalog(sp.GetRequiredService<IIvrWorkflowLoader>()));
 
         services.TryAddSingleton<IIvrWorkflowGraphBuilder, IvrWorkflowGraphBuilder>();
 

@@ -11,7 +11,11 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 /// </summary>
 internal static class IvrDtmfMapper
 {
-    public static StepDtmfConfiguration Map(IvrDtmfDocument doc, string stageId, List<string> errors)
+    public static StepDtmfConfiguration Map(
+        IvrDtmfDocument doc,
+        string stageId,
+        List<string> errors,
+        Func<IvrGuardDocument, IIvrStepGuard?>? guardBuilder = null)
     {
         var collect = doc.Collect;
         var min = collect?.MinDigits ?? 1;
@@ -19,7 +23,7 @@ internal static class IvrDtmfMapper
         var terminator = ParseDigit(collect?.Terminator, '#', stageId, "collect.terminator", errors);
         var interDigit = collect?.InterDigitTimeoutMs ?? 5000;
 
-        var menu = doc.Options.Count == 0 ? null : BuildMenu(doc, stageId, errors);
+        var menu = doc.Options.Count == 0 ? null : BuildMenu(doc, stageId, errors, guardBuilder);
 
         var config = new StepDtmfConfiguration(
             terminationDigit: terminator,
@@ -58,7 +62,11 @@ internal static class IvrDtmfMapper
         return config;
     }
 
-    private static Dictionary<char, DtmfMenuOption> BuildMenu(IvrDtmfDocument doc, string stageId, List<string> errors)
+    private static Dictionary<char, DtmfMenuOption> BuildMenu(
+        IvrDtmfDocument doc,
+        string stageId,
+        List<string> errors,
+        Func<IvrGuardDocument, IIvrStepGuard?>? guardBuilder)
     {
         var menu = new Dictionary<char, DtmfMenuOption>();
         foreach (var opt in doc.Options)
@@ -75,9 +83,6 @@ internal static class IvrDtmfMapper
                 continue;
             }
 
-            // YAML keeps multiple routing fields; the runtime DtmfMenuOption supports
-            // (ActionToolName, Arguments, NextStepId). Capabilities and intents are surfaced
-            // through Arguments under reserved keys so the strategy can resolve them lazily.
             var args = opt.Args.Count > 0 ? new Dictionary<string, object?>(opt.Args) : null;
             if (opt.Capability is { Length: > 0 } cap)
             {
@@ -90,6 +95,22 @@ internal static class IvrDtmfMapper
                 args["__intent"] = intent;
             }
 
+            // Phase 3: per-option requires → compiled guard list.
+            IReadOnlyList<IIvrStepGuard> optionGuards = [];
+            if (opt.Requires.Count > 0 && guardBuilder is not null)
+            {
+                var builtGuards = new List<IIvrStepGuard>(opt.Requires.Count);
+                foreach (var requiresDoc in opt.Requires)
+                {
+                    var g = guardBuilder(requiresDoc);
+                    if (g is not null)
+                    {
+                        builtGuards.Add(g);
+                    }
+                }
+                optionGuards = builtGuards;
+            }
+
             menu[d] = new DtmfMenuOption
             {
                 Digit = d,
@@ -99,6 +120,7 @@ internal static class IvrDtmfMapper
                 NextStepId = opt.NextStage,
                 OnFailurePrompt = opt.OnFailurePrompt,
                 OnFailureAudioFile = TryParseUri(opt.OnFailureAudioFile, stageId, $"option '{d}' onFailureAudioFile", errors),
+                Guards = optionGuards,
             };
         }
         return menu;

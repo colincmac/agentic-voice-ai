@@ -12,18 +12,20 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Guards;
 /// </summary>
 public sealed class RequiredAuthLevelGuard : IIvrStepGuard
 {
-    private readonly CallerVerificationLevel _required;
     private readonly string _failureMessage;
 
     public RequiredAuthLevelGuard(CallerVerificationLevel required, string? failureMessage = null)
     {
-        _required = required;
+        RequiredLevel = required;
         _failureMessage = failureMessage ?? $"Verification level {required} is required.";
     }
 
+    /// <summary>The minimum <see cref="CallerVerificationLevel"/> this guard demands.</summary>
+    public CallerVerificationLevel RequiredLevel { get; }
+
     public Task<IvrGuardResult> EvaluateAsync(IvrWorkflowState state, CancellationToken cancellationToken = default)
     {
-        var result = state.VerificationLevel >= _required
+        var result = state.VerificationLevel >= RequiredLevel
             ? IvrGuardResult.Pass()
             : IvrGuardResult.Fail(_failureMessage);
         return Task.FromResult(result);

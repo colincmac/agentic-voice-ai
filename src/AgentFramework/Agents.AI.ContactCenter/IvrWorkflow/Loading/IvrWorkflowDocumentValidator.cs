@@ -29,14 +29,17 @@ public static class IvrWorkflowDocumentValidator
         for (var i = 0; i < document.Stages.Count; i++)
         {
             var stage = document.Stages[i];
-            if (string.IsNullOrWhiteSpace(stage.Id))
+            var effectiveId = EffectiveStageId(stage);
+            if (string.IsNullOrWhiteSpace(effectiveId))
             {
-                errors.Add($"Stage at index {i} is missing 'id'.");
+                errors.Add(stage.Import is not null
+                    ? $"Import stage at index {i} is missing both 'id' and 'import.as'."
+                    : $"Stage at index {i} is missing 'id'.");
                 continue;
             }
-            if (!stageIds.Add(stage.Id))
+            if (!stageIds.Add(effectiveId))
             {
-                errors.Add($"Duplicate stage id '{stage.Id}'.");
+                errors.Add($"Duplicate stage id '{effectiveId}'.");
             }
         }
 
@@ -51,7 +54,16 @@ public static class IvrWorkflowDocumentValidator
 
         foreach (var stage in document.Stages)
         {
-            if (string.IsNullOrWhiteSpace(stage.Id))
+            var effectiveId = EffectiveStageId(stage);
+            if (string.IsNullOrWhiteSpace(effectiveId))
+            {
+                continue;
+            }
+
+            // Imported stages don't carry their own capability/transition declarations —
+            // those came from the source stage and were validated when its workflow was
+            // compiled. Skip the rest of the per-stage checks for imports.
+            if (stage.Import is not null)
             {
                 continue;
             }
@@ -60,7 +72,7 @@ public static class IvrWorkflowDocumentValidator
             {
                 if (!capabilityIds.Contains(capRef))
                 {
-                    errors.Add($"Stage '{stage.Id}' references unknown capability '{capRef}'.");
+                    errors.Add($"Stage '{effectiveId}' references unknown capability '{capRef}'.");
                 }
             }
 
@@ -68,26 +80,54 @@ public static class IvrWorkflowDocumentValidator
             {
                 if (!string.IsNullOrWhiteSpace(transition.To) && !stageIds.Contains(transition.To))
                 {
-                    errors.Add($"Stage '{stage.Id}' transitions to unknown stage '{transition.To}'.");
+                    errors.Add($"Stage '{effectiveId}' transitions to unknown stage '{transition.To}'.");
                 }
             }
 
             if (!string.IsNullOrWhiteSpace(stage.OnExit) && !stageIds.Contains(stage.OnExit))
             {
-                errors.Add($"Stage '{stage.Id}' onExit references unknown stage '{stage.OnExit}'.");
+                errors.Add($"Stage '{effectiveId}' onExit references unknown stage '{stage.OnExit}'.");
             }
 
-            ValidateIntents(stage.Id, stage.Intents, stageIds, capabilityIds, errors);
+            ValidateIntents(effectiveId, stage.Intents, stageIds, capabilityIds, errors);
 
             if (stage.Scripted is { } scripted)
             {
-                ValidateScripted(stage.Id, scripted, stageIds, capabilityIds, errors);
+                ValidateScripted(effectiveId, scripted, stageIds, capabilityIds, errors);
             }
 
             ValidateTransitionReachability(stage, errors);
         }
 
         return new IvrWorkflowValidationResult(errors);
+    }
+
+    /// <summary>
+    /// Resolve the stage id the rest of the workflow refers to. Normal stages use
+    /// <see cref="IvrStageDocument.Id"/>; Phase 2 import stages fall back to
+    /// <see cref="IvrStageImportDocument.As"/>, then to the source stage id parsed out
+    /// of <see cref="IvrStageImportDocument.Stage"/>.
+    /// </summary>
+    private static string EffectiveStageId(IvrStageDocument stage)
+    {
+        if (!string.IsNullOrWhiteSpace(stage.Id))
+        {
+            return stage.Id;
+        }
+        if (stage.Import is { } import)
+        {
+            if (!string.IsNullOrWhiteSpace(import.As))
+            {
+                return import.As!;
+            }
+            var reference = import.Stage ?? string.Empty;
+            var lastDot = reference.LastIndexOf('.');
+            if (lastDot > 0 && lastDot < reference.Length - 1)
+            {
+                return reference[(lastDot + 1)..];
+            }
+        }
+        return string.Empty;
     }
 
     /// <summary>

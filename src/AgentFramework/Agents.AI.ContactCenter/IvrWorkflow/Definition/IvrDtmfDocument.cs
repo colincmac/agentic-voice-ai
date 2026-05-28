@@ -67,6 +67,14 @@ public sealed class IvrDtmfOptionDocument
 
     [YamlMember(Alias = "onFailureAudioFile")]
     public string? OnFailureAudioFile { get; set; }
+
+    /// <summary>
+    /// Phase 3: guards that must pass before this digit fires. Same semantics as
+    /// <see cref="IvrTransitionDocument.Requires"/> — unmet guards trigger an
+    /// authResolver detour before the underlying <c>nextStage:</c> / <c>tool:</c> runs.
+    /// </summary>
+    [YamlMember(Alias = "requires")]
+    public List<IvrGuardDocument> Requires { get; set; } = [];
 }
 
 /// <summary>Configures the digit-collection (buffered) DTMF flow for a stage.</summary>

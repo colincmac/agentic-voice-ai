@@ -26,6 +26,31 @@ public sealed class IvrStageDocument
     [YamlMember(Alias = "id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Stage kind. Defaults to <c>stage</c> (a normal IVR stage with prompts / tools /
+    /// transitions). When set to <c>subflow</c> the stage acts as a delegation marker
+    /// that pushes a child workflow onto the navigator's frame stack; the
+    /// <see cref="Subflow"/> block, <see cref="OnSuccess"/>, and <see cref="OnFailure"/>
+    /// configure the delegation.
+    /// </summary>
+    [YamlMember(Alias = "type")]
+    public string? Type { get; set; }
+
+    /// <summary>
+    /// Child-workflow reference for <c>type: subflow</c> stages. Ignored for normal stages.
+    /// </summary>
+    [YamlMember(Alias = "subflow")]
+    public IvrSubflowReferenceDocument? Subflow { get; set; }
+
+    /// <summary>
+    /// Phase 2: import a stage from another workflow at compile time. When set the
+    /// other stage fields (<c>realtime</c>, <c>scripted</c>, etc.) are ignored — the
+    /// imported stage is cloned and inlined under <see cref="IvrStageImportDocument.As"/>
+    /// (or the source stage id when not aliased). Only leaf stages are importable.
+    /// </summary>
+    [YamlMember(Alias = "import")]
+    public IvrStageImportDocument? Import { get; set; }
+
     /// <summary>Optional human-readable description of the stage purpose.</summary>
     [YamlMember(Alias = "description")]
     public string? Description { get; set; }
@@ -71,9 +96,42 @@ public sealed class IvrStageDocument
     [YamlMember(Alias = "onExit")]
     public string? OnExit { get; set; }
 
+    /// <summary>
+    /// For <c>type: subflow</c> stages: parent-frame step id to enter after the child
+    /// workflow exits via a non-failure terminal stage. Takes precedence over
+    /// <see cref="IvrSubflowReferenceDocument.OnSuccess"/> when both are set.
+    /// </summary>
+    [YamlMember(Alias = "onSuccess")]
+    public string? OnSuccess { get; set; }
+
+    /// <summary>
+    /// For <c>type: subflow</c> stages: parent-frame step id to enter after the child
+    /// workflow exits via a failure terminal stage. Takes precedence over
+    /// <see cref="IvrSubflowReferenceDocument.OnFailure"/> when both are set.
+    /// </summary>
+    [YamlMember(Alias = "onFailure")]
+    public string? OnFailure { get; set; }
+
+    /// <summary>
+    /// Phase 3: stage-level override for the workflow's <c>onUnauthorized</c> fallback.
+    /// When a transition into this stage fails its <c>requires:</c> guards and no
+    /// auth-resolver chain can satisfy them, the navigator routes here instead of the
+    /// workflow-default <c>onUnauthorized</c>.
+    /// </summary>
+    [YamlMember(Alias = "onUnauthorized")]
+    public string? OnUnauthorized { get; set; }
+
     /// <summary>Marks a terminal stage; the workflow completes upon entry/exit.</summary>
     [YamlMember(Alias = "terminal")]
     public bool Terminal { get; set; }
+
+    /// <summary>
+    /// For terminal stages of a sub-workflow: <c>success</c> (default) routes the parent
+    /// to the subflow stage's <c>onSuccess</c> target on pop; <c>failure</c> routes to
+    /// <c>onFailure</c>. Ignored for non-terminal stages and for the root workflow.
+    /// </summary>
+    [YamlMember(Alias = "terminalOutcome")]
+    public string? TerminalOutcome { get; set; }
 
     /// <summary>Maximum retries before failing the stage. Defaults to <c>3</c> when absent.</summary>
     [YamlMember(Alias = "maxRetries")]
@@ -127,4 +185,13 @@ public sealed class IvrTransitionDocument
 
     [YamlMember(Alias = "onCondition")]
     public string? OnCondition { get; set; }
+
+    /// <summary>
+    /// Phase 3: guards that must pass before this transition fires. Combined with the
+    /// target stage's <c>requires:</c> at evaluation time. When any guard fails the
+    /// navigator looks up a matching <see cref="IvrAuthResolverDocument"/> and detours
+    /// through the named sub-workflow before re-applying the transition.
+    /// </summary>
+    [YamlMember(Alias = "requires")]
+    public List<IvrGuardDocument> Requires { get; set; } = [];
 }

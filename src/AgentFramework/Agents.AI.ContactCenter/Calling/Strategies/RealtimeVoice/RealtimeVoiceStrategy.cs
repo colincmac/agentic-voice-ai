@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Telemetry;
@@ -128,26 +129,30 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     private async Task PrepareBackendAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
-        _navigator = new IvrWorkflowNavigator(
-            _workflow,
-            WorkflowState,
-            services,
-            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        // Phase 1: prefer the per-call IIvrWorkflowCatalog so subflow stages can resolve
+        // child workflows. Falls back to a single-definition adapter when no catalog has
+        // been registered (legacy hosts / tests).
+        var catalog = services.GetService<IIvrWorkflowCatalog>();
+        _navigator = catalog is not null
+            ? new IvrWorkflowNavigator(
+                _workflow,
+                WorkflowState,
+                services,
+                catalog,
+                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>())
+            : new IvrWorkflowNavigator(
+                _workflow,
+                WorkflowState,
+                services,
+                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
 
         // The invoker reads CurrentStep lazily on each invocation so it can be created
-        // once per call and shared across stage transitions. The apply-stage callback
-        // serializes against the DTMF pump via _navigatorLock and ends the session when
-        // the model advances into a terminal stage (parity with the DTMF dispatch path).
+        // once per call and shared across stage transitions. EnterStepAsyncLocked handles
+        // subflow pushes, terminal-child pops, and terminal-root session end, so the
+        // callback no longer needs an explicit Terminal check.
         _advanceInvoker = new IvrAdvanceToolInvoker(
             _navigator,
-            async (step, ct) =>
-            {
-                await ApplyStageAsyncLocked(step, ct).ConfigureAwait(false);
-                if (step.Terminal)
-                {
-                    await EndSessionAsync($"terminal stage '{step.Id}' reached", ct).ConfigureAwait(false);
-                }
-            },
+            (step, ct) => EnterStepAsyncLocked(step, ct),
             _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
 
         using var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId);
@@ -183,7 +188,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         // Seed the agent with the system prompt for the current workflow step.
         var step = _navigator.EnterInitialStep();
-        await ApplyStageAsyncLocked(step, cancellationToken).ConfigureAwait(false);
+        await EnterStepAsyncLocked(step, cancellationToken).ConfigureAwait(false);
     }
     /// <summary>
     /// Serialized wrapper around <see cref="ApplyStageAsync"/> so the two concurrent
@@ -200,6 +205,82 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         finally
         {
             _navigatorLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Phase 1 stage-entry router. Serialized against <see cref="_navigatorLock"/>,
+    /// then delegates to <see cref="EnterStepAsync"/> for the actual subflow-aware
+    /// dispatch. Use this instead of <see cref="ApplyStageAsyncLocked"/> when the
+    /// step might be a <see cref="SubflowIvrWorkflowStep"/> or a terminal child stage
+    /// that should pop rather than end the session.
+    /// </summary>
+    private async Task EnterStepAsyncLocked(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        await _navigatorLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await EnterStepAsync(step, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _navigatorLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Subflow-aware stage entry. Three cases:
+    /// <list type="bullet">
+    ///   <item>Sub-workflow marker stage: push the child workflow's initial step (via
+    ///   <see cref="IIvrWorkflowNavigator.PushSubflowAsync"/>) and recurse.</item>
+    ///   <item>Terminal child stage (<c>Terminal &amp;&amp; FrameDepth &gt; 1</c>): pop
+    ///   back to the parent's <c>onSuccess</c> / <c>onFailure</c> and recurse on the
+    ///   resumed parent step.</item>
+    ///   <item>Terminal root stage: render once, then end the session.</item>
+    ///   <item>Normal stage: render the prompt + tools onto the realtime backend and
+    ///   emit observer events.</item>
+    /// </list>
+    /// Caller must already hold <see cref="_navigatorLock"/>.
+    /// </summary>
+    private async Task EnterStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        if (step is SubflowIvrWorkflowStep subflow)
+        {
+            var childInitial = await _navigator!.PushSubflowAsync(
+                subflow.SubflowWorkflowId,
+                subflow.OnSuccessStepId,
+                subflow.OnFailureStepId,
+                subflow.MinVersion,
+                subflow.MaxVersion,
+                ct).ConfigureAwait(false);
+
+            await EnterStepAsync(childInitial, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await ApplyStageAsync(step, ct).ConfigureAwait(false);
+
+        if (step.Terminal)
+        {
+            if (_navigator!.State.FrameDepth > 1)
+            {
+                // Child workflow finished — pop and resume the parent. TerminalOutcome
+                // chooses the parent's onSuccess vs onFailure resume target.
+                var success = step.TerminalOutcome == TerminalOutcome.Success;
+                var resumed = await _navigator.PopFrameAsync(success, ct).ConfigureAwait(false);
+                if (resumed is not null)
+                {
+                    await EnterStepAsync(resumed, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await EndSessionAsync($"terminal stage '{step.Id}' reached at root", ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await EndSessionAsync($"terminal stage '{step.Id}' reached", ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -494,22 +575,71 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         switch (result)
         {
             case DtmfActionResult.Transition transition when _navigator is not null:
-                var tr = _navigator.TransitionTo(transition.NextStepId);
-                if (tr.Succeeded && tr.NewStep is not null)
+            {
+                // Phase 3: route through EvaluateTransitionAsync so per-transition
+                // requires / per-DTMF-option requires trigger an auth-resolver detour
+                // before the transition fires. EnterStepAsyncLocked still owns the
+                // subflow-push / terminal-pop / normal-render branching from Phase 1.
+                var eval = await _navigator.EvaluateTransitionAsync(transition.NextStepId, ct).ConfigureAwait(false);
+                switch (eval)
                 {
-                    await ApplyStageAsyncLocked(tr.NewStep, ct).ConfigureAwait(false);
-                    if (tr.NewStep.Terminal)
+                    case TransitionEvaluation.Allowed allowed:
                     {
-                        await EndSessionAsync($"terminal stage '{tr.NewStep.Id}' reached", ct).ConfigureAwait(false);
+                        var tr = _navigator.TransitionTo(allowed.Target.Id);
+                        if (tr.Succeeded && tr.NewStep is not null)
+                        {
+                            await EnterStepAsyncLocked(tr.NewStep, ct).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "DTMF requested transition to '{Target}' but it was rejected after Allowed evaluation: {Reason}",
+                                allowed.Target.Id, tr.Reason);
+                        }
+                        break;
                     }
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "DTMF requested transition to '{Target}' but it was rejected: {Reason}",
-                        transition.NextStepId, tr.Reason);
+                    case TransitionEvaluation.RequiresDetour detour:
+                    {
+                        WorkflowState.Set(
+                            PendingIntent.StateKey,
+                            new PendingIntent(detour.Target.Id, _navigator.Definition.Name));
+                        _logger.LogInformation(
+                            "DTMF transition to '{Target}' detouring through '{Subflow}' to satisfy '{Guard}'.",
+                            detour.Target.Id, detour.ResolverWorkflowId, detour.UnmetGuard.GetType().Name);
+                        var childInitial = await _navigator.PushSubflowAsync(
+                            detour.ResolverWorkflowId,
+                            returnToStepId: detour.Target.Id,
+                            failureReturnStepId: detour.Target.OnUnauthorizedStepId
+                                ?? _navigator.Definition.UnauthorizedFailureStepId,
+                            detour.MinVersion,
+                            detour.MaxVersion,
+                            ct).ConfigureAwait(false);
+                        await EnterStepAsyncLocked(childInitial, ct).ConfigureAwait(false);
+                        break;
+                    }
+                    case TransitionEvaluation.BlockedNoResolver blocked:
+                        _logger.LogWarning(
+                            "DTMF transition to '{Target}' blocked: {Reason} (no resolver for guard '{Guard}')",
+                            transition.NextStepId, blocked.Reason, blocked.UnmetGuard.GetType().Name);
+                        // Surface the rejection to the model so it can re-prompt.
+                        try
+                        {
+                            await _backend.SendUserTextAsync(
+                                $"[Transition to '{transition.NextStepId}' blocked: {blocked.Reason}]", ct).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to surface DTMF detour rejection to backend");
+                        }
+                        break;
+                    case TransitionEvaluation.Invalid invalid:
+                        _logger.LogWarning(
+                            "DTMF requested transition to '{Target}' but it was rejected: {Reason}",
+                            transition.NextStepId, invalid.Reason);
+                        break;
                 }
                 break;
+            }
 
             case DtmfActionResult.Reject reject:
                 try

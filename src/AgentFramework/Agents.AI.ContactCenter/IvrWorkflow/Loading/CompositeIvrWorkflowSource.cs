@@ -10,7 +10,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Loading;
 /// matching workflow. <see cref="ListAsync"/> de-duplicates ids across sources while
 /// preserving order (first occurrence wins).
 /// </summary>
-public sealed class CompositeIvrWorkflowSource : IIvrWorkflowDefinitionSource
+public sealed class CompositeIvrWorkflowSource : IIvrWorkflowDefinitionSource, IVersionedWorkflowSource
 {
     private readonly IReadOnlyList<IIvrWorkflowDefinitionSource> _sources;
 
@@ -50,5 +50,36 @@ public sealed class CompositeIvrWorkflowSource : IIvrWorkflowDefinitionSource
             }
         }
         return null;
+    }
+
+    public async ValueTask<IvrWorkflowSourceEntry?> LoadAsync(string workflowId, int? version, CancellationToken cancellationToken = default)
+    {
+        foreach (var source in _sources)
+        {
+            var entry = source is IVersionedWorkflowSource versioned
+                ? await versioned.LoadAsync(workflowId, version, cancellationToken).ConfigureAwait(false)
+                : await source.LoadAsync(workflowId, cancellationToken).ConfigureAwait(false);
+            if (entry is not null)
+            {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    public async ValueTask<IReadOnlyList<int>> ListVersionsAsync(string workflowId, CancellationToken cancellationToken = default)
+    {
+        var union = new SortedSet<int>();
+        foreach (var source in _sources)
+        {
+            if (source is IVersionedWorkflowSource versioned)
+            {
+                foreach (var v in await versioned.ListVersionsAsync(workflowId, cancellationToken).ConfigureAwait(false))
+                {
+                    union.Add(v);
+                }
+            }
+        }
+        return union.ToArray();
     }
 }

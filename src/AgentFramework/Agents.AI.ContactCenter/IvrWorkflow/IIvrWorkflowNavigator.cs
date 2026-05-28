@@ -43,6 +43,45 @@ public interface IIvrWorkflowNavigator
     /// </summary>
     void Complete(IvrWorkflowStatus status = IvrWorkflowStatus.Completed);
 
+    /// <summary>
+    /// Push a child workflow (resolved by id through the navigator's catalog) onto the
+    /// frame stack and enter its initial step. Returns the child's initial
+    /// <see cref="RealtimeIvrWorkflowStep"/> so the caller can apply it to the backend.
+    /// </summary>
+    /// <param name="workflowId">Id of the workflow to push. Must be known to the catalog.</param>
+    /// <param name="returnToStepId">Parent-frame step id to enter when the child completes successfully (typically the subflow stage's <c>onSuccess</c>).</param>
+    /// <param name="failureReturnStepId">Parent-frame step id to enter when the child exits via a failure terminal (the subflow stage's <c>onFailure</c>).</param>
+    /// <param name="minVersion">Phase 2: optional lower-bound version constraint; navigator resolves the highest version <c>&gt;= minVersion</c> (and <c>&lt;= maxVersion</c> when set).</param>
+    /// <param name="maxVersion">Phase 2: optional upper-bound version constraint.</param>
+    Task<RealtimeIvrWorkflowStep> PushSubflowAsync(
+        string workflowId,
+        string? returnToStepId,
+        string? failureReturnStepId,
+        int? minVersion = null,
+        int? maxVersion = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pop the innermost frame and transition the now-active parent to its return /
+    /// failure-return step. Returns the resumed parent step, or <see langword="null"/>
+    /// when the popped frame was the root (caller should end the session).
+    /// </summary>
+    Task<RealtimeIvrWorkflowStep?> PopFrameAsync(bool success, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Phase 3: evaluate <paramref name="targetStepId"/> against the current step's
+    /// per-transition <c>requires:</c> guards and the target step's stage-level guards.
+    /// Returns <see cref="TransitionEvaluation.Allowed"/> when all guards pass,
+    /// <see cref="TransitionEvaluation.RequiresDetour"/> when a guard fails but the
+    /// workflow's <see cref="RealtimeIvrWorkflowDefinition.AuthResolvers"/> supplies a
+    /// sub-workflow that can satisfy it, <see cref="TransitionEvaluation.BlockedNoResolver"/>
+    /// when no resolver matches, or <see cref="TransitionEvaluation.Invalid"/> when the
+    /// target isn't a declared transition from the current step.
+    /// </summary>
+    Task<TransitionEvaluation> EvaluateTransitionAsync(
+        string targetStepId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Look up the current step's DTMF menu binding for a digit. Pure read.</summary>
     bool TryResolveDtmfDigit(char digit, [NotNullWhen(true)] out DtmfMenuOption? option);
 

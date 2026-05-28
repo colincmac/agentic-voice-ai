@@ -1,14 +1,18 @@
 name: authenticated-realtime
-version: 1
+version: 2
 description: |
-  Voice-first ACME Bank concierge that greets the caller, walks them through
-  two-factor verification (knowledge-based PIN + SMS one-time passcode), and
-  then exposes a self-service balance lookup. The PIN step calls the host
-  'confirm-identity' tool which elevates the caller to KnowledgeBased; the
-  OTP step calls 'request-otp' to dispatch an SMS, then 'submit-otp' once the
-  caller reads the digits back, elevating the caller to MultiFactor. The
-  balance stage is guarded by an `auth: multiFactor` requirement so it is
-  unreachable unless both factors have passed.
+  Voice-first ACME Bank concierge demonstrating Phase 3 per-transition auth
+  requirements + authResolver detours. The parent workflow declares three options
+  on `welcome`:
+    * `balance`        — requires `auth: multiFactor`
+    * `activate_card`  — requires `auth: knowledgeBased` (PIN only)
+    * `transfer`       — no auth required
+  The workflow-level `authResolvers:` block routes failing guards to reusable
+  sub-workflows (`subflows.verify` for PIN, `subflows.verify-mfa` for OTP). The
+  MFA subflow itself requires KBA, so when a caller hits `balance` starting from
+  ANI-only, the navigator chains `welcome → subflows.verify (PIN) → subflows.verify-mfa
+  (OTP) → balance` automatically. No verify / otp_verify stages live in this
+  parent workflow.
 
 strategy:
   primary: realtime
@@ -32,6 +36,21 @@ base:
     - transfer-to-human
     - end-session
 
+# Phase 3: every guard kind that can be auto-satisfied by pushing a sub-workflow.
+# The navigator consults this list in order whenever a transition's `requires:` (or a
+# target stage's stage-level `requires:`) fails. First match wins. The MFA resolver
+# below references a sub-workflow that itself requires KBA, so chaining is automatic.
+authResolvers:
+  - guard: { type: auth, level: knowledgeBased }
+    subflow: subflows.verify
+  - guard: { type: auth, level: multiFactor }
+    subflow: subflows.verify-mfa
+
+# Workflow-default destination when a transition's guards can't be satisfied by any
+# resolver chain (e.g. the caller fails PIN three times). Per-stage `onUnauthorized:`
+# overrides this.
+onUnauthorized: transfer
+
 stages:
   - id: welcome
     goal: "Greet the caller, capture their name, and collect their primary intent."
@@ -40,10 +59,10 @@ stages:
         - "Greet the caller warmly."
         - "If `CallerFullName` is already present in the Collected Information, address them by first name directly — do NOT ask again."
         - "Otherwise, ask the caller for their first and last name. Once they have clearly stated both, call the record-caller-name tool exactly once with the spoken values. After the tool returns success, thank them by first name."
-        - "Then listen for the caller's intent: balance, billing, or agent transfer."
+        - "Then listen for the caller's intent: balance, activate card, or agent transfer. Don't ask for PINs or codes yourself — picking an intent will trigger any verification automatically."
       examples:
         - "Welcome to ACME Bank. Before we get started, could I get your first and last name?"
-        - "Thanks, Jordan. I can help with balances, billing, or transferring to a representative — what would you like to do?"
+        - "Thanks, Jordan. I can help you check your balance, activate a card, or transfer to a representative — what would you like to do?"
       tools:
         - record-caller-name
     scripted:
@@ -56,102 +75,34 @@ stages:
                 <break time="300ms"/>
                 For account balance, press 1.
                 <break time="200ms"/>
-                For billing, press 2.
+                To activate a card, press 2.
                 <break time="200ms"/>
                 To speak with an agent, press 0.
               </prosody>
             </voice>
           </speak>
         options:
-          - { digit: '1', label: balance, nextStage: verify }
-          - { digit: '2', label: billing, nextStage: verify }
-          - { digit: '0', label: agent,   nextStage: transfer }
+          - { digit: '1', label: balance,        nextStage: balance,        requires: [{ type: auth, level: multiFactor }] }
+          - { digit: '2', label: activate-card,  nextStage: activate_card,  requires: [{ type: auth, level: knowledgeBased }] }
+          - { digit: '0', label: agent,          nextStage: transfer }
     exitWhen: "Caller has stated their primary intent"
     transitions:
-      - to: verify
-        onCondition: "Caller wants account-specific information"
+      - to: balance
+        onCondition: "Caller wants to hear their account balance"
+        requires:
+          - type: auth
+            level: multiFactor
+      - to: activate_card
+        onCondition: "Caller wants to activate a card"
+        requires:
+          - type: auth
+            level: knowledgeBased
       - to: transfer
         onCondition: "Caller asked for an agent"
 
-  - id: verify
-    goal: "Confirm the caller's identity via PIN (knowledge factor)."
-    description: "PIN verification (factor 1)"
-    realtime:
-      instructions:
-        - "Politely ask the caller to say their four-digit PIN."
-        - "When they say it, call the confirm-identity tool with the digits."
-        - "On failure, ask once more, then offer to transfer to an agent."
-      tools:
-        - confirm-identity
-    scripted:
-      onErrorPrompt: "That PIN doesn't match our records. Transferring you to an agent."
-      dtmf:
-        ssmlPrompt: |
-          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-            <voice name="en-US-Ava:DragonHDLatestNeural">
-              Please enter your four-digit PIN, followed by the pound key.
-            </voice>
-          </speak>
-        collect:
-          minDigits: 4
-          maxDigits: 4
-          terminator: '#'
-          validator: pin-validator
-          digitsParameterName: digits
-          collectedStateKey: pinVerified
-          onValidNextStage: otp_verify
-          onInvalidPrompt: "That PIN doesn't match our records. Transferring you to an agent."
-    exitWhen: "PIN confirmed or transfer requested"
-    transitions:
-      - to: otp_verify
-        onCondition: "PIN confirmed"
-      - to: transfer
-        onCondition: "PIN could not be confirmed"
-
-  - id: otp_verify
-    goal: "Complete MFA by sending an SMS one-time passcode and validating the caller's response."
-    description: "SMS OTP verification (factor 2)"
-    requires:
-      - type: auth
-        level: knowledgeBased
-        message: "PIN verification must complete before sending an OTP."
-    realtime:
-      instructions:
-        - "Tell the caller you are sending a six-digit code to the phone number on file."
-        - "Call request-otp exactly once to dispatch the SMS."
-        - "When the caller reads the digits back, call submit-otp with just the digits — do not invent or guess."
-        - "On failure, allow one retry, then offer to transfer to an agent."
-      tools:
-        - request-otp
-        - submit-otp
-    scripted:
-      onErrorPrompt: "That code doesn't match. Transferring you to an agent."
-      dtmf:
-        ssmlPrompt: |
-          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-            <voice name="en-US-Ava:DragonHDLatestNeural">
-              A six-digit code has been sent to your phone. Enter it followed by the pound key.
-            </voice>
-          </speak>
-        collect:
-          minDigits: 6
-          maxDigits: 6
-          terminator: '#'
-          validator: submit-otp
-          digitsParameterName: digits
-          collectedStateKey: otpVerified
-          onValidNextStage: balance
-          onInvalidPrompt: "That code doesn't match. Transferring you to an agent."
-    exitWhen: "OTP confirmed or transfer requested"
-    transitions:
-      - to: balance
-        onCondition: "OTP confirmed"
-      - to: transfer
-        onCondition: "OTP could not be confirmed"
-
   - id: balance
     goal: "Read the verified caller their current account balance."
-    description: "Verified balance self-service"
+    description: "Verified balance self-service (requires MFA)"
     requires:
       - type: auth
         level: multiFactor
@@ -166,6 +117,22 @@ stages:
     exitWhen: "Caller has heard their balance and has no more questions"
     onExit: closing
 
+  - id: activate_card
+    goal: "Activate the caller's card after PIN verification."
+    description: "Card activation (requires KBA)"
+    requires:
+      - type: auth
+        level: knowledgeBased
+        message: "Card activation requires PIN verification."
+    realtime:
+      instructions:
+        - "Caller is PIN-verified at this point."
+        - "Confirm the last four digits of the card the caller wants to activate."
+        - "For this showcase there is no real backend; politely confirm activation and ask if anything else is needed."
+        - "When they're done, hand off to closing."
+    exitWhen: "Card activation acknowledged and caller has no more questions"
+    onExit: closing
+
   - id: transfer
     goal: "Transfer the caller to a live agent."
     description: "Agent transfer"
@@ -178,12 +145,7 @@ stages:
     exitWhen: "Transfer initiated"
     onExit: closing
 
-  - id: closing
-    goal: "Politely end the call."
-    terminal: true
-    realtime:
-      instructions:
-        - "Summarize what was accomplished and end the call."
-      examples:
-        - "Thanks for calling ACME Bank. Goodbye."
+  - import:
+      stage: subflows.closing
+      as: closing
 

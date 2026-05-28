@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Definition;
 using Agents.AI.ContactCenter.IvrWorkflow.Guards;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
@@ -23,16 +24,28 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
     private readonly IIvrToolRegistry _tools;
     private readonly IIvrPredicateRegistry _predicates;
     private readonly IReadOnlyDictionary<string, IIvrGuardFactory> _guardFactories;
+    private readonly Func<IIvrWorkflowCatalog>? _catalogAccessor;
+
+    // AsyncLocal cycle guard: tracks workflow names currently being compiled on this
+    // logical async flow so a stage import that pulls the workflow being compiled in
+    // (or any ancestor) throws a clear error instead of recursing forever. Uses
+    // AsyncLocal rather than [ThreadStatic] because the catalog drives compilation
+    // synchronously via .GetAwaiter().GetResult() over an async loader, which hops
+    // thread-pool threads — [ThreadStatic] state doesn't flow across that boundary
+    // and would cause cyclic imports to spin indefinitely instead of throwing.
+    private static readonly AsyncLocal<HashSet<string>?> compileStack = new();
 
     public IvrWorkflowCompiler(
         IIvrToolRegistry tools,
         IIvrPredicateRegistry predicates,
-        IEnumerable<IIvrGuardFactory>? guardFactories = null)
+        IEnumerable<IIvrGuardFactory>? guardFactories = null,
+        Func<IIvrWorkflowCatalog>? catalogAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(tools);
         ArgumentNullException.ThrowIfNull(predicates);
         _tools = tools;
         _predicates = predicates;
+        _catalogAccessor = catalogAccessor;
         var factories = (guardFactories ?? BuiltInGuardFactories.CreateAll())
             .GroupBy(f => f.Type, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
@@ -42,6 +55,38 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
     public CompiledIvrWorkflow Compile(IvrWorkflowDocument document, IvrWorkflowSourceEntry? source = null)
     {
         ArgumentNullException.ThrowIfNull(document);
+
+        // Cycle guard: refuse to compile a workflow that is already being compiled in
+        // this async flow (typical when stage imports load each other).
+        var stack = compileStack.Value;
+        if (stack is null)
+        {
+            stack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            compileStack.Value = stack;
+        }
+        if (!stack.Add(document.Name))
+        {
+            throw new IvrWorkflowCompilationException(document.Name, [
+                $"Import cycle detected: workflow '{document.Name}' is being compiled recursively. Check stage import chains."
+            ]);
+        }
+
+        try
+        {
+            return CompileCore(document, source);
+        }
+        finally
+        {
+            stack.Remove(document.Name);
+            if (stack.Count == 0)
+            {
+                compileStack.Value = null;
+            }
+        }
+    }
+
+    private CompiledIvrWorkflow CompileCore(IvrWorkflowDocument document, IvrWorkflowSourceEntry? source)
+    {
         var errors = new List<string>();
 
         IvrStrategyPolicy workflowPolicy;
@@ -87,12 +132,20 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             throw new IvrWorkflowCompilationException(document.Name, errors);
         }
 
+        var authResolvers = CompileAuthResolvers(document, errors);
+        if (errors.Count > 0)
+        {
+            throw new IvrWorkflowCompilationException(document.Name, errors);
+        }
+
         var runtime = new RealtimeIvrWorkflowDefinition
         {
             Name = document.Name,
             Tier = workflowPolicy.Primary.ToTier(),
             BasePrompt = basePrompt,
             Steps = runtimeSteps,
+            AuthResolvers = authResolvers,
+            UnauthorizedFailureStepId = string.IsNullOrWhiteSpace(document.OnUnauthorized) ? null : document.OnUnauthorized,
         };
 
         var intents = intentExamples.ToDictionary(
@@ -125,6 +178,22 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         Dictionary<string, List<string>> intentExamples,
         List<string> errors)
     {
+        // Phase 2: stage import — pull a leaf stage from another workflow at compile time
+        // and inline it under the local alias. No frame, no return contract; behaves
+        // identically to a stage authored inline.
+        if (stage.Import is { } importDoc)
+        {
+            return CompileImportStage(stage, importDoc, workflowPolicy, errors);
+        }
+
+        // Phase 1: subflow stages compile to a marker step the navigator pushes onto
+        // its frame stack at entry time. They carry no prompt / tools / DTMF config —
+        // those come from the child workflow's stages.
+        if (string.Equals(stage.Type, "subflow", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompileSubflowStage(stage, workflowPolicy, errors);
+        }
+
         // Strategy resolution: stage strategy overrides workflow strategy.
         IvrStrategyPolicy stagePolicy;
         try
@@ -249,11 +318,24 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             }
         }
 
-        // Scripted (DTMF + NLU) tier configuration.
+        // Scripted (DTMF + NLU) tier configuration. Pass a guardBuilder so per-option
+        // `requires:` lower to compiled IIvrStepGuard instances on each DtmfMenuOption.
         StepScriptedConfiguration? scriptedConfig = null;
         if (stage.Scripted is { } scriptedDoc)
         {
-            scriptedConfig = IvrScriptedMapper.Map(scriptedDoc, stage.Id, errors);
+            IIvrStepGuard? PerOptionGuardBuilder(IvrGuardDocument g)
+            {
+                try
+                {
+                    return BuildGuard(document.Name, stage.Id, g);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    errors.Add(ex.Message);
+                    return null;
+                }
+            }
+            scriptedConfig = IvrScriptedMapper.Map(scriptedDoc, stage.Id, errors, PerOptionGuardBuilder);
         }
 
         // ConversationState (instructions/examples/exit/transitions).
@@ -262,6 +344,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             : (stage.Goal is { Length: > 0 } goalText ? new[] { goalText } : (IReadOnlyList<string>)[]);
 
         var transitions = BuildTransitions(stage);
+        var transitionRules = BuildTransitionRules(document.Name, stage, errors);
 
         var conversationState = new ConversationState
         {
@@ -287,6 +370,9 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             RequiredAuthLevel = ResolveStageAuthLevel(baseRequiredAuth, stage.Requires),
             StepScriptedConfiguration = scriptedConfig,
             Terminal = stage.Terminal,
+            TerminalOutcome = ParseTerminalOutcome(stage.TerminalOutcome),
+            TransitionRules = transitionRules,
+            OnUnauthorizedStepId = string.IsNullOrWhiteSpace(stage.OnUnauthorized) ? null : stage.OnUnauthorized,
             Intents = compiledIntents.Count == 0
                 ? new Dictionary<string, RealtimeIvrWorkflowIntent>(StringComparer.OrdinalIgnoreCase)
                 : compiledIntents.ToDictionary(
@@ -440,6 +526,350 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         }
 
         return transitions.Count == 0 ? null : transitions;
+    }
+
+    /// <summary>
+    /// Phase 2: resolve an <see cref="IvrStageImportDocument"/> against the catalog,
+    /// validate the source stage is a leaf, and clone its compiled form under the local
+    /// alias. Tools, prompts, guards, and scripted blocks travel unchanged (tool
+    /// instances are shared singletons via <see cref="IIvrToolRegistry"/>).
+    /// </summary>
+    private CompiledIvrStage CompileImportStage(
+        IvrStageDocument stage,
+        IvrStageImportDocument import,
+        IvrStrategyPolicy workflowPolicy,
+        List<string> errors)
+    {
+        // "workflowId.stageId" — the last dot-segment is the stage id; everything before
+        // is the workflow id (supports multi-segment ids like banking.lib.closing).
+        var reference = import.Stage ?? string.Empty;
+        var lastDot = reference.LastIndexOf('.');
+        if (lastDot <= 0 || lastDot >= reference.Length - 1)
+        {
+            errors.Add($"Stage '{stage.Id}': import.stage '{reference}' must be in 'workflowId.stageId' form.");
+            return BuildPlaceholderImport(stage, workflowPolicy);
+        }
+        var sourceWorkflowId = reference[..lastDot];
+        var sourceStageId = reference[(lastDot + 1)..];
+        var localId = !string.IsNullOrWhiteSpace(import.As) ? import.As!
+            : !string.IsNullOrWhiteSpace(stage.Id) ? stage.Id
+            : sourceStageId;
+
+        if (_catalogAccessor is null)
+        {
+            errors.Add(
+                $"Stage '{stage.Id}': stage imports require an IIvrWorkflowCatalog. " +
+                "Construct IvrWorkflowCompiler with the catalogAccessor argument.");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
+        CompiledIvrWorkflow sourceWorkflow;
+        try
+        {
+            sourceWorkflow = _catalogAccessor().Get(sourceWorkflowId, import.MinVersion, import.MaxVersion);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            errors.Add($"Stage '{stage.Id}': {ex.Message}");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
+        var sourceStage = sourceWorkflow.Stages.FirstOrDefault(
+            s => string.Equals(s.Id, sourceStageId, StringComparison.Ordinal));
+        if (sourceStage is null)
+        {
+            errors.Add(
+                $"Stage '{stage.Id}': import.stage references stage '{sourceStageId}' which does not exist in workflow '{sourceWorkflowId}' v{sourceWorkflow.Version}.");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
+        var sourceRuntime = sourceStage.RuntimeStep;
+        if (sourceRuntime is SubflowIvrWorkflowStep)
+        {
+            errors.Add(
+                $"Stage '{stage.Id}': cannot import subflow-marker stage '{sourceWorkflowId}.{sourceStageId}'. Reference the workflow directly via 'type: subflow' instead.");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
+        var outboundTransitions = sourceRuntime.ConversationState.Transitions?.Count ?? 0;
+        if (outboundTransitions > 0)
+        {
+            errors.Add(
+                $"Stage '{stage.Id}': cannot import stage '{sourceWorkflowId}.{sourceStageId}' because it declares {outboundTransitions} outbound transition(s). " +
+                "Only leaf stages are importable in Phase 2; use 'type: subflow' to delegate into a workflow you can return from.");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
+        // Deep-clone the runtime step under the local id. ConversationState.Id mirrors
+        // the local id so the rendered prompt's "Stage:" header reflects the alias.
+        var clonedConversationState = sourceRuntime.ConversationState with { Id = localId };
+        var clonedRuntime = new RealtimeIvrWorkflowStep
+        {
+            Id = localId,
+            ConversationState = clonedConversationState,
+            AvailableTools = sourceRuntime.AvailableTools,
+            ToolRules = sourceRuntime.ToolRules,
+            Guards = sourceRuntime.Guards,
+            Validators = sourceRuntime.Validators,
+            RequiredStateKeys = sourceRuntime.RequiredStateKeys,
+            MaxRetries = sourceRuntime.MaxRetries,
+            MaxDuration = sourceRuntime.MaxDuration,
+            RequiredAuthLevel = sourceRuntime.RequiredAuthLevel,
+            OnCompleted = sourceRuntime.OnCompleted,
+            StepScriptedConfiguration = sourceRuntime.StepScriptedConfiguration,
+            Terminal = sourceRuntime.Terminal,
+            TerminalOutcome = sourceRuntime.TerminalOutcome,
+            Intents = sourceRuntime.Intents,
+        };
+
+        return new CompiledIvrStage
+        {
+            Id = localId,
+            Description = sourceStage.Description,
+            Goal = sourceStage.Goal,
+            Terminal = sourceStage.Terminal,
+            Strategy = workflowPolicy,
+            Tools = sourceStage.Tools,
+            Capabilities = sourceStage.Capabilities,
+            Intents = sourceStage.Intents,
+            RuntimeStep = clonedRuntime,
+        };
+    }
+
+    /// <summary>
+    /// Build a degenerate <see cref="CompiledIvrStage"/> used when an import fails. The
+    /// compiler will throw with the accumulated errors anyway; this just lets the rest
+    /// of the document continue to compile so all errors surface at once.
+    /// </summary>
+    private static CompiledIvrStage BuildPlaceholderImport(
+        IvrStageDocument stage,
+        IvrStrategyPolicy workflowPolicy,
+        string? localId = null)
+    {
+        var id = !string.IsNullOrWhiteSpace(localId) ? localId!
+            : !string.IsNullOrWhiteSpace(stage.Id) ? stage.Id
+            : "import-error";
+        var runtimeStep = new RealtimeIvrWorkflowStep
+        {
+            Id = id,
+            ConversationState = new ConversationState { Id = id, Description = id, Instructions = [] },
+        };
+        return new CompiledIvrStage
+        {
+            Id = id,
+            Description = stage.Description,
+            Goal = stage.Goal,
+            Terminal = stage.Terminal,
+            Strategy = workflowPolicy,
+            Tools = [],
+            Capabilities = [],
+            Intents = new Dictionary<string, CompiledIvrIntent>(StringComparer.OrdinalIgnoreCase),
+            RuntimeStep = runtimeStep,
+        };
+    }
+
+    /// <summary>
+    /// Lower a YAML stage tagged <c>type: subflow</c> into a marker
+    /// <see cref="SubflowIvrWorkflowStep"/>. The realtime navigator detects the marker
+    /// at entry time and pushes the referenced child workflow onto its frame stack
+    /// instead of rendering a prompt.
+    /// </summary>
+    private static CompiledIvrStage CompileSubflowStage(
+        IvrStageDocument stage,
+        IvrStrategyPolicy workflowPolicy,
+        List<string> errors)
+    {
+        var subflowDoc = stage.Subflow;
+        var workflowId = subflowDoc?.WorkflowId;
+        if (string.IsNullOrWhiteSpace(workflowId))
+        {
+            errors.Add($"Stage '{stage.Id}': type=subflow requires 'subflow.workflowId'.");
+            workflowId = string.Empty;
+        }
+
+        // Stage-level shortcut fields take precedence over the nested subflow block.
+        var onSuccess = !string.IsNullOrWhiteSpace(stage.OnSuccess) ? stage.OnSuccess : subflowDoc?.OnSuccess;
+        var onFailure = !string.IsNullOrWhiteSpace(stage.OnFailure) ? stage.OnFailure : subflowDoc?.OnFailure;
+
+        // Synthesize transitions so the navigator's TransitionTo (which validates against
+        // CurrentStep.ValidTransitions) accepts the resume targets emitted by PopFrameAsync.
+        var transitions = new List<StateTransition>();
+        if (!string.IsNullOrWhiteSpace(onSuccess))
+        {
+            transitions.Add(new StateTransition { Condition = "subflow:onSuccess", NextStep = onSuccess! });
+        }
+        if (!string.IsNullOrWhiteSpace(onFailure))
+        {
+            transitions.Add(new StateTransition { Condition = "subflow:onFailure", NextStep = onFailure! });
+        }
+
+        var conversationState = new ConversationState
+        {
+            Id = stage.Id,
+            Description = stage.Description ?? $"Sub-workflow: {workflowId}",
+            Goal = stage.Goal,
+            Instructions = (IReadOnlyList<string>)[],
+            ExitWhen = stage.ExitWhen,
+            Transitions = transitions.Count == 0 ? null : transitions,
+        };
+
+        var runtimeStep = new SubflowIvrWorkflowStep
+        {
+            Id = stage.Id,
+            ConversationState = conversationState,
+            SubflowWorkflowId = workflowId ?? string.Empty,
+            OnSuccessStepId = onSuccess,
+            OnFailureStepId = onFailure,
+            MinVersion = subflowDoc?.MinVersion,
+            MaxVersion = subflowDoc?.MaxVersion,
+            Terminal = stage.Terminal,
+            TerminalOutcome = ParseTerminalOutcome(stage.TerminalOutcome),
+            MaxRetries = stage.MaxRetries ?? 3,
+        };
+
+        return new CompiledIvrStage
+        {
+            Id = stage.Id,
+            Description = stage.Description,
+            Goal = stage.Goal,
+            Terminal = stage.Terminal,
+            Strategy = workflowPolicy,
+            Tools = [],
+            Capabilities = [],
+            Intents = new Dictionary<string, CompiledIvrIntent>(StringComparer.OrdinalIgnoreCase),
+            RuntimeStep = runtimeStep,
+        };
+    }
+
+    private static TerminalOutcome ParseTerminalOutcome(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return TerminalOutcome.Success;
+        }
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "success" or "ok" or "completed" => TerminalOutcome.Success,
+            "failure" or "failed" or "cancel" or "cancelled" => TerminalOutcome.Failure,
+            _ => TerminalOutcome.Success,
+        };
+    }
+
+    /// <summary>
+    /// Phase 3: lower per-transition <c>requires:</c> into compiled
+    /// <see cref="TransitionRule"/> records. The same transition is also represented as a
+    /// <c>ConversationState.Transitions</c> entry (for legacy consumers that only need
+    /// the target id); this list adds the guard metadata the navigator's auth-resolver
+    /// detour needs.
+    /// </summary>
+    private IReadOnlyList<TransitionRule> BuildTransitionRules(string workflowName, IvrStageDocument stage, List<string> errors)
+    {
+        if (stage.Transitions.Count == 0 && string.IsNullOrWhiteSpace(stage.OnExit))
+        {
+            return [];
+        }
+
+        var rules = new List<TransitionRule>();
+
+        if (stage.OnExit is { Length: > 0 } onExit)
+        {
+            rules.Add(new TransitionRule
+            {
+                TargetStepId = onExit,
+                Condition = stage.ExitWhen ?? "default",
+                Guards = [],
+            });
+        }
+
+        foreach (var t in stage.Transitions)
+        {
+            if (string.IsNullOrWhiteSpace(t.To))
+            {
+                continue;
+            }
+
+            IReadOnlyList<IIvrStepGuard> tGuards = [];
+            if (t.Requires.Count > 0)
+            {
+                var built = new List<IIvrStepGuard>(t.Requires.Count);
+                foreach (var g in t.Requires)
+                {
+                    try { built.Add(BuildGuard(workflowName, stage.Id, g)); }
+                    catch (InvalidOperationException ex) { errors.Add(ex.Message); }
+                }
+                tGuards = built;
+            }
+
+            rules.Add(new TransitionRule
+            {
+                TargetStepId = t.To,
+                Condition = t.OnIntent is { Length: > 0 } i ? $"intent:{i}"
+                    : t.OnCondition is { Length: > 0 } c ? c
+                    : "default",
+                Guards = tGuards,
+            });
+        }
+
+        return rules;
+    }
+
+    /// <summary>
+    /// Phase 3: lower the workflow-level <c>authResolvers:</c> list into runtime
+    /// <see cref="CompiledAuthResolver"/> entries. Each entry pairs a guard-shape matcher
+    /// with the sub-workflow to push when a transition's guard fails.
+    /// </summary>
+    private IReadOnlyList<CompiledAuthResolver> CompileAuthResolvers(IvrWorkflowDocument document, List<string> errors)
+    {
+        if (document.AuthResolvers.Count == 0)
+        {
+            return [];
+        }
+
+        var resolvers = new List<CompiledAuthResolver>(document.AuthResolvers.Count);
+        foreach (var r in document.AuthResolvers)
+        {
+            if (string.IsNullOrWhiteSpace(r.Subflow))
+            {
+                errors.Add($"Workflow '{document.Name}': authResolver entry is missing 'subflow'.");
+                continue;
+            }
+
+            IIvrStepGuard template;
+            try
+            {
+                template = BuildGuard(document.Name, stageId: null, r.Guard);
+            }
+            catch (InvalidOperationException ex)
+            {
+                errors.Add(ex.Message);
+                continue;
+            }
+
+            // Shape-based matcher: for known built-in guards we compare the discriminating
+            // field (level, etc.); for everything else we fall back to runtime-type
+            // equality. Custom guard kinds can register their own matchers later by
+            // implementing equality on the produced IIvrStepGuard.
+            var matcher = template switch
+            {
+                Guards.RequiredAuthLevelGuard authTemplate => new Func<IIvrStepGuard, bool>(g =>
+                    g is Guards.RequiredAuthLevelGuard candidate && candidate.RequiredLevel == authTemplate.RequiredLevel),
+                _ => (Func<IIvrStepGuard, bool>)(g => g.GetType() == template.GetType()),
+            };
+
+            var description = template is Guards.RequiredAuthLevelGuard authT
+                ? $"auth:{authT.RequiredLevel}"
+                : template.GetType().Name;
+
+            resolvers.Add(new CompiledAuthResolver
+            {
+                Matches = matcher,
+                SubflowWorkflowId = r.Subflow,
+                MinVersion = r.MinVersion,
+                MaxVersion = r.MaxVersion,
+                Description = description,
+            });
+        }
+        return resolvers;
     }
 
     private static CallerVerificationLevel ParseAuthLevel(string? value)

@@ -52,4 +52,13 @@ public sealed record DtmfMenuOption
 
     /// <summary>Audio file played when the action signals failure (alternative to <see cref="OnFailurePrompt"/>).</summary>
     public Uri? OnFailureAudioFile { get; init; }
+
+    /// <summary>
+    /// Phase 3: guards that must pass before this digit's transition fires. Combined with
+    /// the target step's stage-level guards at evaluation time. When any guard fails the
+    /// navigator looks up a matching auth-resolver from
+    /// <see cref="RealtimeIvrWorkflowDefinition.AuthResolvers"/> and detours through the
+    /// named sub-workflow before re-applying.
+    /// </summary>
+    public IReadOnlyList<IIvrStepGuard> Guards { get; init; } = [];
 }

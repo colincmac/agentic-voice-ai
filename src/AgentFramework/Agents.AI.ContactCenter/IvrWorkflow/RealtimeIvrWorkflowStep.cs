@@ -9,7 +9,12 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// Represents a workflow step that integrates with the Realtime AI prompt system.
 /// Each step defines a conversation state, required tools, guards, and exit conditions.
 /// </summary>
-public sealed class RealtimeIvrWorkflowStep
+/// <remarks>
+/// Not <c>sealed</c> so the compiler can emit specialized step kinds (e.g.
+/// <see cref="SubflowIvrWorkflowStep"/> introduced in Phase 1) that the navigator
+/// branches on without a separate discriminator field.
+/// </remarks>
+public class RealtimeIvrWorkflowStep
 {
     /// <summary>
     /// Gets the unique identifier for this step.
@@ -97,10 +102,35 @@ public sealed class RealtimeIvrWorkflowStep
     public bool Terminal { get; init; }
 
     /// <summary>
+    /// When <see cref="Terminal"/> is true and this step belongs to a child workflow
+    /// frame, indicates whether the pop should resume the parent at its <c>onSuccess</c>
+    /// (<see cref="TerminalOutcome.Success"/>) or <c>onFailure</c>
+    /// (<see cref="TerminalOutcome.Failure"/>) target. Sourced from the YAML
+    /// <c>terminalOutcome:</c> field; defaults to <see cref="TerminalOutcome.Success"/>
+    /// so single-workflow YAMLs and pre-Phase-1 step builders keep their existing meaning.
+    /// </summary>
+    public TerminalOutcome TerminalOutcome { get; init; } = TerminalOutcome.Success;
+
+    /// <summary>
     /// Gets the valid step IDs this step can transition to.
     /// </summary>
-    public IReadOnlyList<string> ValidTransitions =>
+    public virtual IReadOnlyList<string> ValidTransitions =>
         ConversationState.Transitions?.Select(t => t.NextStep).ToList() ?? [];
+
+    /// <summary>
+    /// Phase 3: per-transition rules including any <c>requires:</c> guards lowered from
+    /// the YAML. Indexed by <see cref="TransitionRule.TargetStepId"/>. Empty when the
+    /// compiler had no guard metadata to attach (legacy workflows without
+    /// <c>requires:</c> on their transitions).
+    /// </summary>
+    public IReadOnlyList<TransitionRule> TransitionRules { get; init; } = [];
+
+    /// <summary>
+    /// Phase 3: stage-level override for the workflow's <c>onUnauthorized</c> fallback.
+    /// Routed by the navigator when a transition into this stage fails its guards and
+    /// no auth-resolver chain can satisfy them.
+    /// </summary>
+    public string? OnUnauthorizedStepId { get; init; }
 
     /// <summary>
     /// Gets the compiled intent table for this step keyed by intent name. Populated by the

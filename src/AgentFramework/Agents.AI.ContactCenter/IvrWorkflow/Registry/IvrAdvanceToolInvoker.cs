@@ -116,35 +116,108 @@ public sealed class IvrAdvanceToolInvoker
             case AdvanceResolutionKind.Intent:
                 {
                     var target = resolution.TargetStageId!;
-                    var tr = _navigator.TransitionTo(target);
-                    if (!tr.Succeeded || tr.NewStep is null)
+
+                    // Phase 3: consult per-transition + per-stage guards before applying.
+                    // The navigator returns a verdict that may require an auth-resolver
+                    // detour via PushSubflowAsync before the actual transition fires.
+                    var evaluation = await _navigator.EvaluateTransitionAsync(target, cancellationToken).ConfigureAwait(false);
+
+                    switch (evaluation)
                     {
-                        _logger.LogWarning(
-                            "Advance to '{Target}' from '{Current}' rejected by navigator: {Reason}",
-                            target, currentStep.Id, tr.Reason);
-                        return new AdvanceToolResult(
-                            AdvanceToolResult.StatusTransitionRejected,
-                            $"Cannot advance to '{target}': {tr.Reason ?? "navigator rejected the transition."}",
-                            From: currentStep.Id,
-                            To: target,
-                            Reason: tr.Reason);
+                        case TransitionEvaluation.Allowed allowed:
+                        {
+                            var tr = _navigator.TransitionTo(target);
+                            if (!tr.Succeeded || tr.NewStep is null)
+                            {
+                                _logger.LogWarning(
+                                    "Advance to '{Target}' from '{Current}' rejected by navigator after Allowed evaluation: {Reason}",
+                                    target, currentStep.Id, tr.Reason);
+                                return new AdvanceToolResult(
+                                    AdvanceToolResult.StatusTransitionRejected,
+                                    $"Cannot advance to '{target}': {tr.Reason ?? "navigator rejected the transition."}",
+                                    From: currentStep.Id,
+                                    To: target,
+                                    Reason: tr.Reason);
+                            }
+
+                            await _applyStageAsync(tr.NewStep, cancellationToken).ConfigureAwait(false);
+
+                            var status = tr.NewStep.Terminal
+                                ? AdvanceToolResult.StatusAdvancedTerminal
+                                : AdvanceToolResult.StatusAdvanced;
+                            var message = tr.NewStep.Terminal
+                                ? $"Advanced to terminal stage '{tr.NewStep.Id}'. The workflow is complete."
+                                : $"Advanced to stage '{tr.NewStep.Id}'.";
+
+                            return new AdvanceToolResult(
+                                status, message,
+                                From: currentStep.Id,
+                                To: tr.NewStep.Id,
+                                Terminal: tr.NewStep.Terminal);
+                        }
+
+                        case TransitionEvaluation.RequiresDetour detour:
+                        {
+                            // Cache the original intent so subflow prompts can surface it
+                            // (Collected Information renders all state keys automatically),
+                            // then push the resolver subflow with the original target as
+                            // the return step. PopFrameAsync will chain another detour if
+                            // a stricter guard still fails post-resume.
+                            _navigator.State.Set(
+                                PendingIntent.StateKey,
+                                new PendingIntent(target, _navigator.Definition.Name, resolution.ResolvedIntent?.Name));
+
+                            _logger.LogInformation(
+                                "Advance to '{Target}' detouring through '{Resolver}' ({Subflow}) to satisfy '{Guard}'.",
+                                target, detour.ResolverDescription, detour.ResolverWorkflowId, detour.UnmetGuard.GetType().Name);
+
+                            var childInitial = await _navigator.PushSubflowAsync(
+                                detour.ResolverWorkflowId,
+                                returnToStepId: target,
+                                failureReturnStepId: detour.Target.OnUnauthorizedStepId
+                                    ?? _navigator.Definition.UnauthorizedFailureStepId,
+                                detour.MinVersion,
+                                detour.MaxVersion,
+                                cancellationToken).ConfigureAwait(false);
+
+                            await _applyStageAsync(childInitial, cancellationToken).ConfigureAwait(false);
+
+                            return new AdvanceToolResult(
+                                AdvanceToolResult.StatusAdvanced,
+                                $"Routing through '{detour.ResolverWorkflowId}' to satisfy {detour.ResolverDescription} before continuing to '{target}'.",
+                                From: currentStep.Id,
+                                To: childInitial.Id);
+                        }
+
+                        case TransitionEvaluation.BlockedNoResolver blocked:
+                            _logger.LogWarning(
+                                "Advance to '{Target}' blocked: {Reason} (no resolver registered for guard '{Guard}')",
+                                target, blocked.Reason, blocked.UnmetGuard.GetType().Name);
+                            return new AdvanceToolResult(
+                                AdvanceToolResult.StatusTransitionRejected,
+                                $"Cannot advance to '{target}': {blocked.Reason}",
+                                From: currentStep.Id,
+                                To: target,
+                                Reason: blocked.Reason);
+
+                        case TransitionEvaluation.Invalid invalid:
+                            _logger.LogWarning(
+                                "Advance to '{Target}' from '{Current}' rejected by navigator: {Reason}",
+                                target, currentStep.Id, invalid.Reason);
+                            return new AdvanceToolResult(
+                                AdvanceToolResult.StatusTransitionRejected,
+                                $"Cannot advance to '{target}': {invalid.Reason}",
+                                From: currentStep.Id,
+                                To: target,
+                                Reason: invalid.Reason);
                     }
 
-                    await _applyStageAsync(tr.NewStep, cancellationToken).ConfigureAwait(false);
-
-                    var status = tr.NewStep.Terminal
-                        ? AdvanceToolResult.StatusAdvancedTerminal
-                        : AdvanceToolResult.StatusAdvanced;
-                    var message = tr.NewStep.Terminal
-                        ? $"Advanced to terminal stage '{tr.NewStep.Id}'. The workflow is complete."
-                        : $"Advanced to stage '{tr.NewStep.Id}'.";
-
+                    // Should be exhaustive — defensive fallback.
                     return new AdvanceToolResult(
-                        status,
-                        message,
+                        AdvanceToolResult.StatusTransitionRejected,
+                        $"Unrecognized transition evaluation for '{target}'.",
                         From: currentStep.Id,
-                        To: tr.NewStep.Id,
-                        Terminal: tr.NewStep.Terminal);
+                        To: target);
                 }
 
             default:

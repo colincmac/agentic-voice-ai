@@ -37,4 +37,22 @@ public sealed class IvrWorkflowDocument
     /// <summary>Ordered stages composing the workflow. The first stage is the initial stage.</summary>
     [YamlMember(Alias = "stages")]
     public List<IvrStageDocument> Stages { get; set; } = [];
+
+    /// <summary>
+    /// Phase 3: workflow-level table mapping guard patterns to sub-workflows that
+    /// satisfy them. The navigator consults this list whenever a transition's or stage's
+    /// <c>requires:</c> fail, pushes the first matching resolver's subflow with the
+    /// original target as the return step, and re-evaluates after pop.
+    /// </summary>
+    [YamlMember(Alias = "authResolvers")]
+    public List<IvrAuthResolverDocument> AuthResolvers { get; set; } = [];
+
+    /// <summary>
+    /// Phase 3: workflow-default stage to enter when a transition's guards cannot be
+    /// satisfied by any resolver chain (no resolver match, or the resolver subflow
+    /// itself terminates in failure). Per-stage <c>onUnauthorized</c> overrides this.
+    /// When neither is set the call ends.
+    /// </summary>
+    [YamlMember(Alias = "onUnauthorized")]
+    public string? OnUnauthorized { get; set; }
 }

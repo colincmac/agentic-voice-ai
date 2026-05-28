@@ -15,7 +15,11 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 /// </remarks>
 internal static class IvrScriptedMapper
 {
-    public static StepScriptedConfiguration? Map(IvrScriptedStageDocument doc, string stageId, List<string> errors)
+    public static StepScriptedConfiguration? Map(
+        IvrScriptedStageDocument doc,
+        string stageId,
+        List<string> errors,
+        Func<IvrGuardDocument, IIvrStepGuard?>? guardBuilder = null)
     {
         if (doc.ConfidenceThreshold is < 0.0 or > 1.0)
         {
@@ -35,7 +39,7 @@ internal static class IvrScriptedMapper
         }
 
         var nluCfg = doc.Nlu is { } nluDoc ? MapNlu(nluDoc, stageId, errors) : null;
-        var dtmfCfg = doc.Dtmf is { } dtmfDoc ? IvrDtmfMapper.Map(dtmfDoc, stageId, errors) : null;
+        var dtmfCfg = doc.Dtmf is { } dtmfDoc ? IvrDtmfMapper.Map(dtmfDoc, stageId, errors, guardBuilder) : null;
 
         var hasSharedSignal =
             !string.IsNullOrEmpty(doc.SsmlPrompt)
