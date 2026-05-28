@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -269,15 +270,77 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                     MessageId = update.MessageId,
                 };
 
-                if(update is OutputTextAudioRealtimeServerMessage outputMessage)
+                switch (update)
                 {
-                    wrapped.ResponseId = outputMessage.ResponseId;
-                    wrapped.Contents.Add(new TextContent(outputMessage.Text));
-                    byte[]? audioBytes = outputMessage.Audio is not null
-                        ? Convert.FromBase64String(outputMessage.Audio)
-                        : null;
-                    wrapped.Contents.Add(new DataContent(audioBytes, "audio/pcm"));
+                    case OutputTextAudioRealtimeServerMessage outputMessage:
+                        wrapped.ResponseId = outputMessage.ResponseId;
+                        if (outputMessage.Text is not null)
+                        {
+                            wrapped.Contents.Add(new TextContent(outputMessage.Text));
+                        }
+                        if (outputMessage.Audio is not null)
+                        {
+                            wrapped.Contents.Add(new DataContent(Convert.FromBase64String(outputMessage.Audio), "audio/pcm"));
+                        }
+                        break;
+
+                    case ResponseCreatedRealtimeServerMessage responseMessage:
+                        wrapped.ResponseId = responseMessage.ResponseId;
+                        if (responseMessage.Type == RealtimeServerMessageType.ResponseCreated)
+                        {
+                            wrapped.Contents.Add(new RealtimeResponseStartContent(responseMessage.ResponseId));
+                        }
+                        else if (responseMessage.Type == RealtimeServerMessageType.ResponseDone)
+                        {
+                            wrapped.Contents.Add(new RealtimeResponseFinishedContent(responseMessage.ResponseId));
+                        }
+                        if (responseMessage.Usage is not null)
+                        {
+                            wrapped.Contents.Add(new UsageContent(responseMessage.Usage));
+                        }
+                        if (responseMessage.Error is not null)
+                        {
+                            wrapped.Contents.Add(responseMessage.Error);
+                        }
+                        break;
+
+                    case ResponseOutputItemRealtimeServerMessage outputItemMessage:
+                        wrapped.ResponseId = outputItemMessage.ResponseId;
+                        if (wrapped.MessageId is null && outputItemMessage.Item?.Id is { } itemId)
+                        {
+                            wrapped.MessageId = itemId;
+                        }
+                        if (outputItemMessage.Item?.Contents is { Count: > 0 } itemContents)
+                        {
+                            foreach (var content in itemContents)
+                            {
+                                wrapped.Contents.Add(content);
+                            }
+                        }
+                        break;
+
+                    case InputAudioTranscriptionRealtimeServerMessage transcriptionMessage:
+                        if (!string.IsNullOrEmpty(transcriptionMessage.Transcription))
+                        {
+                            wrapped.Contents.Add(new TextContent(transcriptionMessage.Transcription));
+                        }
+                        if (transcriptionMessage.Error is not null)
+                        {
+                            wrapped.Contents.Add(transcriptionMessage.Error);
+                        }
+                        if (transcriptionMessage.Type == RealtimeServerMessageType.InputAudioTranscriptionCompleted
+                            && transcriptionMessage.Usage is not null)
+                        {
+                            wrapped.Contents.Add(new UsageContent(transcriptionMessage.Usage));
+                        }
+                        break;
+
+                    default:
+                        // Fallback (including RawContentOnly and error-mapped messages):
+                        // yield with RawRepresentation only.
+                        break;
                 }
+
                 yield return wrapped;
 
                 hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
