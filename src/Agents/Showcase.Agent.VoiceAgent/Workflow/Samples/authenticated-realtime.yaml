@@ -1,10 +1,14 @@
 name: authenticated-realtime
 version: 1
 description: |
-  Showcase port of AuthenticatedSampleWorkflows.BuildAuthenticatedRealtimeWorkflow.
-  Voice-first ACME Bank concierge that greets the caller, asks for their PIN,
-  and calls the host-registered 'confirm-identity' tool to elevate the
-  verification level before answering account-specific questions.
+  Voice-first ACME Bank concierge that greets the caller, walks them through
+  two-factor verification (knowledge-based PIN + SMS one-time passcode), and
+  then exposes a self-service balance lookup. The PIN step calls the host
+  'confirm-identity' tool which elevates the caller to KnowledgeBased; the
+  OTP step calls 'request-otp' to dispatch an SMS, then 'submit-otp' once the
+  caller reads the digits back, elevating the caller to MultiFactor. The
+  balance stage is guarded by an `auth: multiFactor` requirement so it is
+  unreachable unless both factors have passed.
 
 strategy:
   primary: realtime
@@ -30,13 +34,18 @@ base:
 
 stages:
   - id: welcome
-    goal: "Greet the caller and collect their primary intent."
+    goal: "Greet the caller, capture their name, and collect their primary intent."
     realtime:
       instructions:
-        - "If a CallerName is present in context, greet by first name. Otherwise greet generically."
-        - "Listen for the caller's intent: balance, billing, or agent transfer."
+        - "Greet the caller warmly."
+        - "If `CallerFullName` is already present in the Collected Information, address them by first name directly — do NOT ask again."
+        - "Otherwise, ask the caller for their first and last name. Once they have clearly stated both, call the record-caller-name tool exactly once with the spoken values. After the tool returns success, thank them by first name."
+        - "Then listen for the caller's intent: balance, billing, or agent transfer."
       examples:
-        - "Welcome to ACME Bank. I can help with balances, billing, or transferring to a representative."
+        - "Welcome to ACME Bank. Before we get started, could I get your first and last name?"
+        - "Thanks, Jordan. I can help with balances, billing, or transferring to a representative — what would you like to do?"
+      tools:
+        - record-caller-name
     scripted:
       dtmf:
         ssmlPrompt: |
@@ -65,8 +74,8 @@ stages:
         onCondition: "Caller asked for an agent"
 
   - id: verify
-    goal: "Confirm the caller's identity via PIN before sharing account info."
-    description: "Identity verification"
+    goal: "Confirm the caller's identity via PIN (knowledge factor)."
+    description: "PIN verification (factor 1)"
     realtime:
       instructions:
         - "Politely ask the caller to say their four-digit PIN."
@@ -74,24 +83,87 @@ stages:
         - "On failure, ask once more, then offer to transfer to an agent."
       tools:
         - confirm-identity
-    exitWhen: "Identity confirmed or transfer requested"
+    scripted:
+      onErrorPrompt: "That PIN doesn't match our records. Transferring you to an agent."
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              Please enter your four-digit PIN, followed by the pound key.
+            </voice>
+          </speak>
+        collect:
+          minDigits: 4
+          maxDigits: 4
+          terminator: '#'
+          validator: pin-validator
+          digitsParameterName: digits
+          collectedStateKey: pinVerified
+          onValidNextStage: otp_verify
+          onInvalidPrompt: "That PIN doesn't match our records. Transferring you to an agent."
+    exitWhen: "PIN confirmed or transfer requested"
     transitions:
-      - to: self_service
-        onCondition: "Identity confirmed"
+      - to: otp_verify
+        onCondition: "PIN confirmed"
       - to: transfer
-        onCondition: "Identity could not be confirmed"
+        onCondition: "PIN could not be confirmed"
 
-  - id: self_service
-    goal: "Answer the caller's account-specific question."
-    description: "Verified self-service"
+  - id: otp_verify
+    goal: "Complete MFA by sending an SMS one-time passcode and validating the caller's response."
+    description: "SMS OTP verification (factor 2)"
+    requires:
+      - type: auth
+        level: knowledgeBased
+        message: "PIN verification must complete before sending an OTP."
+    realtime:
+      instructions:
+        - "Tell the caller you are sending a six-digit code to the phone number on file."
+        - "Call request-otp exactly once to dispatch the SMS."
+        - "When the caller reads the digits back, call submit-otp with just the digits — do not invent or guess."
+        - "On failure, allow one retry, then offer to transfer to an agent."
+      tools:
+        - request-otp
+        - submit-otp
+    scripted:
+      onErrorPrompt: "That code doesn't match. Transferring you to an agent."
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              A six-digit code has been sent to your phone. Enter it followed by the pound key.
+            </voice>
+          </speak>
+        collect:
+          minDigits: 6
+          maxDigits: 6
+          terminator: '#'
+          validator: submit-otp
+          digitsParameterName: digits
+          collectedStateKey: otpVerified
+          onValidNextStage: balance
+          onInvalidPrompt: "That code doesn't match. Transferring you to an agent."
+    exitWhen: "OTP confirmed or transfer requested"
+    transitions:
+      - to: balance
+        onCondition: "OTP confirmed"
+      - to: transfer
+        onCondition: "OTP could not be confirmed"
+
+  - id: balance
+    goal: "Read the verified caller their current account balance."
+    description: "Verified balance self-service"
     requires:
       - type: auth
         level: multiFactor
+        message: "Balance access requires multi-factor verification."
     realtime:
       instructions:
-        - "Caller is verified — answer their original request using account tools."
-        - "When they're done, ask if there's anything else."
-    exitWhen: "Caller has no more questions"
+        - "Caller is fully verified at this point."
+        - "Call lookup-balance and read back the available and pending amounts in a natural sentence (e.g. \"Your available balance is $8,421.33 with $125 pending\")."
+        - "When they're done, ask if there's anything else; if not, hand off to closing."
+      tools:
+        - lookup-balance
+    exitWhen: "Caller has heard their balance and has no more questions"
     onExit: closing
 
   - id: transfer
@@ -114,3 +186,4 @@ stages:
         - "Summarize what was accomplished and end the call."
       examples:
         - "Thanks for calling ACME Bank. Goodbye."
+

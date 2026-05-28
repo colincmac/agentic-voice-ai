@@ -25,6 +25,7 @@ using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Authentication;
 using Showcase.Agent.VoiceAgent.Configuration;
+using Showcase.Agent.VoiceAgent.Tools;
 using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 
@@ -99,6 +100,13 @@ builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
 
+// Mock SMS-OTP MFA: in-process sender that logs the generated code and stashes it in
+// LastIssuedOtpRegistry so the diagnostics API can surface it during demo runs.
+builder.Services.AddSingleton<LastIssuedOtpRegistry>();
+builder.Services.AddSingleton<ISmsOtpSender, LoggingSmsOtpSender>();
+// SmsOtpAttempt is consumed by SmsOtpAuthenticator + SmsOtpTools within the same call scope.
+builder.Services.AddScoped<SmsOtpAttempt>();
+
 // Declarative YAML IVR framework: loads workflow definitions from
 // Workflow\Samples\*.yaml (copied to the app output via the csproj content glob),
 // compiles them into RealtimeIvrWorkflowDefinition instances, and exposes the
@@ -112,6 +120,15 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("confirm-identity", sp => PinValidationTools.ConfirmIdentityTool(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()))
+    .AddTool("request-otp", sp => SmsOtpTools.RequestOtpTool(
+        sp.GetRequiredService<ILoggerFactory>()))
+    .AddTool("submit-otp", sp => SmsOtpTools.SubmitOtpTool(
+        sp.GetRequiredService<ILoggerFactory>()))
+    .AddTool("lookup-balance", sp => BalanceLookupTools.LookupBalanceTool(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()))
+    .AddTool("record-caller-name", sp => WorkflowStateTools.RecordCallerNameTool(
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
         DemoWorkflowIds.DefaultEscalationNumber)));
@@ -180,6 +197,10 @@ builder.AddCallSessionContainer()
     .AddCallerAuthentication()
     .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
     .AddPinAuthenticator<InMemoryPinValidator>()
+    // Demo MFA second factor: SMS OTP. Uses LoggingSmsOtpSender + the framework's
+    // InMemoryChallengeStore registered by AddCallerAuthentication() above. The SmsOtpAttempt
+    // scoped buffer the SmsOtpTools fill is added here so it shares the call's DI scope.
+    .AddCallerAuthenticator<SmsOtpAuthenticator>()
     // Where the composite (and any DTMF "press 0 for agent" tool) sends escalations.
     .AddTransferEscalationTarget(DemoWorkflowIds.DefaultEscalationNumber)
     // Composite chain: RealtimeVoice → IntentNlu → DtmfOnly. The composite registers as a

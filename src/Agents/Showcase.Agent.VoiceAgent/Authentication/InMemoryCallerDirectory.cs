@@ -32,7 +32,9 @@ public sealed class InMemoryCallerDirectory : ICallerDirectory
             {
                 ["accountTier"] = "Premium",
                 ["preferredLanguage"] = "en-US",
-                ["pin"] = "4242"
+                ["pin"] = "4242",
+                ["balance"] = 8421.33m,
+                ["balancePending"] = 125.00m
             }));
 
         Seed(new CallerIdentity(
@@ -49,7 +51,9 @@ public sealed class InMemoryCallerDirectory : ICallerDirectory
             {
                 ["accountTier"] = "Standard",
                 ["preferredLanguage"] = "es-MX",
-                ["pin"] = "1357"
+                ["pin"] = "1357",
+                ["balance"] = 312.07m,
+                ["balancePending"] = 0m
             }));
     }
 

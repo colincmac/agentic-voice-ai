@@ -30,9 +30,37 @@ public sealed class IvrWorkflowNavigator(
         var step = Definition.GetStep(stepId)
             ?? throw new InvalidOperationException($"Step '{stepId}' not found in workflow '{Definition.Name}'.");
 
-        State.CurrentStepName = step.Id;
-        State.CurrentStepIndex = Definition.GetStepIndex(step.Id);
-        State.StepStartedAt = DateTimeOffset.UtcNow;
+        var stepIndex = Definition.GetStepIndex(step.Id);
+        var startedAt = DateTimeOffset.UtcNow;
+
+        // Phase 0: push a real frame if none exists yet (or the existing top frame is the
+        // anonymous shim frame produced by a legacy direct-write to CurrentStepName).
+        // Resume-after-tier-swap: if the top frame already belongs to this workflow, keep
+        // it as-is so we don't reset StepStartedAt or clobber sub-frames from Phase 1.
+        var current = State.CurrentFrame;
+        if (current is null || !string.Equals(current.WorkflowId, Definition.Name, StringComparison.Ordinal))
+        {
+            if (current is not null && current.WorkflowId.Length == 0)
+            {
+                // Anonymous shim frame from a legacy setter; drop it in favor of a real one.
+                State.PopFrame();
+            }
+            State.PushFrame(new WorkflowFrame
+            {
+                WorkflowId = Definition.Name,
+                CurrentStepId = step.Id,
+                CurrentStepIndex = stepIndex,
+                StepStartedAt = startedAt,
+            });
+        }
+        else
+        {
+            // Existing frame for this workflow — refresh step pointer/index but preserve identity.
+            current.CurrentStepId = step.Id;
+            current.CurrentStepIndex = stepIndex;
+            current.StepStartedAt ??= startedAt;
+        }
+
         if (State.Status is IvrWorkflowStatus.NotStarted)
         {
             State.Status = IvrWorkflowStatus.Running;
