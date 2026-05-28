@@ -88,14 +88,9 @@ builder.AddKeyedConversationClient("voicelive")
 
 var azureSpeechConnectionString = builder.Configuration.GetConnectionString("azurespeech");
 
-builder.Services.AddAzureSpeech(options =>
+builder.Services.AddAzureSpeech(builder.Configuration.GetSection(AzureSpeechServiceOptions.SectionName), options =>
 {
-    builder.Configuration.GetSection("AzureSpeech").Bind(options);
     options.Credential = new AzureCliCredential();
-    if (!string.IsNullOrWhiteSpace(azureSpeechConnectionString))
-    {
-        options.Endpoint = new Uri(azureSpeechConnectionString);
-    }
 });
 
 // E2E showcase: register the auth-aware DTMF workflow as the default and the realtime

@@ -47,12 +47,18 @@ public static class AzureSpeechServiceCollectionExtensions
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddAzureSpeech(
         this IServiceCollection services,
-        IConfigurationSection configurationSection)
+        IConfigurationSection configurationSection,
+        Action<AzureSpeechServiceOptions>? configure = null)
     {
-        services.AddOptions<AzureSpeechServiceOptions>()
+        var optionsBuilder = services.AddOptions<AzureSpeechServiceOptions>()
             .Bind(configurationSection)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        if (configure != null)
+        {
+            optionsBuilder.Configure(configure);
+        }
 
         RegisterResilientPipeline(services);
 

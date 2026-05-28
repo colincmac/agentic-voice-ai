@@ -261,6 +261,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         _cts.Dispose();
     }
 
+    #region Pump loops
     private async Task PumpInboundAudioAsync(StrategyStartContext context, CancellationToken ct)
     {
         try
@@ -310,6 +311,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             _logger.LogWarning(ex, "Realtime inbound DTMF pump terminated for call {CallId}", _callId);
         }
     }
+    #endregion
 
     private async Task HandleDtmfToneAsync(DtmfTone tone, CancellationToken ct)
     {

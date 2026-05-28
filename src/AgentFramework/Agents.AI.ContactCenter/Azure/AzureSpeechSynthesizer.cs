@@ -270,4 +270,6 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
 
         return ssmlDoc.ToString(SaveOptions.DisableFormatting);
     }
+
+
 }
