@@ -1,11 +1,8 @@
 using System.Buffers;
 using System.Threading.Channels;
 using Agents.AI.Extensions.Helpers.Streaming;
-using Agents.AI.Extensions.LiveVoice.Media.Audio;
-using Agents.AI.Extensions.LiveVoice.Media.Messaging;
-using Agents.AI.RealtimeVoice.Azure.Media.Audio;
-using Agents.AI.RealtimeVoice.Azure.Models;
-using Agents.AI.RealtimeVoice.Azure.Transports;
+using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Messaging;
 using Extensions.AI.Contents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -13,7 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Showcase.ConsolePlayground;
 
-public class TestCallParticipant : IChannelTransport, IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
+public class TestCallParticipant : IAudioConsumer, IAudioProducer, IMessageConsumer, IMessageProducer
 {
     private readonly ILogger<TestCallParticipant>? _logger;
     private SpeakerOutput? _speakerOutput;
@@ -29,16 +26,6 @@ public class TestCallParticipant : IChannelTransport, IAudioConsumer, IAudioProd
 
     public string ChannelId => "test";
     public bool IsConnected => true;
-
-    public ParticipantTransportMetadata Metadata => new()
-    {
-        RawIdentifier = "Test",
-        ChannelType = CommunicationChannelType.Unknown,
-        ContactId = ChannelId,
-        DisplayName = "Test Participant",
-        SupportsAudio = true,
-        SupportsMessaging = true
-    };
 
     public async Task WriteOutboundAsync(RawMediaStreamChannel audioOutput, MessageUpdateChannel messageOutput, CancellationToken cancellationToken = default)
     {

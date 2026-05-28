@@ -1,0 +1,119 @@
+name: dtmf-direct-express
+version: 1
+description: |
+  Showcase port of the legacy IvrSampleWorkflow.DtmfOnly flow. A bilingual
+  Direct Express style entry menu that branches into the English account
+  services tree. Pure DTMF, no realtime tier.
+
+strategy:
+  primary: dtmf
+  allowMidCallDegradation: false
+
+base:
+  commonTools:
+    - transfer-to-human
+    - end-session
+
+stages:
+  - id: 01_language
+    goal: "Greet the caller and pick a language."
+    scripted:
+      onErrorPrompt: "I didn't catch that. Press 1 for English or 2 for Spanish."
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0"
+                 xmlns="http://www.w3.org/2001/10/synthesis"
+                 xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              <prosody rate="-8%">
+                Thank you for calling Direct Express.
+                <break time="400ms"/>
+                For English, press 1.
+                <break time="200ms"/>
+                Para espa&#241;ol, oprima el dos.
+              </prosody>
+            </voice>
+          </speak>
+        options:
+          - { digit: '1', label: english, nextStage: main_menu_eng }
+          - { digit: '2', label: spanish, nextStage: main_menu_esp }
+
+  - id: main_menu_eng
+    goal: "English main menu — Direct Express account services."
+    scripted:
+      onErrorPrompt: "Sorry, that isn't a valid option. Please try again."
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0"
+                 xmlns="http://www.w3.org/2001/10/synthesis"
+                 xml:lang="en-US">
+            <voice name="en-US-Ava:DragonHDLatestNeural">
+              <prosody rate="-8%">
+                Welcome to Direct Express automated account services.
+                <break time="700ms"/>
+                Please have your card number available before continuing.
+                <break time="700ms"/>
+                For card activation, press 1.
+                <break time="450ms"/>
+                For your current balance and recent account activity, press 2.
+                <break time="450ms"/>
+                To report a lost or stolen card, press 3.
+                <break time="450ms"/>
+                To report unauthorized charges or possible fraud, press 4.
+                <break time="450ms"/>
+                For replacement card services, press 5.
+                <break time="450ms"/>
+                For account information, fees, or direct deposit questions, press 6.
+                <break time="450ms"/>
+                To repeat these options, press 9.
+                <break time="650ms"/>
+                To speak with a customer service representative, press 0.
+              </prosody>
+            </voice>
+          </speak>
+        options:
+          - { digit: '0', label: agent,           tool: transfer-to-human }
+          - { digit: '1', label: card_activation, nextStage: card_activation }
+          - { digit: '9', label: repeat,          nextStage: main_menu_eng }
+
+  - id: main_menu_esp
+    goal: "Stub Spanish main menu — transfers to a human agent."
+    scripted:
+      dtmf:
+        ssmlPrompt: |
+          <speak version="1.0"
+                 xmlns="http://www.w3.org/2001/10/synthesis"
+                 xml:lang="es-ES">
+            <voice name="es-ES-AlvaroNeural">
+              Lo sentimos, en este momento el men&#250; en espa&#241;ol no est&#225; disponible.
+              Le transferiremos con un agente.
+            </voice>
+          </speak>
+        options:
+          - { digit: '0', label: agent, tool: transfer-to-human }
+
+  - id: card_activation
+    goal: "Collect the card number and confirm activation."
+    requires:
+      - type: previousStage
+        stage: main_menu_eng
+    scripted:
+      onErrorPrompt: "That didn't look right. Please re-enter your 16-digit card number followed by the pound key."
+      dtmf:
+        ssmlPrompt: "Please enter your 16-digit card number followed by the pound key."
+        collect:
+          minDigits: 16
+          maxDigits: 16
+          terminator: '#'
+          collectedStateKey: cardNumber
+          onValidNextStage: card_activation_complete
+
+  - id: card_activation_complete
+    goal: "Confirm the card has been activated and end the call."
+    requires:
+      - type: state
+        key: cardNumber
+    terminal: true
+    scripted:
+      dtmf:
+        ssmlPrompt: "Thank you. Your card has been activated. Goodbye."

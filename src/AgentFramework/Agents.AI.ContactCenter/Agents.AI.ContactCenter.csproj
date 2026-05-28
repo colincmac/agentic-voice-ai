@@ -1,0 +1,67 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InjectSharedThrow>true</InjectSharedThrow>
+
+  </PropertyGroup>
+  <ItemGroup>
+
+    <!-- Azure Communication Services (ACS)-->
+    <PackageReference Include="Azure.Communication.CallAutomation" />
+    <PackageReference Include="Azure.Communication.Common" />
+    <PackageReference Include="Azure.Communication.Identity" />
+    <PackageReference Include="Azure.Messaging.EventGrid" />
+
+    <!-- Azure Blob Storage -->
+    <PackageReference Include="Azure.Storage.Blobs" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" />
+
+    <!-- Azure Managed Redis (AMR)-->
+    <PackageReference Include="StackExchange.Redis" />
+
+    <PackageReference Include="Microsoft.Extensions.Telemetry.Abstractions" />
+    <PackageReference Include="Microsoft.OpenTelemetry" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.Net.ClientFactory" />
+
+    <!-- Agent Framework Workflows runtime (executor/edge/InProcessExecution) -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" />
+
+    <!-- YAML authoring surface for declarative IVR workflows -->
+    <PackageReference Include="YamlDotNet" />
+
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <Protobuf Include="..\..\protos\agents.realtimevoice.v1.proto" GrpcServices="Server" />
+    <Protobuf Include="..\..\protos\biometrics.v1.proto" GrpcServices="Client" />
+    <Protobuf Include="..\..\protos\agents.intent.v1.proto" GrpcServices="Client" />
+
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\Agents.AI.Extensions\Agents.AI.Extensions.csproj" />
+    <ProjectReference Include="..\Agents.AI\Agents.AI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship YAML samples + schema next to the assembly so they can be discovered at runtime. -->
+    <Content Include="IvrWorkflow\Samples\*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="IvrWorkflow\Schema\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Authentication\UserIdentity\**" />
+    <EmbeddedResource Remove="Authentication\UserIdentity\**" />
+    <None Remove="Authentication\UserIdentity\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Agents.AI.ContactCenter.Tests" />
+  </ItemGroup>
+</Project>

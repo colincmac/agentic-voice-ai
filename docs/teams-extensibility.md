@@ -11,3 +11,11 @@ For the operator-side workflow in this repo, prefer:
 - [`tpe-onboarding-guide.md`](tpe-onboarding-guide.md) — greenfield enterprise onboarding (provisioning the Entra app, resource account, ACS binding, Bot Service registration, and TPE configuration end-to-end).
 - [`tpe-brownfield.md`](tpe-brownfield.md) — connecting an *existing* Teams Phone resource account to an *existing* ACS resource (the common case for customers who already have Teams Phone Standard or Direct Routing).
 - [`adr/0001-pstn-ingress-via-tpe.md`](adr/0001-pstn-ingress-via-tpe.md) — the architecture decision that picked TPE over Direct Routing / Operator Connect for this platform.
+
+## Known Issues
+To transfer directly to the Teams Resource Account, it needs a Phone Number
+await callConnection.TransferCallToParticipantAsync(
+    new TransferToParticipantOptions(target)
+    {
+        OperationContext = "transfer-to-dynamics"
+    });

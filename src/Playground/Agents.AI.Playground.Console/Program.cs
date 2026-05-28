@@ -6,7 +6,6 @@ using System.Buffers;
 using Agents.AI.Hosting;
 using Agents.AI.Playground.ConsoleApp;
 using Agents.AI.Realtime;
-using Agents.AI.RealtimeVoice;
 using Azure;
 using Azure.AI.VoiceLive;
 using Azure.Identity;

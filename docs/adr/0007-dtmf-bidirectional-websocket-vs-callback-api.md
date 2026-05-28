@@ -1,7 +1,7 @@
 # ADR-0007 — DTMF capture: ACS Recognize callback API vs ACS bi-directional media-streaming WebSocket with in-app DTMF detection
 
-- **Status:** **Proposed** (decision pending)
-- **Date:** WIP — track in the issue tracker before implementing the dependent work
+- **Status:** Accepted
+- **Date:** initial review; accepted 2026-05-15 alongside [ADR-0010](0010-active-active-multi-cluster-topology.md) / [ADR-0011](0011-pod-ownership-and-lease-model.md)
 
 ## Context
 
@@ -19,10 +19,12 @@ The realtime AI provider decision in [ADR-0006](0006-realtime-ai-voicelive-vs-gp
 
 ## Decision
 
-**Pending.** The decision will be made together with [ADR-0006](0006-realtime-ai-voicelive-vs-gpt-realtime.md) because the two interact, and after a small bake-off measuring DTMF latency and reliability under each model. Prior to that decision:
+A **hybrid** model is adopted, with `IDtmfSource` as the single abstraction dialog code consumes:
 
-- All DTMF handling **must** go through a single `IDtmfSource` abstraction in the agent code so the implementation can switch without touching dialog/menu logic.
-- The reference deployment defaults to the **Recognize callback API** (`CallMediaRecognizeDtmfOptions`) for the classic IVR path. This default is provisional and explicitly subject to change by this ADR — particularly for the realtime-AI path.
+- **Tier 1 / Tier 2 (realtime or ASR-driven dialog):** consume DTMF from the **bi-di WebSocket** so digits are accepted mid-utterance without fighting the audio session. The agent treats a digit as an interruption signal (`0` → escalate, account-number digits → fill a slot, `*` → repeat).
+- **Tier 3 (DTMF-only IVR) and any path where bi-di media streaming is unavailable:** use the **Recognize callback API** (`StartRecognizing(Dtmf)`) — server-side timeouts, no app-owned media, and works when the WebSocket is itself the failure mode.
+- The active **tier** ([ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md)) selects the implementation wired into `IDtmfSource` for the call. Mid-call degradation that crosses the WebSocket / Recognize boundary is handled by the same downgrade routine that flips `tier` in [ADR-0004](0004-call-state-in-redis-by-callconnectionid.md) state.
+- All DTMF handling **must** go through `IDtmfSource`. Dialog logic depends only on "a digit arrived for this call" — not on which API delivered it.
 
 ### Decision drivers
 
@@ -35,23 +37,17 @@ The realtime AI provider decision in [ADR-0006](0006-realtime-ai-voicelive-vs-gp
 | **Provider-side DTMF event differences** | Uniform `RecognizeCompleted` shape; ACS handles RFC 2833 vs in-band normalisation. | Same normalisation, but the event shape on the bi-di stream is different from the Recognize callback shape — needs adapting. |
 | **Required for graceful degradation** | Tier 3 (DTMF-only IVR) in [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) needs a working DTMF path that does **not** depend on the bi-di WebSocket — because Tier 3 is what we degrade to when realtime AI / media streaming is degraded. | Cannot be the only DTMF path: a media-streaming outage would also kill DTMF. |
 | **Server-side timeouts** | First-class (`initialSilenceTimeout`, `interToneTimeout`). | App must implement equivalents. |
+| **Pod affinity** ([ADR-0011](0011-pod-ownership-and-lease-model.md)) | None — callbacks land on any pod. | **Pins the call to the WS-owning pod** by construction — the pod that holds the bi-di WS is the only pod that can write barge-in audio back. Drives the pod-ownership lease model. |
 
-### Likely shape of the decision
+## Consequences
 
-The most probable outcome — to be validated by the bake-off — is a **hybrid**:
-
-- **Tier 1 / Tier 2 (realtime or ASR-driven dialog):** consume DTMF from the **bi-di WebSocket** so digits can be accepted mid-utterance without fighting the audio session. The agent treats a digit as an interruption signal (e.g., `0` → escalate, account-number digits → fill a slot, `*` → repeat).
-- **Tier 3 (DTMF-only IVR) and any path where bi-di media streaming is unavailable:** use the **Recognize callback API** (`StartRecognizing(Dtmf)`) — server-side timeouts, no app-owned media, and works even when the WebSocket is the failure mode.
-
-If the hybrid is adopted, the `IDtmfSource` abstraction has two implementations and the active tier (per [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md)) selects which one is wired in for the call.
-
-## Consequences (provisional)
-
-- A single `IDtmfSource` abstraction is mandatory regardless of outcome. Dialog logic depends only on "a digit arrived for this call" — not on which API delivered it.
-- If a hybrid is adopted, every dialog node needs to declare whether it expects digits during AI speech (bi-di) or only between prompts (Recognize). This is a per-node config, not a global mode.
-- Telemetry includes a `dtmfSource = recognize|webSocket` dimension on every digit event so dashboards can compare reliability and latency between the two paths during and after the bake-off.
-- The Recognize callback API stays in the codebase **even if** the bi-di path becomes the default for Tier 1, because Tier 3 of [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) requires it.
+- A single `IDtmfSource` abstraction is mandatory. Dialog logic depends only on "a digit arrived for this call" — not on which API delivered it.
+- Every dialog node declares whether it expects digits during AI speech (bi-di) or only between prompts (Recognize). This is a per-node config, not a global mode.
+- **Bi-di WebSocket consumption pins the call to one pod for its lifetime.** The pod that accepts the WS is the only pod that can drive barge-in audio for the call. This is the pod-affinity premise [ADR-0011](0011-pod-ownership-and-lease-model.md) is built on; mid-call callbacks for streaming-mode calls that land on a different pod must be looked up against the ownership lease and either forwarded or reaped.
+- Telemetry includes a `dtmfSource = recognize|webSocket` dimension on every digit event so dashboards compare reliability and latency between the two paths in production.
+- The Recognize callback API stays in the codebase **even though** the bi-di path is the default for Tier 1, because Tier 3 of [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) requires it and because mid-call degradation flips `IDtmfSource` to the Recognize implementation on WebSocket failure.
 - `operationContext` discipline (every Recognize tags the menu node it's listening for — see [ADR-0004](0004-call-state-in-redis-by-callconnectionid.md)) carries forward unchanged.
+- Streaming-mode calls do not survive their pod ([ADR-0011](0011-pod-ownership-and-lease-model.md)). Pod restarts during a Tier 1 / Tier 2 call trigger the audible-reroute path; Tier 3 / Tier 4 calls are unaffected because they have no pod-resident audio path.
 
 ## Alternatives considered
 
@@ -59,3 +55,9 @@ If the hybrid is adopted, the `IDtmfSource` abstraction has two implementations 
 - **Recognize callback only.** Workable for classic IVR but degrades the realtime AI experience: every `StartRecognizing` either pauses the AI or loses tones overlapping the AI's audio. Acceptable as the *Tier 3* path only.
 - **In-band DTMF detection from raw RTP.** Out of scope — ACS already normalises DTMF; reimplementing detection in the app gains nothing and adds DSP code.
 - **A second ACS call leg dedicated to DTMF.** Rejected — adds a second call object per caller, doubles event volume, and ACS does not expose a clean way to attach a "DTMF-only listener" leg.
+
+## Related
+
+- [ADR-0006](0006-realtime-ai-voicelive-vs-gpt-realtime.md) — Realtime AI provider choice that consumes the same bi-di WS.
+- [ADR-0008](0008-graceful-degradation-realtime-to-dtmf.md) — Tier model that selects the active `IDtmfSource` implementation.
+- [ADR-0011](0011-pod-ownership-and-lease-model.md) — Pod-affinity model that consumes the bi-di-pinning consequence above.

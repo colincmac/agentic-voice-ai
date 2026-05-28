@@ -13,7 +13,7 @@ public static class ChatClientExtensions
 
         if (!ChatClientConnectionInfo.TryParse(cs, out var connectionInfo))
         {
-            throw new InvalidOperationException($"Invalid connection string: {cs}. Expected format: 'Endpoint=endpoint;AccessKey=your_access_key;Model=model_name;Provider=ollama/openai/azureopenai;'.");
+            throw new InvalidOperationException($"Invalid connection string: {cs}. Expected format: 'Endpoint=endpoint;AccessKey=your_access_key;Deployment=model_name;Provider=ollama/openai/azureopenai;'.");
         }
 
         var chatClientBuilder = connectionInfo.Provider switch
@@ -72,7 +72,7 @@ public static class ChatClientExtensions
 
         if (!ChatClientConnectionInfo.TryParse(cs, out var connectionInfo))
         {
-            throw new InvalidOperationException($"Invalid connection string: {cs}. Expected format: 'Endpoint=endpoint;Key=your_access_key;Deployment=model_name;Provider=ollama/openai/azureopenai;'.");
+            throw new InvalidOperationException($"Invalid connection string: {cs}. Expected format: 'Endpoint=endpoint;Key=your_access_key;Model=model_name;Provider=ollama/openai/azureopenai;'.");
         }
 
         var chatClientBuilder = connectionInfo.Provider switch

@@ -1,6 +1,0 @@
-@Showcase.Agent.IntentAgent_HostAddress = http://localhost:5160
-
-GET {{Showcase.Agent.IntentAgent_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

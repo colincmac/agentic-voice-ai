@@ -32,9 +32,9 @@ public class ChatClientConnectionInfo
         }
 
         string? model = null;
-        if (connectionBuilder.ContainsKey("Deployment"))
+        if (connectionBuilder.ContainsKey("Model"))
         {
-            model = (string)connectionBuilder["Deployment"];
+            model = (string)connectionBuilder["Model"];
         }
 
         string? accessKey = null;
