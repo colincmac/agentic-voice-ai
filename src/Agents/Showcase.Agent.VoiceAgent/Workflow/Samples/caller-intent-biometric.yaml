@@ -74,15 +74,13 @@ stages:
     goal: "Run voice biometric verification."
     requires:
       - type: auth
-        level: accountVerified
+        level: aniMatch
     realtime:
       instructions:
         - "Explain that voice verification helps protect their account"
         - "Ask caller to repeat: 'My voice is my password, verify me'"
         - "Wait for biometric tool to complete verification"
         - "If verification fails, inform caller and offer to connect to a representative"
-      tools:
-        - voice-biometric-verify
     exitWhen: "Voice verification completes successfully or fails"
     transitions:
       - to: 5_handle_request
@@ -94,7 +92,7 @@ stages:
     goal: "Process the caller's verified request."
     requires:
       - type: auth
-        level: fullyAuthenticated
+        level: voiceBiometric
     realtime:
       instructions:
         - "Access appropriate tools based on the confirmed intent"

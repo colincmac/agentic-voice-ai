@@ -90,13 +90,13 @@ stages:
   - id: balance_self_service
     goal: "Read the verified caller their account balance."
     description: "Balance self-service"
+    terminal: true
     requires:
       - type: auth
         level: multiFactor
     realtime:
       instructions:
         - "Caller is fully verified at this point. Read account balance and offer next actions."
-    exitWhen: "Caller is finished or asks for an agent"
 
   - id: transfer_to_agent
     goal: "Hand the caller to a live agent."

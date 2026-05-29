@@ -24,10 +24,33 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Definition;
 public sealed class IvrStageImportDocument
 {
     /// <summary>
-    /// Reference to the source stage in the form <c>workflowId.stageId</c>. Required.
-    /// Multi-segment workflow ids are supported (e.g. <c>banking.lib.closing</c> → workflow
-    /// <c>banking.lib</c>, stage <c>closing</c> — the last <c>.</c>-separated segment is the
-    /// stage id).
+    /// Reference to the source stage. Required. Resolved against the
+    /// <see cref="Catalog.IIvrWorkflowCatalog"/> using a catalog-aware longest-prefix
+    /// match, so two forms are accepted:
+    /// <list type="number">
+    ///   <item>
+    ///     <description>
+    ///       <b>Bare workflow id</b> — when the referenced workflow has exactly one
+    ///       stage, that stage is imported (e.g. <c>stage: subflows.closing</c> where
+    ///       <c>subflows.closing</c> is itself a single-stage workflow). Importing a
+    ///       bare id whose workflow has 2+ stages is a compile error and the message
+    ///       prompts for the explicit <c>workflowId.stageId</c> form.
+    ///     </description>
+    ///   </item>
+    ///   <item>
+    ///     <description>
+    ///       <b><c>workflowId.stageId</c></b> — multi-segment workflow ids are
+    ///       supported via right-to-left longest-prefix lookup (e.g. <c>banking.lib.closing</c>
+    ///       resolves to workflow <c>banking.lib</c>, stage <c>closing</c> when both
+    ///       <c>banking</c> and <c>banking.lib</c> are registered; the longer/more
+    ///       specific prefix wins).
+    ///     </description>
+    ///   </item>
+    /// </list>
+    /// <see cref="MinVersion"/> / <see cref="MaxVersion"/> participate in resolution:
+    /// a workflow id only matches when the catalog has a version satisfying the pin
+    /// constraints, so the same reference can resolve differently across version
+    /// windows.
     /// </summary>
     [YamlMember(Alias = "stage")]
     public string Stage { get; set; } = string.Empty;

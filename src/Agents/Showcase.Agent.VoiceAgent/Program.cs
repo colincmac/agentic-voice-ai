@@ -83,12 +83,6 @@ builder.AddKeyedConversationClient("voicelive")
     .UseFunctionInvocation()
     .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
 
-// New Calling/Proposed shape: registers ICallSessionFactory + ICallSessionRegistry +
-// ICallQualityReporter, and wires the realtime voice strategy on top of the existing
-// AuthorizingRealtimeAIAgent. ISpeechSynthesizer would be added separately to enable DTMF.
-
-var azureSpeechConnectionString = builder.Configuration.GetConnectionString("azurespeech");
-
 builder.Services.AddAzureSpeech(builder.Configuration.GetSection(AzureSpeechServiceOptions.SectionName), options =>
 {
     options.Credential = new AzureCliCredential();
@@ -133,14 +127,10 @@ builder.Services.AddIvrWorkflowFramework(b => b
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
         DemoWorkflowIds.DefaultEscalationNumber)));
 
-// AI Agents
-var triageSection = builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}");
 
-// The realtime agent that the new realtime backend wraps. Reads its config from
-// Agents:TriageAgent and uses the "voicelive" conversation client registered above.
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
-    configurationSection: triageSection,
+    configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
     liveConversationClientKey: "voicelive",
     configureOptions: agentOptions =>
     {
@@ -162,10 +152,7 @@ builder.AddRealtimeAIAgent(
             });
     });
 
-// Workflow definitions are now loaded from the YAML samples under
-// Workflow\Samples\ via IIvrWorkflowLoader (registered by AddIvrWorkflowFramework
-// above). The default registration is the authenticated DTMF flow; the keyed
-// registrations let the CallingApi pick a tier-specific workflow via ?tier=.
+
 builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
     DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedRealtime));
 

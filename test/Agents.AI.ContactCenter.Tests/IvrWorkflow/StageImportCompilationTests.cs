@@ -58,6 +58,64 @@ public class StageImportCompilationTests
         Assert.Contains("cycle", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Import_ResolvesSingleStageWorkflow_ByWorkflowIdAlone()
+    {
+        // The reference "lib" is the full workflow id. The workflow has exactly one stage,
+        // so the compiler should pick it without requiring "lib.<stageId>".
+        using var dir = new TempDir();
+        WriteYaml(dir, "lib.yaml", LibClosingYaml);
+        WriteYaml(dir, "parent.yaml", ImportingParentYaml.Replace("lib.closing", "lib"));
+
+        var (catalog, _) = BuildPipeline(dir.Path);
+
+        var parent = catalog.Get("parent");
+        var closing = parent.Stages.FirstOrDefault(s => s.Id == "closing");
+
+        Assert.NotNull(closing);
+        Assert.True(closing!.Terminal);
+        Assert.Contains("Goodbye", closing.RuntimeStep.ConversationState.Instructions[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Import_RejectsBareReference_WhenWorkflowHasMultipleStages()
+    {
+        // "lib" matches a workflow that has 2+ stages → the compiler must refuse to guess
+        // and surface a message instructing the author to qualify the stage id.
+        using var dir = new TempDir();
+        WriteYaml(dir, "lib.yaml", LibWithTwoStagesYaml);
+        WriteYaml(dir, "parent.yaml", ImportingParentYaml.Replace("lib.closing", "lib"));
+
+        var (catalog, _) = BuildPipeline(dir.Path);
+
+        var ex = Assert.Throws<IvrWorkflowCompilationException>(() => catalog.Get("parent"));
+        Assert.Contains("specify the stage id explicitly", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Import_LongestPrefixWins_ForMultiSegmentWorkflowIds()
+    {
+        // Two workflows registered: "banking" (single-stage) and "banking.lib" (with stage
+        // "closing"). The reference "banking.lib.closing" must resolve via longest-prefix
+        // to workflow "banking.lib" + stage "closing", not workflow "banking" + (missing) stage.
+        using var dir = new TempDir();
+        WriteYaml(dir, "banking.yaml", BankingRootYaml);
+        // FileSystemWorkflowSource derives ids by replacing path separators with '.', so
+        // banking/lib.yaml becomes workflow id "banking.lib".
+        Directory.CreateDirectory(Path.Combine(dir.Path, "banking"));
+        File.WriteAllText(Path.Combine(dir.Path, "banking", "lib.yaml"), BankingLibYaml);
+        WriteYaml(dir, "parent.yaml", ImportingParentYaml.Replace("lib.closing", "banking.lib.closing"));
+
+        var (catalog, _) = BuildPipeline(dir.Path);
+
+        var parent = catalog.Get("parent");
+        var closing = parent.Stages.FirstOrDefault(s => s.Id == "closing");
+
+        Assert.NotNull(closing);
+        Assert.True(closing!.Terminal);
+        Assert.Contains("Goodbye from banking.lib", closing.RuntimeStep.ConversationState.Instructions[0], StringComparison.Ordinal);
+    }
+
     private static (IIvrWorkflowCatalog Catalog, IIvrWorkflowLoader Loader) BuildPipeline(string root)
     {
         var tools = new IvrToolRegistry();
@@ -89,6 +147,41 @@ stages:
     realtime:
       instructions:
         - 'Goodbye and thank you.'
+";
+
+    private const string LibWithTwoStagesYaml = @"
+name: lib
+stages:
+  - id: closing
+    terminal: true
+    realtime:
+      instructions:
+        - 'Goodbye and thank you.'
+  - id: other
+    terminal: true
+    realtime:
+      instructions:
+        - 'Another leaf.'
+";
+
+    private const string BankingRootYaml = @"
+name: banking
+stages:
+  - id: root
+    terminal: true
+    realtime:
+      instructions:
+        - 'Banking root workflow.'
+";
+
+    private const string BankingLibYaml = @"
+name: banking.lib
+stages:
+  - id: closing
+    terminal: true
+    realtime:
+      instructions:
+        - 'Goodbye from banking.lib.'
 ";
 
     private const string LibWithTransitionsYaml = @"

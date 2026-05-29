@@ -540,46 +540,111 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         IvrStrategyPolicy workflowPolicy,
         List<string> errors)
     {
-        // "workflowId.stageId" — the last dot-segment is the stage id; everything before
-        // is the workflow id (supports multi-segment ids like banking.lib.closing).
-        var reference = import.Stage ?? string.Empty;
-        var lastDot = reference.LastIndexOf('.');
-        if (lastDot <= 0 || lastDot >= reference.Length - 1)
+        // import.stage accepts two forms (resolved via a catalog-aware longest-prefix match):
+        //   1) Bare workflow id — used when the referenced workflow has exactly one stage.
+        //   2) "workflowId.stageId" — workflow ids may themselves contain dots
+        //      (e.g. "banking.lib.closing" => workflow "banking.lib", stage "closing").
+        // The right-to-left longest-prefix scan asks the catalog which prefix it knows,
+        // so users don't have to disambiguate manually.
+        var reference = (import.Stage ?? string.Empty).Trim();
+        // Effective id used in diagnostics so we never emit "Stage '': ..." when the
+        // import stage has no top-level id (the YAML uses `as:` instead).
+        string EffectiveId(string? srcWorkflowId = null, string? srcStageId = null) =>
+            !string.IsNullOrWhiteSpace(import.As) ? import.As!
+            : !string.IsNullOrWhiteSpace(stage.Id) ? stage.Id
+            : !string.IsNullOrWhiteSpace(srcStageId) ? srcStageId!
+            : !string.IsNullOrWhiteSpace(srcWorkflowId) ? srcWorkflowId!
+            : "(import)";
+
+        if (reference.Length == 0)
         {
-            errors.Add($"Stage '{stage.Id}': import.stage '{reference}' must be in 'workflowId.stageId' form.");
+            errors.Add($"Stage '{EffectiveId()}': import.stage is required.");
             return BuildPlaceholderImport(stage, workflowPolicy);
         }
-        var sourceWorkflowId = reference[..lastDot];
-        var sourceStageId = reference[(lastDot + 1)..];
-        var localId = !string.IsNullOrWhiteSpace(import.As) ? import.As!
-            : !string.IsNullOrWhiteSpace(stage.Id) ? stage.Id
-            : sourceStageId;
-
         if (_catalogAccessor is null)
         {
             errors.Add(
-                $"Stage '{stage.Id}': stage imports require an IIvrWorkflowCatalog. " +
+                $"Stage '{EffectiveId()}': stage imports require an IIvrWorkflowCatalog. " +
                 "Construct IvrWorkflowCompiler with the catalogAccessor argument.");
-            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+            return BuildPlaceholderImport(stage, workflowPolicy);
         }
+        var catalog = _catalogAccessor();
+
+        string? sourceWorkflowId = null;
+        string? sourceStageId = null;
+
+        // (1) Whole reference IS a workflow id (covers bare ids and multi-segment ids
+        //     like "subflows.closing" where the whole thing is the workflow name).
+        if (catalog.TryGet(reference, import.MinVersion, import.MaxVersion, out _))
+        {
+            sourceWorkflowId = reference;
+        }
+        else
+        {
+            // (2) Longest-prefix match across dots, right-to-left.
+            for (var i = reference.LastIndexOf('.'); i > 0; i = reference.LastIndexOf('.', i - 1))
+            {
+                var prefix = reference[..i];
+                var suffix = reference[(i + 1)..];
+                if (suffix.Length == 0) { continue; }
+                if (catalog.TryGet(prefix, import.MinVersion, import.MaxVersion, out _))
+                {
+                    sourceWorkflowId = prefix;
+                    sourceStageId = suffix;
+                    break;
+                }
+            }
+        }
+
+        if (sourceWorkflowId is null)
+        {
+            var pinSuffix = (import.MinVersion is not null || import.MaxVersion is not null)
+                ? $" (minVersion={import.MinVersion?.ToString(CultureInfo.InvariantCulture) ?? "*"}, maxVersion={import.MaxVersion?.ToString(CultureInfo.InvariantCulture) ?? "*"})"
+                : string.Empty;
+            errors.Add(
+                $"Stage '{EffectiveId()}': import.stage '{reference}' could not be resolved to a known workflow. " +
+                $"Check the workflow id and any minVersion/maxVersion pins{pinSuffix}.");
+            return BuildPlaceholderImport(stage, workflowPolicy);
+        }
+
+        var localId = EffectiveId(sourceWorkflowId, sourceStageId);
 
         CompiledIvrWorkflow sourceWorkflow;
         try
         {
-            sourceWorkflow = _catalogAccessor().Get(sourceWorkflowId, import.MinVersion, import.MaxVersion);
+            sourceWorkflow = catalog.Get(sourceWorkflowId, import.MinVersion, import.MaxVersion);
         }
         catch (KeyNotFoundException ex)
         {
-            errors.Add($"Stage '{stage.Id}': {ex.Message}");
+            errors.Add($"Stage '{localId}': {ex.Message}");
             return BuildPlaceholderImport(stage, workflowPolicy, localId);
         }
 
-        var sourceStage = sourceWorkflow.Stages.FirstOrDefault(
-            s => string.Equals(s.Id, sourceStageId, StringComparison.Ordinal));
+        CompiledIvrStage? sourceStage;
+        if (sourceStageId is not null)
+        {
+            sourceStage = sourceWorkflow.Stages.FirstOrDefault(
+                s => string.Equals(s.Id, sourceStageId, StringComparison.Ordinal));
+        }
+        else if (sourceWorkflow.Stages.Count == 1)
+        {
+            sourceStage = sourceWorkflow.Stages[0];
+            sourceStageId = sourceStage.Id;
+            // Recompute the effective id now that we know the source stage.
+            localId = EffectiveId(sourceWorkflowId, sourceStageId);
+        }
+        else
+        {
+            errors.Add(
+                $"Stage '{localId}': import.stage '{reference}' resolved to workflow '{sourceWorkflowId}' v{sourceWorkflow.Version} which has {sourceWorkflow.Stages.Count} stages; " +
+                $"specify the stage id explicitly (e.g. '{reference}.<stageId>').");
+            return BuildPlaceholderImport(stage, workflowPolicy, localId);
+        }
+
         if (sourceStage is null)
         {
             errors.Add(
-                $"Stage '{stage.Id}': import.stage references stage '{sourceStageId}' which does not exist in workflow '{sourceWorkflowId}' v{sourceWorkflow.Version}.");
+                $"Stage '{localId}': import.stage references stage '{sourceStageId}' which does not exist in workflow '{sourceWorkflowId}' v{sourceWorkflow.Version}.");
             return BuildPlaceholderImport(stage, workflowPolicy, localId);
         }
 
@@ -587,7 +652,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         if (sourceRuntime is SubflowIvrWorkflowStep)
         {
             errors.Add(
-                $"Stage '{stage.Id}': cannot import subflow-marker stage '{sourceWorkflowId}.{sourceStageId}'. Reference the workflow directly via 'type: subflow' instead.");
+                $"Stage '{localId}': cannot import subflow-marker stage '{sourceWorkflowId}.{sourceStageId}'. Reference the workflow directly via 'type: subflow' instead.");
             return BuildPlaceholderImport(stage, workflowPolicy, localId);
         }
 
@@ -595,7 +660,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         if (outboundTransitions > 0)
         {
             errors.Add(
-                $"Stage '{stage.Id}': cannot import stage '{sourceWorkflowId}.{sourceStageId}' because it declares {outboundTransitions} outbound transition(s). " +
+                $"Stage '{localId}': cannot import stage '{sourceWorkflowId}.{sourceStageId}' because it declares {outboundTransitions} outbound transition(s). " +
                 "Only leaf stages are importable in Phase 2; use 'type: subflow' to delegate into a workflow you can return from.");
             return BuildPlaceholderImport(stage, workflowPolicy, localId);
         }
