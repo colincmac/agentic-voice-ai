@@ -4,7 +4,7 @@
 - **Last revised:** 2026-05-22
 - **Audience:** Platform engineers provisioning the AKS cluster(s) and the SRE on call when something pages
 
-This document is the **deployment view** of the platform. It says where each process lives, how they talk, which node pool runs which workload, and how the same code scales from a 10-call showcase to a 330k-concurrent-call production posture. The *why* behind each decision lives in the ADRs — this doc cross-references them rather than repeating them.
+This document is the **deployment view** of the platform. It says where each process lives, how they talk, which node pool runs which workload, and how the same code scales from a 10-call showcase to a 50-300k-concurrent-call production posture. The *why* behind each decision lives in the ADRs — this doc cross-references them rather than repeating them.
 
 ## Why a separate deployment-view doc
 
@@ -145,7 +145,7 @@ The codebase already defines per-tier `MaxConcurrent` budgets in `AgentTierOptio
 |---|---|---|---|---|---|---|
 | **Showcase** | ~10 | 2 | 1 | 1 (or stub) | Standard, single-region | Single AKS cluster, AppHost defaults |
 | **Pilot** | ~40k | ~40 (HPA: 1k WS per pod target) | ~6 | ~8 | Enterprise, single region | Single AKS cluster; KEDA on Redis `cap:tier:*` for admission; PDB minAvailable=`replicas-1` |
-| **Hyperscale** | ~330k | ~320 across **2 active-active clusters** ([ADR-0010](../adr/0010-active-active-multi-cluster-topology.md)) | ~40 per cluster | ~60 per cluster | **Enterprise + active geo-replication** | Per [ADR-0010](../adr/0010-active-active-multi-cluster-topology.md); per-cluster ceilings per [ADR-0008](../adr/0008-graceful-degradation-realtime-to-dtmf.md); reaper per [ADR-0011](../adr/0011-pod-ownership-and-lease-model.md) |
+| **Hyperscale** | ~300k | ~320 across **2 active-active clusters** ([ADR-0010](../adr/0010-active-active-multi-cluster-topology.md)) | ~40 per cluster | ~60 per cluster | **Enterprise + active geo-replication** | Per [ADR-0010](../adr/0010-active-active-multi-cluster-topology.md); per-cluster ceilings per [ADR-0008](../adr/0008-graceful-degradation-realtime-to-dtmf.md); reaper per [ADR-0011](../adr/0011-pod-ownership-and-lease-model.md) |
 
 ### Sizing heuristics
 
@@ -200,6 +200,6 @@ We don't ship raw Kubernetes YAML in this iteration — the AppHost graph is the
 |---|---|---|
 | Reaper (`IPodHeartbeat` + orphan reroute per ADR-0011) | Pilot tier (40k) | `Agents.AI.ContactCenter.Calling.Routing` |
 | Tier 2 (ChatCompletion-TTS) strategy slot | After [ADR-0006](../adr/0006-realtime-ai-voicelive-vs-gpt-realtime.md) is accepted | `Agents.AI.ContactCenter.Calling.Strategies.ChatCompletion` |
-| Active-active publishing (multi-cluster `azd up` overlay) | Hyperscale tier (330k) | `Showcase.AppHost` |
+| Active-active publishing (multi-cluster `azd up` overlay) | Hyperscale tier (300k) | `Showcase.AppHost` |
 | Self-hosted SLM behind `intent-agent` (Phi-4-mini ONNX or TorchSharp) | After SLM bake-off | `Showcase.Agent.IntentAgent` |
 | Operator runbook for tier ceiling pinning + region drain | Pilot tier | `docs/runbooks/` |
