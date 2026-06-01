@@ -21,7 +21,9 @@ public sealed class DtmfStreamingStrategyFactory : IConversationStrategyFactory
     {
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
         var loggerFactory = services.GetService<ILoggerFactory>();
-        IConversationStrategy strategy = new DtmfStreamingStrategy(workflow, synthesizer, restoreFrom, loggerFactory);
+        var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
+        var session = sessionFactory.Create(workflow, restoreFrom, services);
+        IConversationStrategy strategy = new DtmfStreamingStrategy(session, synthesizer, loggerFactory);
         return ValueTask.FromResult(strategy);
     }
 }
@@ -38,7 +40,9 @@ public sealed class DtmfVerbStrategyFactory : IConversationStrategyFactory
         CancellationToken cancellationToken = default)
     {
         var loggerFactory = services.GetService<ILoggerFactory>();
-        IConversationStrategy strategy = new DtmfVerbStrategy(workflow, restoreFrom, loggerFactory);
+        var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
+        var session = sessionFactory.Create(workflow, restoreFrom, services);
+        IConversationStrategy strategy = new DtmfVerbStrategy(session, loggerFactory);
         return ValueTask.FromResult(strategy);
     }
 }

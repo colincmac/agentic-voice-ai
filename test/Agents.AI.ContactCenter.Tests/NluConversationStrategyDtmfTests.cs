@@ -29,11 +29,11 @@ public class NluConversationStrategyDtmfTests
         var intentAgent = new IvrIntentAgent(chat, new NoOpSpeechRecognizer());
 
         var workflow = BuildMenuWorkflow();
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         var strategy = new NluConversationStrategy(
-            workflow,
+            IvrWorkflowSession.Create(workflow, services),
             intentAgent,
             new RecordingSpeechSynthesizer(),
-            restoreFrom: null,
             escalationTarget: null);
 
         var (dtmfWriter, ctx) = await StartAsync(strategy);
@@ -41,7 +41,7 @@ public class NluConversationStrategyDtmfTests
         try
         {
             // Wait for the strategy's classifier loop to enter the initial step before pressing
-            // any digits — the DTMF pump silently no-ops while _navigator is still null.
+            // any digits — the DTMF pump silently no-ops while the navigator is still null.
             await WaitForEventAsync<StrategyEvent.WorkflowStepEntered>(
                 strategy.Events, e => e.StepId == "welcome", TimeSpan.FromSeconds(2));
 
@@ -70,11 +70,11 @@ public class NluConversationStrategyDtmfTests
         var intentAgent = new IvrIntentAgent(chat, new NoOpSpeechRecognizer());
 
         var workflow = BuildMenuWorkflow();
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         var strategy = new NluConversationStrategy(
-            workflow,
+            IvrWorkflowSession.Create(workflow, services),
             intentAgent,
             new RecordingSpeechSynthesizer(),
-            restoreFrom: null,
             escalationTarget: null);
 
         var (dtmfWriter, ctx) = await StartAsync(strategy);

@@ -31,6 +31,33 @@ public interface IIvrWorkflowNavigator
     RealtimeIvrWorkflowStep EnterInitialStep();
 
     /// <summary>
+    /// Resume the current step from a restored <see cref="IvrWorkflowState"/> (tier swap
+    /// or persisted state). Returns <see langword="null"/> when no frame belongs to this
+    /// workflow yet — callers should fall back to <see cref="EnterInitialStep"/>.
+    /// </summary>
+    RealtimeIvrWorkflowStep? ResumeCurrentStep();
+
+    /// <summary>
+    /// Resolve <paramref name="step"/> to the next renderable step, handling subflow
+    /// markers and terminal-child pops along the way:
+    /// <list type="bullet">
+    ///   <item>When <paramref name="step"/> is a <see cref="SubflowIvrWorkflowStep"/>,
+    ///     pushes the child workflow and recurses on its initial step.</item>
+    ///   <item>When <paramref name="step"/> is <see cref="RealtimeIvrWorkflowStep.Terminal"/>
+    ///     and the frame depth is greater than 1, pops back to the parent's
+    ///     <c>onSuccess</c>/<c>onFailure</c> step and recurses on the resumed parent step.</item>
+    ///   <item>When <paramref name="step"/> is terminal at the root frame, marks the
+    ///     workflow complete and returns <see langword="null"/>.</item>
+    ///   <item>Otherwise returns <paramref name="step"/> unchanged.</item>
+    /// </list>
+    /// Strategies should call this each time the navigator hands them a step (initial,
+    /// post-transition, after an advance-tool fire) and render the returned step. A
+    /// <see langword="null"/> return signals end-of-workflow — strategies should wind
+    /// down their loops.
+    /// </summary>
+    Task<RealtimeIvrWorkflowStep?> EnterStepAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Validate <paramref name="targetStepId"/> against the current step's
     /// <see cref="RealtimeIvrWorkflowStep.ValidTransitions"/>, mark the current step
     /// completed, and advance. Pure state-machine; no I/O.

@@ -121,8 +121,7 @@ public class RealtimeVoiceStrategyDtmfTests
             .BuildServiceProvider();
 
         var strategy = new RealtimeVoiceStrategy(
-            backend,
-            workflow,
+            backend, IvrWorkflowSession.Create(workflow, new ServiceCollection().AddLogging().BuildServiceProvider()),
             TestTelemetry.LoggerFactory,
             TestTelemetry.Calling);
 

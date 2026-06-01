@@ -17,8 +17,7 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 /// </summary>
 public sealed class DtmfVerbStrategy : IConversationStrategy
 {
-    private readonly RealtimeIvrWorkflowDefinition _workflow;
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly IvrWorkflowSession _session;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -45,22 +44,19 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     private string _callId = string.Empty;
 
     public DtmfVerbStrategy(
-        RealtimeIvrWorkflowDefinition workflow,
-        IvrWorkflowState? restoreFrom = null,
+        IvrWorkflowSession session,
         ILoggerFactory? loggerFactory = null)
     {
-        _workflow = workflow;
-        _loggerFactory = loggerFactory;
+        ArgumentNullException.ThrowIfNull(session);
+        _session = session;
         _logger = loggerFactory?.CreateLogger<DtmfVerbStrategy>() ?? NullLogger<DtmfVerbStrategy>.Instance;
-
-        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.Dtmf;
 
     public AgentTier Tier => AgentTier.DtmfOnly;
 
-    public IvrWorkflowState WorkflowState { get; }
+    public IvrWorkflowState WorkflowState => _session.State;
 
     public EdgeCapabilities EmittedDirectives =>
         EdgeCapabilities.SpeakText | EdgeCapabilities.CollectDtmf | EdgeCapabilities.StopPlayback;
@@ -89,13 +85,9 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             return;
         }
 
-        _navigator = new IvrWorkflowNavigator(
-            _workflow,
-            WorkflowState,
-            services,
-            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        _navigator = _session.Navigator;
 
-        var initial = _navigator.EnterInitialStep();
+        var initial = _navigator.ResumeCurrentStep() ?? _navigator.EnterInitialStep();
         _prewarmedInitialStep = initial;
         _prewarmedInitialDirectives = BuildEnterStepDirectives(initial, out var prompt);
 
@@ -146,11 +138,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
     {
         if (!_prewarmed)
         {
-            _navigator = new IvrWorkflowNavigator(
-                _workflow,
-                WorkflowState,
-                context.Services,
-                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+            _navigator = _session.Navigator;
         }
 
         try
@@ -180,7 +168,7 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
             }
             else
             {
-                var initial = _navigator!.EnterInitialStep();
+                var initial = _navigator!.ResumeCurrentStep() ?? _navigator.EnterInitialStep();
                 await EnterStepAsync(initial, ct).ConfigureAwait(false);
             }
 
@@ -339,12 +327,12 @@ public sealed class DtmfVerbStrategy : IConversationStrategy
                         DateTimeOffset.UtcNow,
                         transfer.Reason),
                     ct).ConfigureAwait(false);
-                _navigator!.Complete();
+                _session.Complete();
                 break;
 
             case DtmfActionResult.HangUp:
             case DtmfActionResult.Complete:
-                _navigator!.Complete();
+                _session.Complete();
                 break;
         }
     }

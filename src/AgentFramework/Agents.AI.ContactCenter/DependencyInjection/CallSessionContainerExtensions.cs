@@ -8,6 +8,8 @@ using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
@@ -121,6 +123,13 @@ public static class CallSessionContainerExtensions
         services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
+
+        // Per-call IVR workflow session bundle (navigator + catalog + advance invoker).
+        // The empty catalog is only used when no real IIvrWorkflowCatalog was registered
+        // via AddIvrWorkflowFramework — subflow lookups against the empty catalog throw
+        // with a clear message.
+        services.TryAddSingleton<IIvrWorkflowCatalog, EmptyIvrWorkflowCatalog>();
+        services.TryAddSingleton<IIvrWorkflowSessionFactory, IvrWorkflowSessionFactory>();
 
 
 

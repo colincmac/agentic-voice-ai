@@ -57,8 +57,7 @@ stages:
     realtime:
       instructions:
         - "Greet the caller warmly."
-        - "If `CallerFullName` is already present in the Collected Information, address them by first name directly — do NOT ask again."
-        - "Otherwise, ask the caller for their first and last name. Once they have clearly stated both, call the record-caller-name tool exactly once with the spoken values. After the tool returns success, thank them by first name."
+        - "Ask the caller for their first and last name. Once they have clearly stated both, call the record-caller-name tool exactly once with the spoken values. After the tool returns success, thank them by first name."
         - "Then listen for the caller's intent: balance, activate card, or agent transfer. Don't ask for PINs or codes yourself — picking an intent will trigger any verification automatically."
       examples:
         - "Welcome to ACME Bank. Before we get started, could I get your first and last name?"

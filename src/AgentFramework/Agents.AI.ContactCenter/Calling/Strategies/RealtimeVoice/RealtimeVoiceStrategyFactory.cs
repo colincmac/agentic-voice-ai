@@ -12,11 +12,6 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 /// (typically the production <c>AuthorizingAgentRealtimeBackend</c> adapter, or a
 /// fake in tests) and wraps it in <see cref="RealtimeVoiceStrategy"/>.
 /// </summary>
-/// <remarks>
-/// Production wiring will register the adapter. The adapter itself is intentionally
-/// not part of this slice — it would wrap <see cref="AuthorizingRealtimeAIAgent"/>
-/// the same way <see cref="Transports.RealtimeVoiceAgentTransport"/> does today.
-/// </remarks>
 public sealed class RealtimeVoiceStrategyFactory : IConversationStrategyFactory
 {
     public AgentTier Tier => AgentTier.RealtimeVoice;
@@ -31,8 +26,10 @@ public sealed class RealtimeVoiceStrategyFactory : IConversationStrategyFactory
         var backend = services.GetRequiredService<IRealtimeVoiceBackend>();
         var loggerFactory = services.GetRequiredService<ILoggerFactory>();
         var telemetry = services.GetRequiredService<CallingTelemetry>();
+        var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
 
-        IConversationStrategy strategy = new RealtimeVoiceStrategy(backend, workflow, loggerFactory, telemetry, restoreFrom);
+        var session = sessionFactory.Create(workflow, restoreFrom, services);
+        IConversationStrategy strategy = new RealtimeVoiceStrategy(backend, session, loggerFactory, telemetry);
         return ValueTask.FromResult(strategy);
     }
 }

@@ -29,12 +29,13 @@ public sealed class NluConversationStrategyFactory : IConversationStrategyFactor
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
         var escalation = services.GetService<TransferEscalationTarget>();
         var loggerFactory = services.GetService<ILoggerFactory>();
+        var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
 
+        var session = sessionFactory.Create(workflow, restoreFrom, services);
         IConversationStrategy strategy = new NluConversationStrategy(
-            workflow,
+            session,
             intentAgent,
             synthesizer,
-            restoreFrom,
             escalation,
             loggerFactory);
         return ValueTask.FromResult(strategy);

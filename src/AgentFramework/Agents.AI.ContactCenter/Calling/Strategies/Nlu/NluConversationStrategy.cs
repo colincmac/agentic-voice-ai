@@ -1,6 +1,7 @@
 using System.Text;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Agents.IntentAgent;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Authentication;
@@ -9,7 +10,6 @@ using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
@@ -44,10 +44,9 @@ public sealed class NluConversationStrategy : IConversationStrategy
     /// </summary>
     public const string TransferIntentName = "transfer_to_agent";
 
-    private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly IvrWorkflowSession _session;
     private readonly IvrIntentAgent _intentAgent;
     private readonly ISpeechSynthesizer _synthesizer;
-    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -70,7 +69,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
         });
 
     private readonly CancellationTokenSource _cts = new();
-    private IIvrWorkflowNavigator? _navigator;
+    private DtmfInputProcessor? _dtmfProcessor;
     private Task? _audioPump;
     private Task? _classifyLoop;
     private Task? _dtmfPump;
@@ -78,38 +77,35 @@ public sealed class NluConversationStrategy : IConversationStrategy
     private string _callId = string.Empty;
     private CallEdgeMetadata? _callerMetadata;
 
-    // Buffered digit state for scripted.dtmf.collect shortcut path.
-    private readonly StringBuilder _dtmfBuffer = new();
-
     // When a DTMF press resolves an intent / transition, suppress the very next
     // no-match event in the speech classifier loop — the caller already gave us
     // a deterministic answer, we don't want to re-prompt over it.
     private int _suppressNoMatchCount;
 
     public NluConversationStrategy(
-        RealtimeIvrWorkflowDefinition workflow,
+        IvrWorkflowSession session,
         IvrIntentAgent intentAgent,
         ISpeechSynthesizer synthesizer,
-        IvrWorkflowState? restoreFrom = null,
         TransferEscalationTarget? escalationTarget = null,
         ILoggerFactory? loggerFactory = null)
     {
-        _workflow = workflow;
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(intentAgent);
+        ArgumentNullException.ThrowIfNull(synthesizer);
+
+        _session = session;
         _intentAgent = intentAgent;
         _synthesizer = synthesizer;
         EscalationTarget = escalationTarget;
-        _loggerFactory = loggerFactory;
         _logger = loggerFactory?.CreateLogger<NluConversationStrategy>()
                   ?? NullLogger<NluConversationStrategy>.Instance;
-
-        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.Nlu;
 
     public AgentTier Tier => AgentTier.IntentNlu;
 
-    public IvrWorkflowState WorkflowState { get; }
+    public IvrWorkflowState WorkflowState => _session.State;
 
     public EdgeCapabilities EmittedDirectives =>
         EdgeCapabilities.Audio | EdgeCapabilities.StopPlayback | EdgeCapabilities.TransferCall;
@@ -196,11 +192,14 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
     private async Task RunAsync(StrategyStartContext context, CancellationToken ct)
     {
-        _navigator = new IvrWorkflowNavigator(
-            _workflow,
-            WorkflowState,
-            context.Services,
-            _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
+        // Build the shared DTMF input processor now that we know the strategy is alive.
+        // The sink delegates speech-flow side effects (speak/reject/repeat) back to this
+        // strategy's own TTS helpers.
+        _dtmfProcessor = new DtmfInputProcessor(
+            _session,
+            new NluDtmfSink(this),
+            _events.Writer,
+            _logger);
 
         try
         {
@@ -210,13 +209,12 @@ public sealed class NluConversationStrategy : IConversationStrategy
                 _callerMetadata,
                 _events.Writer,
                 _logger,
-                WorkflowState,
+                _session.State,
                 ct).ConfigureAwait(false);
 
             // If the composite restored mid-workflow, re-enter the current step. Otherwise start fresh.
-            var step = ResumeOrEnterInitialStep();
-            await EmitStepEnteredAsync(step, ct).ConfigureAwait(false);
-            await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+            var step = _session.Navigator.ResumeCurrentStep() ?? _session.Navigator.EnterInitialStep();
+            await EnterStepWithGuardsAsync(step, ct).ConfigureAwait(false);
 
             await foreach (var evt in _intentAgent
                 .ClassifyAudioStreamAsync(_audioFrames.Reader.ReadAllAsync(ct), BuildContext, ct)
@@ -251,16 +249,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
     }
 
     private RealtimeIvrWorkflowStep ResumeOrEnterInitialStep()
-    {
-        // Restored from a previous tier: workflow state already has CurrentStepName.
-        if (WorkflowState.CurrentStepName is { Length: > 0 } current
-            && _workflow.GetStep(current) is { } resumed)
-        {
-            _logger.LogInformation("NLU strategy resuming on step {StepId} for call {CallId}", current, _callId);
-            return resumed;
-        }
-        return _navigator!.EnterInitialStep();
-    }
+        => _session.Navigator.ResumeCurrentStep() ?? _session.Navigator.EnterInitialStep();
 
     /// <summary>
     /// Resolves the per-utterance classification context the intent agent should use for
@@ -269,7 +258,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
     /// </summary>
     private IvrIntentClassificationContext BuildContext()
     {
-        var step = _navigator?.CurrentStep ?? ResumeOrEnterInitialStep();
+        var step = _session.Navigator.CurrentStep ?? ResumeOrEnterInitialStep();
         var stepIntents = step.Intents;
         var validIntents = new List<string>(stepIntents.Count + 1);
         foreach (var intentName in stepIntents.Keys)
@@ -292,13 +281,13 @@ public sealed class NluConversationStrategy : IConversationStrategy
 
     private async Task ProcessIntentEventAsync(IvrIntentEvent evt, CancellationToken ct)
     {
-        var step = _navigator?.CurrentStep ?? ResumeOrEnterInitialStep();
+        var step = _session.Navigator.CurrentStep ?? ResumeOrEnterInitialStep();
         var stepIntents = step.Intents;
 
         if (stepIntents.Count == 0 && EscalationTarget is null)
         {
             _logger.LogDebug("NLU step {StepId} has no intents; storing utterance and re-prompting", step.Id);
-            WorkflowState.Set(step.Id, evt.Transcript.Text);
+            _session.State.Set(step.Id, evt.Transcript.Text);
             await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
             return;
         }
@@ -334,7 +323,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
         {
             foreach (var (k, v) in result.Entities)
             {
-                WorkflowState.Set(k, v);
+                _session.State.Set(k, v);
             }
         }
 
@@ -368,19 +357,81 @@ public sealed class NluConversationStrategy : IConversationStrategy
             await EmitConfiguredPromptAsync(scriptedCfg.OnConfirmPrompt, scriptedCfg.OnConfirmAudioFile, fallbackText: null, ct).ConfigureAwait(false);
         }
 
-        var transition = _navigator!.TransitionTo(targetStage);
-        if (!transition.Succeeded || transition.NewStep is null)
+        // Phase 3 parity with RealtimeVoice: route the speech-driven transition through
+        // EvaluateTransitionAsync so per-transition `requires:` guards and workflow-level
+        // auth-resolver detours fire on the NLU tier too.
+        var eval = await _session.Navigator.EvaluateTransitionAsync(targetStage, ct).ConfigureAwait(false);
+        switch (eval)
         {
-            _logger.LogWarning(
-                "Intent '{Intent}' classified for step {StepId} but transition to '{Target}' failed: {Reason}",
-                result.IntentName, step.Id, targetStage, transition.Reason);
-            await SpeakAsync("Let's try that again.", ct).ConfigureAwait(false);
-            await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+            case TransitionEvaluation.Allowed allowed:
+            {
+                var tr = _session.Navigator.TransitionTo(allowed.Target.Id);
+                if (!tr.Succeeded || tr.NewStep is null)
+                {
+                    _logger.LogWarning(
+                        "Intent '{Intent}' classified for step {StepId} but transition to '{Target}' failed: {Reason}",
+                        result.IntentName, step.Id, targetStage, tr.Reason);
+                    await SpeakAsync("Let's try that again.", ct).ConfigureAwait(false);
+                    await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+                    return;
+                }
+                await EnterStepWithGuardsAsync(tr.NewStep, ct).ConfigureAwait(false);
+                break;
+            }
+
+            case TransitionEvaluation.RequiresDetour detour:
+            {
+                _session.State.Set(
+                    PendingIntent.StateKey,
+                    new PendingIntent(detour.Target.Id, _session.Navigator.Definition.Name, result.IntentName));
+                _logger.LogInformation(
+                    "Intent '{Intent}' detouring through '{Subflow}' to satisfy '{Guard}'.",
+                    result.IntentName, detour.ResolverWorkflowId, detour.UnmetGuard.GetType().Name);
+                var childInitial = await _session.Navigator.PushSubflowAsync(
+                    detour.ResolverWorkflowId,
+                    returnToStepId: detour.Target.Id,
+                    failureReturnStepId: detour.Target.OnUnauthorizedStepId
+                        ?? _session.Navigator.Definition.UnauthorizedFailureStepId,
+                    detour.MinVersion,
+                    detour.MaxVersion,
+                    ct).ConfigureAwait(false);
+                await EnterStepWithGuardsAsync(childInitial, ct).ConfigureAwait(false);
+                break;
+            }
+
+            case TransitionEvaluation.BlockedNoResolver blocked:
+                _logger.LogWarning(
+                    "Intent '{Intent}' transition to '{Target}' blocked: {Reason}",
+                    result.IntentName, targetStage, blocked.Reason);
+                await SpeakAsync("I'm not able to do that right now.", ct).ConfigureAwait(false);
+                await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+                break;
+
+            case TransitionEvaluation.Invalid invalid:
+                _logger.LogWarning(
+                    "Intent '{Intent}' classified for step {StepId} but transition to '{Target}' was rejected: {Reason}",
+                    result.IntentName, step.Id, targetStage, invalid.Reason);
+                await SpeakAsync("Let's try that again.", ct).ConfigureAwait(false);
+                await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Apply <paramref name="step"/> through <see cref="IIvrWorkflowNavigator.EnterStepAsync"/>
+    /// so subflow markers / terminal-child pops are handled uniformly, then render the
+    /// resolved step.
+    /// </summary>
+    private async Task EnterStepWithGuardsAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    {
+        var resolved = await _session.Navigator.EnterStepAsync(step, ct).ConfigureAwait(false);
+        if (resolved is null)
+        {
+            _logger.LogInformation("NLU strategy reached a terminal root stage on call {CallId}; completing.", _callId);
             return;
         }
-
-        await EmitStepEnteredAsync(transition.NewStep, ct).ConfigureAwait(false);
-        await SpeakStepPromptAsync(transition.NewStep, ct).ConfigureAwait(false);
+        await EmitStepEnteredAsync(resolved, ct).ConfigureAwait(false);
+        await SpeakStepPromptAsync(resolved, ct).ConfigureAwait(false);
     }
 
     private async Task EscalateAsync(string reason, CancellationToken ct)
@@ -395,7 +446,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
         await _events.Writer.WriteAsync(
             new StrategyEvent.EscalationRequested(reason, DateTimeOffset.UtcNow),
             ct).ConfigureAwait(false);
-        var handoffStep = _navigator?.CurrentStep;
+        var handoffStep = _session.Navigator.CurrentStep;
         await EmitConfiguredPromptAsync(
             handoffStep?.StepScriptedConfiguration?.OnHandoffPrompt,
             handoffStep?.StepScriptedConfiguration?.OnHandoffAudioFile,
@@ -408,7 +459,7 @@ public sealed class NluConversationStrategy : IConversationStrategy
                 DateTimeOffset.UtcNow,
                 reason),
             ct).ConfigureAwait(false);
-        _navigator?.Complete();
+        _session.Complete();
     }
 
     private async Task EmitStepEnteredAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
@@ -498,12 +549,9 @@ public sealed class NluConversationStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Pump inbound DTMF tones from the caller edge in parallel with the speech-classification
-    /// loop. Digits act as a direct shortcut into the same workflow transitions the classifier
-    /// would otherwise drive, so a caller who can't be understood by speech recognition (noisy
-    /// line, accent, can't speak) still has a deterministic way to navigate. This is the
-    /// in-strategy DTMF fallback; the composite fallback (NLU \u2192 DTMF tier) remains in place
-    /// for repeated no-match scenarios.
+    /// Pump inbound DTMF tones through the shared <see cref="Dtmf.DtmfInputProcessor"/>.
+    /// Per-strategy nuances (speak via TTS rather than forwarding text to an LLM, suppress
+    /// the next no-match prompt after a DTMF resolution) live in <see cref="NluDtmfSink"/>.
     /// </summary>
     private async Task PumpInboundDtmfAsync(StrategyStartContext context, CancellationToken ct)
     {
@@ -512,7 +560,10 @@ public sealed class NluConversationStrategy : IConversationStrategy
             await foreach (var tone in context.InboundDtmf.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 if (_suspended) { continue; }
-                await HandleDtmfToneAsync(tone, ct).ConfigureAwait(false);
+                if (_dtmfProcessor is not null)
+                {
+                    await _dtmfProcessor.ProcessAsync(tone, ct).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
@@ -522,213 +573,80 @@ public sealed class NluConversationStrategy : IConversationStrategy
         }
     }
 
-    private async Task HandleDtmfToneAsync(DtmfTone tone, CancellationToken ct)
+    /// <summary>
+    /// NLU flavor of <see cref="IDtmfStrategySink"/>. Speaks via TTS for caller-facing
+    /// surfaces and increments the no-match suppression counter so the classifier loop
+    /// doesn't re-prompt over a DTMF-resolved stage.
+    /// </summary>
+    private sealed class NluDtmfSink(NluConversationStrategy strategy) : IDtmfStrategySink
     {
-        var step = _navigator?.CurrentStep;
-        if (step is null)
+        public async Task ApplyStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
         {
-            return;
+            Interlocked.Increment(ref strategy._suppressNoMatchCount);
+            await strategy.EnterStepWithGuardsAsync(step, ct).ConfigureAwait(false);
         }
 
-        await _events.Writer.WriteAsync(
-            new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), step.Id, DateTimeOffset.UtcNow),
-            ct).ConfigureAwait(false);
+        public Task RejectAsync(DtmfActionResult.Reject reject, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => strategy.EmitConfiguredPromptAsync(reject.ErrorPrompt, reject.ErrorAudioFile, fallbackText: null, ct);
 
-        var dtmf = step.StepScriptedConfiguration?.Dtmf;
+        public Task RepeatAsync(DtmfActionResult.Repeat repeat, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => strategy.SpeakStepPromptAsync(step, ct);
 
-        // Path 1: scripted.dtmf.options menu lookup \u2014 the digit selects a labeled
-        // routing decision that the navigator can execute directly.
-        if (dtmf?.MenuOptions is { Count: > 0 } && _navigator is not null
-            && _navigator.TryResolveDtmfDigit(tone.Digit, out var option))
+        public Task EndSessionAsync(string reason, CancellationToken ct)
         {
-            WorkflowState.Set($"{step.Id}_selection", option.Label);
-            var actionResult = await _navigator.InvokeMenuActionAsync(option, extraArguments: null, ct).ConfigureAwait(false);
-            await DispatchDtmfActionAsync(actionResult, step, ct).ConfigureAwait(false);
-            return;
+            strategy._session.Complete();
+            return Task.CompletedTask;
         }
 
-        // Path 2: scripted.dtmf.collect buffered validator path.
-        if (dtmf?.DigitCollectionValidator is not null
-            || !string.IsNullOrEmpty(dtmf?.OnValidNextStepId))
+        public async Task TransferAsync(DtmfActionResult.Transfer transfer, CancellationToken ct)
         {
-            await HandleCollectedDigitAsync(step, dtmf!, tone.Digit, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // Path 3: digit literally equals a stage-scoped NLU intent name (e.g. an intent
-        // named "1" mapped to a transition). Rare, but documented in the design.
-        var intentTransitions = step.StepScriptedConfiguration?.Nlu?.IntentTransitions;
-        var digitKey = tone.Digit.ToString();
-        if (intentTransitions is not null
-            && intentTransitions.TryGetValue(digitKey, out var nluNext)
-            && !string.IsNullOrEmpty(nluNext))
-        {
-            await ApplyDtmfTransitionAsync(step, nluNext, digitKey, ct).ConfigureAwait(false);
-            return;
-        }
-
-        _logger.LogDebug(
-            "Ignoring inbound DTMF digit '{Digit}' on step {StepId}: no menu / collect / nlu mapping",
-            tone.Digit, step.Id);
-    }
-
-    private async Task HandleCollectedDigitAsync(
-        RealtimeIvrWorkflowStep step,
-        StepDtmfConfiguration dtmf,
-        char digit,
-        CancellationToken ct)
-    {
-        var terminator = dtmf.TerminationDigitChar;
-        var maxDigits = dtmf.MaxNumberOfDigits <= 0 ? int.MaxValue : dtmf.MaxNumberOfDigits;
-
-        string? collected = null;
-        lock (_dtmfBuffer)
-        {
-            if (digit == terminator)
-            {
-                collected = _dtmfBuffer.ToString();
-                _dtmfBuffer.Clear();
-            }
-            else
-            {
-                _dtmfBuffer.Append(digit);
-                if (_dtmfBuffer.Length >= maxDigits)
-                {
-                    collected = _dtmfBuffer.ToString();
-                    _dtmfBuffer.Clear();
-                }
-            }
-        }
-
-        if (string.IsNullOrEmpty(collected) || _navigator is null)
-        {
-            return;
-        }
-
-        if (dtmf.MinNumberOfDigits > 0 && collected.Length < dtmf.MinNumberOfDigits)
-        {
-            _logger.LogDebug(
-                "DTMF buffer '{Collected}' on step {StepId} shorter than min {Min}; discarding",
-                collected, step.Id, dtmf.MinNumberOfDigits);
-            return;
-        }
-
-        if (dtmf.DigitCollectionValidator is { } validator)
-        {
-            var stateKey = dtmf.CollectedStateKey ?? $"{step.Id}_collected";
-            var extra = new Dictionary<string, object?>
-            {
-                [dtmf.DigitsParameterName] = collected,
-            };
-
-            var actionResult = await _navigator.InvokeActionAsync(
-                validator,
-                dtmf.DigitCollectionArguments,
-                extraArguments: extra,
-                successNextStepId: dtmf.OnValidNextStepId,
-                failurePrompt: dtmf.OnInvalidPrompt,
-                failureAudio: dtmf.OnInvalidAudioFile,
+            await strategy._events.Writer.WriteAsync(
+                new StrategyEvent.EscalationRequested(transfer.Reason ?? "DTMF transfer", DateTimeOffset.UtcNow),
                 ct).ConfigureAwait(false);
-
-            if (actionResult is DtmfActionResult.Transition or DtmfActionResult.Complete)
-            {
-                WorkflowState.Set(stateKey, collected);
-            }
-
-            await DispatchDtmfActionAsync(actionResult, step, ct).ConfigureAwait(false);
-            return;
+            await strategy._outbound.Writer.WriteAsync(
+                new OutboundDirective.TransferCall(
+                    transfer.TargetIdentifier,
+                    transfer.Kind switch
+                    {
+                        TransferKindHint.TeamsUser => TransferKind.BlindToTeamsUser,
+                        TransferKindHint.Consultative => TransferKind.Consultative,
+                        _ => TransferKind.BlindToPhoneNumber,
+                    },
+                    DateTimeOffset.UtcNow,
+                    transfer.Reason),
+                ct).ConfigureAwait(false);
+            strategy._session.Complete();
         }
 
-        // No validator: store under default key and walk the first declared transition.
-        WorkflowState.Set(dtmf.CollectedStateKey ?? $"{step.Id}_collected", collected);
-        if (dtmf.OnValidNextStepId is { Length: > 0 } onValid)
+        public Task EscalateAsync(string reason, CancellationToken ct)
+            => strategy.EscalateAsync(reason, ct);
+
+        public Task OnUnmatchedMenuDigitAsync(DtmfTone tone, RealtimeIvrWorkflowStep step, CancellationToken ct)
         {
-            await ApplyDtmfTransitionAsync(step, onValid, collected, ct).ConfigureAwait(false);
+            strategy._logger.LogDebug(
+                "Ignoring unmapped menu digit '{Digit}' on step {StepId}; speech classifier still active",
+                tone.Digit, step.Id);
+            return Task.CompletedTask;
         }
-    }
 
-    private async Task DispatchDtmfActionAsync(
-        DtmfActionResult result,
-        RealtimeIvrWorkflowStep step,
-        CancellationToken ct)
-    {
-        switch (result)
+        public Task OnUnconfiguredDigitAsync(DtmfTone tone, RealtimeIvrWorkflowStep step, CancellationToken ct)
         {
-            case DtmfActionResult.Transition transition:
-                await ApplyDtmfTransitionAsync(step, transition.NextStepId, transition.NextStepId, ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Complete:
-                _navigator?.Complete();
-                break;
-
-            case DtmfActionResult.HangUp:
-                _navigator?.Complete();
-                break;
-
-            case DtmfActionResult.Transfer transfer:
-                await _events.Writer.WriteAsync(
-                    new StrategyEvent.EscalationRequested(transfer.Reason ?? "DTMF transfer", DateTimeOffset.UtcNow),
-                    ct).ConfigureAwait(false);
-                await _outbound.Writer.WriteAsync(
-                    new OutboundDirective.TransferCall(
-                        transfer.TargetIdentifier,
-                        transfer.Kind switch
-                        {
-                            TransferKindHint.TeamsUser => TransferKind.BlindToTeamsUser,
-                            TransferKindHint.Consultative => TransferKind.Consultative,
-                            _ => TransferKind.BlindToPhoneNumber,
-                        },
-                        DateTimeOffset.UtcNow,
-                        transfer.Reason),
-                    ct).ConfigureAwait(false);
-                _navigator?.Complete();
-                break;
-
-            case DtmfActionResult.Escalate escalate:
-                await EscalateAsync(escalate.Reason, ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Reject reject:
-                // Surface the rejection prompt the same way the speech path would.
-                await EmitConfiguredPromptAsync(reject.ErrorPrompt, reject.ErrorAudioFile, fallbackText: null, ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Repeat:
-                await SpeakStepPromptAsync(step, ct).ConfigureAwait(false);
-                break;
+            strategy._logger.LogDebug(
+                "Ignoring inbound DTMF digit '{Digit}' on step {StepId}: no menu / collect / nlu mapping",
+                tone.Digit, step.Id);
+            return Task.CompletedTask;
         }
-    }
 
-    private async Task ApplyDtmfTransitionAsync(
-        RealtimeIvrWorkflowStep step,
-        string nextStepId,
-        string intentLabel,
-        CancellationToken ct)
-    {
-        if (_navigator is null) { return; }
-
-        var transition = _navigator.TransitionTo(nextStepId);
-        if (!transition.Succeeded || transition.NewStep is null)
+        public Task OnIncompleteBufferAsync(string collected, int minRequired, RealtimeIvrWorkflowStep step, CancellationToken ct)
         {
-            _logger.LogWarning(
-                "DTMF requested transition to '{Target}' from step {Current} but it was rejected: {Reason}",
-                nextStepId, step.Id, transition.Reason);
-            return;
+            strategy._logger.LogDebug(
+                "DTMF buffer '{Collected}' on step {StepId} shorter than min {Min}; discarding",
+                collected, step.Id, minRequired);
+            return Task.CompletedTask;
         }
 
-        // Suppress the next no-match event in the classifier loop \u2014 the caller already
-        // gave a deterministic answer via DTMF.
-        Interlocked.Increment(ref _suppressNoMatchCount);
-
-        // Emit IntentClassified so observers see the DTMF resolution alongside the
-        // speech-based ones; confidence is 1.0 because it's a hard digit match.
-        await _events.Writer.WriteAsync(
-            new StrategyEvent.IntentClassified(intentLabel, Confidence: 1.0, DateTimeOffset.UtcNow),
-            ct).ConfigureAwait(false);
-
-        await EmitStepEnteredAsync(transition.NewStep, ct).ConfigureAwait(false);
-        await SpeakStepPromptAsync(transition.NewStep, ct).ConfigureAwait(false);
+        public Task OnTransitionBlockedAsync(string targetStepId, string reason, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => strategy.SpeakAsync($"I can't continue to that yet: {reason}", ct);
     }
 }
 
@@ -739,3 +657,4 @@ public sealed class NluConversationStrategy : IConversationStrategy
 /// <param name="TargetIdentifier">E.164 number, Teams user id, or ACS user id depending on <paramref name="Kind"/>.</param>
 /// <param name="Kind">How the platform should interpret <paramref name="TargetIdentifier"/>.</param>
 public sealed record TransferEscalationTarget(string TargetIdentifier, TransferKind Kind = TransferKind.BlindToPhoneNumber);
+

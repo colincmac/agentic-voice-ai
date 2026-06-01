@@ -28,7 +28,8 @@ public class AcsCallAutomationEdgeTests
     public async Task DtmfVerbStrategy_emits_SpeakText_and_CollectDtmf()
     {
         var workflow = BuildWorkflow();
-        await using var strategy = new DtmfVerbStrategy(workflow);
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        await using var strategy = new DtmfVerbStrategy(IvrWorkflowSession.Create(workflow, services));
 
         var inboundAudio = Channel.CreateUnbounded<AudioFrame>();
         var inboundDtmf = Channel.CreateUnbounded<DtmfTone>();

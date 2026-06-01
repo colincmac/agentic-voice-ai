@@ -16,23 +16,23 @@ public sealed class IvrWorkflowNavigator : IIvrWorkflowNavigator
     private readonly IIvrWorkflowCatalog _catalog;
 
     /// <summary>
-    /// Single-definition constructor. Wraps <paramref name="definition"/> in an in-memory
-    /// catalog so callers that don't have a real <see cref="IIvrWorkflowCatalog"/>
-    /// (legacy strategies, tests) continue to work; subflow stages reached via this
-    /// constructor will fail on push because no other workflows are registered.
+    /// Single-definition convenience constructor. Wraps <paramref name="definition"/>
+    /// with an <see cref="EmptyIvrWorkflowCatalog"/>; any subflow push will fail loudly
+    /// because no other workflows are registered. Intended for tests and single-workflow
+    /// hosts that haven't registered a real <see cref="IIvrWorkflowCatalog"/>.
     /// </summary>
     public IvrWorkflowNavigator(
         RealtimeIvrWorkflowDefinition definition,
         IvrWorkflowState state,
         IServiceProvider services,
         ILogger<IvrWorkflowNavigator>? logger = null)
-        : this(definition, state, services, new SingleDefinitionCatalog(definition), logger)
+        : this(definition, state, services, new EmptyIvrWorkflowCatalog(), logger)
     {
     }
 
     /// <summary>
     /// Catalog-aware constructor. The navigator can resolve any frame's workflow
-    /// through <paramref name="catalog"/>, enabling Phase 1 subflow push/pop.
+    /// through <paramref name="catalog"/>, enabling subflow push/pop.
     /// </summary>
     public IvrWorkflowNavigator(
         RealtimeIvrWorkflowDefinition definition,
@@ -91,44 +91,106 @@ public sealed class IvrWorkflowNavigator : IIvrWorkflowNavigator
         }
     }
 
+    public RealtimeIvrWorkflowStep? ResumeCurrentStep()
+    {
+        var current = State.CurrentFrame;
+        if (current is null || string.IsNullOrEmpty(current.CurrentStepId))
+        {
+            return null;
+        }
+
+        // Only resume frames that belong to this workflow. Frames from sub-workflows
+        // on top of the stack are resolved against the catalog by CurrentStep.
+        if (!string.Equals(current.WorkflowId, Definition.Name, StringComparison.Ordinal))
+        {
+            return CurrentStep;
+        }
+
+        if (State.Status is IvrWorkflowStatus.NotStarted)
+        {
+            State.Status = IvrWorkflowStatus.Running;
+        }
+        return CurrentStep;
+    }
+
     public RealtimeIvrWorkflowStep EnterInitialStep()
     {
-        var stepId = State.CurrentStepName ?? Definition.InitialStepId;
+        // Resume the frame stack when it already belongs to this workflow (tier swap with
+        // restoreFrom). Strategies should normally call ResumeCurrentStep() first; we keep
+        // the resume path here too so existing single-entry callers continue to work.
+        if (ResumeCurrentStep() is { } resumed)
+        {
+            return resumed;
+        }
+
+        var stepId = Definition.InitialStepId;
         var step = Definition.GetStep(stepId)
             ?? throw new InvalidOperationException($"Step '{stepId}' not found in workflow '{Definition.Name}'.");
 
         var stepIndex = Definition.GetStepIndex(step.Id);
         var startedAt = DateTimeOffset.UtcNow;
 
-        // Push a real frame if none exists yet (or the top frame is the anonymous shim
-        // frame produced by a legacy direct write to CurrentStepName). Resume-after-tier-swap:
-        // if the top frame already belongs to this workflow, keep it as-is so we don't
-        // reset StepStartedAt or clobber sub-frames that survived the swap.
-        var current = State.CurrentFrame;
-        if (current is null || !string.Equals(current.WorkflowId, Definition.Name, StringComparison.Ordinal))
+        State.PushFrame(new WorkflowFrame
         {
-            if (current is not null && current.WorkflowId.Length == 0)
-            {
-                State.PopFrame();
-            }
-            State.PushFrame(new WorkflowFrame
-            {
-                WorkflowId = Definition.Name,
-                CurrentStepId = step.Id,
-                CurrentStepIndex = stepIndex,
-                StepStartedAt = startedAt,
-            });
-        }
-        else
-        {
-            current.CurrentStepId = step.Id;
-            current.CurrentStepIndex = stepIndex;
-            current.StepStartedAt ??= startedAt;
-        }
+            WorkflowId = Definition.Name,
+            CurrentStepId = step.Id,
+            CurrentStepIndex = stepIndex,
+            StepStartedAt = startedAt,
+        });
 
         if (State.Status is IvrWorkflowStatus.NotStarted)
         {
             State.Status = IvrWorkflowStatus.Running;
+        }
+
+        return step;
+    }
+
+    public async Task<RealtimeIvrWorkflowStep?> EnterStepAsync(
+        RealtimeIvrWorkflowStep step,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+
+        // Subflow marker: push the child workflow's initial step and recurse so the
+        // returned step is always a renderable stage.
+        if (step is SubflowIvrWorkflowStep subflow)
+        {
+            var childInitial = await PushSubflowAsync(
+                subflow.SubflowWorkflowId,
+                subflow.OnSuccessStepId,
+                subflow.OnFailureStepId,
+                subflow.MinVersion,
+                subflow.MaxVersion,
+                cancellationToken).ConfigureAwait(false);
+
+            return await EnterStepAsync(childInitial, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Terminal child stage: pop the frame so the parent's onSuccess / onFailure
+        // resume target becomes current, then recurse to apply that step (it may itself
+        // be terminal or another subflow marker).
+        if (step.Terminal && State.FrameDepth > 1)
+        {
+            var success = step.TerminalOutcome == TerminalOutcome.Success;
+            var resumed = await PopFrameAsync(success, cancellationToken).ConfigureAwait(false);
+            if (resumed is null)
+            {
+                // Pop completed the root — workflow is done.
+                return null;
+            }
+            return await EnterStepAsync(resumed, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Terminal root stage: mark complete and return so the strategy can render once
+        // before tearing the session down. The strategy detects end-of-workflow by checking
+        // State.IsComplete after rendering.
+        if (step.Terminal)
+        {
+            Complete(step.TerminalOutcome == TerminalOutcome.Success
+                ? IvrWorkflowStatus.Completed
+                : IvrWorkflowStatus.Failed);
+            return step;
         }
 
         return step;
@@ -577,73 +639,4 @@ public sealed class IvrWorkflowNavigator : IIvrWorkflowNavigator
             ? new DtmfActionResult.Transition(successNextStepId)
             : new DtmfActionResult.Repeat();
     }
-}
-
-/// <summary>
-/// Adapter <see cref="IIvrWorkflowCatalog"/> used by the single-definition navigator
-/// constructor. Exposes the bound workflow under its own name; every other id is
-/// "unknown" so subflow pushes against this catalog fail loudly with a clear message.
-/// </summary>
-internal sealed class SingleDefinitionCatalog : IIvrWorkflowCatalog
-{
-    private readonly RealtimeIvrWorkflowDefinition _definition;
-    private readonly Compilation.CompiledIvrWorkflow _compiled;
-
-    public SingleDefinitionCatalog(RealtimeIvrWorkflowDefinition definition)
-    {
-        _definition = definition;
-        _compiled = new Compilation.CompiledIvrWorkflow
-        {
-            Name = definition.Name,
-            Runtime = definition,
-            Strategy = Strategies.IvrStrategyPolicy.Default,
-            Stages = [],
-            Capabilities = new Dictionary<string, Compilation.CompiledIvrCapability>(StringComparer.Ordinal),
-            IntentExamples = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
-        };
-    }
-
-    public IReadOnlyCollection<string> Ids => [_definition.Name];
-
-    public IReadOnlyCollection<int> VersionsFor(string workflowId)
-        => string.Equals(workflowId, _definition.Name, StringComparison.Ordinal)
-            ? [_compiled.Version >= 1 ? _compiled.Version : 1]
-            : [];
-
-    public bool TryGet(string workflowId, [NotNullWhen(true)] out Compilation.CompiledIvrWorkflow? workflow)
-        => TryGet(workflowId, minVersion: null, maxVersion: null, out workflow);
-
-    public bool TryGet(
-        string workflowId,
-        int? minVersion,
-        int? maxVersion,
-        [NotNullWhen(true)] out Compilation.CompiledIvrWorkflow? workflow)
-    {
-        if (string.Equals(workflowId, _definition.Name, StringComparison.Ordinal))
-        {
-            var v = _compiled.Version >= 1 ? _compiled.Version : 1;
-            if ((minVersion is null || v >= minVersion) && (maxVersion is null || v <= maxVersion))
-            {
-                workflow = _compiled;
-                return true;
-            }
-        }
-        workflow = null;
-        return false;
-    }
-
-    public Compilation.CompiledIvrWorkflow Get(string workflowId) => Get(workflowId, null, null);
-
-    public Compilation.CompiledIvrWorkflow Get(string workflowId, int? minVersion, int? maxVersion)
-    {
-        if (!TryGet(workflowId, minVersion, maxVersion, out var compiled))
-        {
-            throw new KeyNotFoundException(
-                $"This navigator was built with the single workflow '{_definition.Name}'; cannot resolve '{workflowId}'. " +
-                "Construct the navigator with an IIvrWorkflowCatalog to enable subflow resolution.");
-        }
-        return compiled;
-    }
-
-    public ValueTask EnsureLoadedAsync(CancellationToken cancellationToken = default) => default;
 }

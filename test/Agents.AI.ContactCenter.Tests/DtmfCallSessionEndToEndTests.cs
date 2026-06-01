@@ -131,9 +131,8 @@ public class DtmfCallSessionEndToEndTests
 
         // Build a replacement strategy seeded from the previous workflow state.
         var replacement = new DtmfStreamingStrategy(
-            workflow,
-            services.GetRequiredService<ISpeechSynthesizer>(),
-            restoreFrom: previousState);
+            IvrWorkflowSession.Create(workflow, services, state: previousState),
+            services.GetRequiredService<ISpeechSynthesizer>());
 
         var swapped = await session.ReplaceStrategyAsync(replacement);
 

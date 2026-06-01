@@ -1,14 +1,13 @@
 using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Registry;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
@@ -21,8 +20,7 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 public sealed class RealtimeVoiceStrategy : IConversationStrategy
 {
     private readonly IRealtimeVoiceBackend _backend;
-    private readonly RealtimeIvrWorkflowDefinition _workflow;
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly IvrWorkflowSession _session;
     private readonly ILogger _logger;
     private readonly CallingTelemetry _telemetry;
     private string _callId = string.Empty;
@@ -39,8 +37,8 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly CancellationTokenSource _cts = new();
-    private IIvrWorkflowNavigator? _navigator;
     private IvrAdvanceToolInvoker? _advanceInvoker;
+    private DtmfInputProcessor? _dtmfProcessor;
     private Task? _agentLoop;
     private Task? _audioPump;
     private Task? _dtmfPump;
@@ -51,39 +49,32 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     // Serializes stage transitions issued from the two concurrent producers in this
     // strategy: the realtime agent loop (advance-tool function calls) and the inbound
-    // DTMF pump (menu / collect → transition). Both call ApplyStageAsync under this
+    // DTMF pump (menu / collect → transition). Both call ApplyStepAsync under this
     // lock so the navigator and backend prompt/tool surface stay coherent.
     private readonly SemaphoreSlim _navigatorLock = new(1, 1);
 
-    // Buffered digit collection state for the inbound DTMF pump. Only used when the
-    // current stage has a scripted.dtmf.collect block; reset on each successful
-    // commit or stage transition.
-    private readonly StringBuilder _dtmfBuffer = new();
-
     public RealtimeVoiceStrategy(
         IRealtimeVoiceBackend backend,
-        RealtimeIvrWorkflowDefinition workflow,
+        IvrWorkflowSession session,
         ILoggerFactory loggerFactory,
-        CallingTelemetry telemetry,
-        IvrWorkflowState? restoreFrom = null)
+        CallingTelemetry telemetry)
     {
+        ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(telemetry);
 
         _backend = backend;
-        _workflow = workflow;
-        _loggerFactory = loggerFactory;
+        _session = session;
         _logger = loggerFactory.CreateLogger<RealtimeVoiceStrategy>();
         _telemetry = telemetry;
-
-        WorkflowState = restoreFrom ?? new IvrWorkflowState { Status = IvrWorkflowStatus.Running };
     }
 
     public StrategyKind Kind => StrategyKind.RealtimeVoice;
 
     public AgentTier Tier => AgentTier.RealtimeVoice;
 
-    public IvrWorkflowState WorkflowState { get; }
+    public IvrWorkflowState WorkflowState => _session.State;
 
     public EdgeCapabilities EmittedDirectives => EdgeCapabilities.Audio | EdgeCapabilities.StopPlayback;
 
@@ -103,8 +94,21 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         if (!_prewarmed)
         {
-            await PrepareBackendAsync(context.Services, cancellationToken).ConfigureAwait(false);
+            await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        // Bind the advance invoker now that we know the apply pipeline; the session
+        // returns the same instance on subsequent calls.
+        _advanceInvoker = _session.GetOrCreateAdvanceInvoker(
+            (step, ct) => ApplyStepAsync(step, ct));
+
+        // Build the shared DTMF input processor. Strategy-specific side effects are
+        // routed through the realtime sink (forward as inline LLM text turns).
+        _dtmfProcessor = new DtmfInputProcessor(
+            _session,
+            new RealtimeVoiceDtmfSink(this),
+            _events.Writer,
+            _logger);
 
         // Authentication and the first prompt push need caller metadata, so they always run
         // here in StartAsync — even when the backend was prewarmed without an attached edge.
@@ -123,43 +127,16 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             return;
         }
 
-        await PrepareBackendAsync(services, cancellationToken).ConfigureAwait(false);
+        await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
         _prewarmed = true;
     }
 
-    private async Task PrepareBackendAsync(IServiceProvider services, CancellationToken cancellationToken)
+    private async Task ConnectBackendAsync(CancellationToken cancellationToken)
     {
-        // Phase 1: prefer the per-call IIvrWorkflowCatalog so subflow stages can resolve
-        // child workflows. Falls back to a single-definition adapter when no catalog has
-        // been registered (legacy hosts / tests).
-        var catalog = services.GetService<IIvrWorkflowCatalog>();
-        _navigator = catalog is not null
-            ? new IvrWorkflowNavigator(
-                _workflow,
-                WorkflowState,
-                services,
-                catalog,
-                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>())
-            : new IvrWorkflowNavigator(
-                _workflow,
-                WorkflowState,
-                services,
-                _loggerFactory?.CreateLogger<IvrWorkflowNavigator>());
-
-        // The invoker reads CurrentStep lazily on each invocation so it can be created
-        // once per call and shared across stage transitions. EnterStepAsyncLocked handles
-        // subflow pushes, terminal-child pops, and terminal-root session end, so the
-        // callback no longer needs an explicit Terminal check.
-        _advanceInvoker = new IvrAdvanceToolInvoker(
-            _navigator,
-            (step, ct) => EnterStepAsyncLocked(step, ct),
-            _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
-
         using var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId);
         try
         {
             await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
-
         }
         catch (Exception ex)
         {
@@ -170,11 +147,6 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     private async Task PushInitialStateAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
-        if (_navigator is null)
-        {
-            throw new InvalidOperationException("Navigator must be built before pushing initial state.");
-        }
-
         // Authenticate the caller (if any authenticators are registered) before the first
         // prompt push so the navigator's prompt can include the resolved identity.
         _conversationContext = await CallerAuthenticationRunner.RunAsync(
@@ -183,24 +155,46 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             _callerMetadata,
             _events.Writer,
             _logger,
-            WorkflowState,
+            _session.State,
             cancellationToken).ConfigureAwait(false);
 
-        // Seed the agent with the system prompt for the current workflow step.
-        var step = _navigator.EnterInitialStep();
-        await EnterStepAsyncLocked(step, cancellationToken).ConfigureAwait(false);
+        // Resume from a restored state if present (tier swap), otherwise start fresh.
+        var step = _session.Navigator.ResumeCurrentStep() ?? _session.Navigator.EnterInitialStep();
+        await ApplyStepAsync(step, cancellationToken).ConfigureAwait(false);
     }
+
     /// <summary>
-    /// Serialized wrapper around <see cref="ApplyStageAsync"/> so the two concurrent
-    /// producers (advance-tool function calls and the inbound DTMF pump) never race
-    /// on the navigator + backend prompt/tool update sequence.
+    /// Single serialized stage-entry pipeline. Calls
+    /// <see cref="IIvrWorkflowNavigator.EnterStepAsync(RealtimeIvrWorkflowStep, CancellationToken)"/>
+    /// to resolve the step through any subflow pushes / terminal-child pops, then renders
+    /// the resulting prompt + tool surface onto the realtime backend. A <see langword="null"/>
+    /// return from the navigator means the workflow ended at a terminal root stage — we
+    /// tear the session down.
     /// </summary>
-    private async Task ApplyStageAsyncLocked(RealtimeIvrWorkflowStep step, CancellationToken ct)
+    private async Task ApplyStepAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken)
     {
-        await _navigatorLock.WaitAsync(ct).ConfigureAwait(false);
+        // Stage transitions are atomic; the lock acquisition itself must not be cancellable
+        // or a partially-applied stage can leave the navigator and backend out of sync.
+        await _navigatorLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            await ApplyStageAsync(step, ct).ConfigureAwait(false);
+            var resolved = await _session.Navigator.EnterStepAsync(step, cancellationToken).ConfigureAwait(false);
+            if (resolved is null)
+            {
+                // Subflow / terminal-child pop chained all the way up and exhausted the
+                // frame stack — nothing left to render.
+                await EndSessionAsync($"workflow ended while resolving '{step.Id}'", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await RenderStepAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            // Terminal root stage: render once (so observers see the final WorkflowStepEntered)
+            // then wind the session down. EnterStepAsync already marked the navigator complete.
+            if (_session.State.IsComplete)
+            {
+                await EndSessionAsync($"terminal stage '{resolved.Id}' reached", cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -209,91 +203,14 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Phase 1 stage-entry router. Serialized against <see cref="_navigatorLock"/>,
-    /// then delegates to <see cref="EnterStepAsync"/> for the actual subflow-aware
-    /// dispatch. Use this instead of <see cref="ApplyStageAsyncLocked"/> when the
-    /// step might be a <see cref="SubflowIvrWorkflowStep"/> or a terminal child stage
-    /// that should pop rather than end the session.
-    /// </summary>
-    private async Task EnterStepAsyncLocked(RealtimeIvrWorkflowStep step, CancellationToken ct)
-    {
-        await _navigatorLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await EnterStepAsync(step, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _navigatorLock.Release();
-        }
-    }
-
-    /// <summary>
-    /// Subflow-aware stage entry. Three cases:
-    /// <list type="bullet">
-    ///   <item>Sub-workflow marker stage: push the child workflow's initial step (via
-    ///   <see cref="IIvrWorkflowNavigator.PushSubflowAsync"/>) and recurse.</item>
-    ///   <item>Terminal child stage (<c>Terminal &amp;&amp; FrameDepth &gt; 1</c>): pop
-    ///   back to the parent's <c>onSuccess</c> / <c>onFailure</c> and recurse on the
-    ///   resumed parent step.</item>
-    ///   <item>Terminal root stage: render once, then end the session.</item>
-    ///   <item>Normal stage: render the prompt + tools onto the realtime backend and
-    ///   emit observer events.</item>
-    /// </list>
-    /// Caller must already hold <see cref="_navigatorLock"/>.
-    /// </summary>
-    private async Task EnterStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
-    {
-        if (step is SubflowIvrWorkflowStep subflow)
-        {
-            var childInitial = await _navigator!.PushSubflowAsync(
-                subflow.SubflowWorkflowId,
-                subflow.OnSuccessStepId,
-                subflow.OnFailureStepId,
-                subflow.MinVersion,
-                subflow.MaxVersion,
-                ct).ConfigureAwait(false);
-
-            await EnterStepAsync(childInitial, ct).ConfigureAwait(false);
-            return;
-        }
-
-        await ApplyStageAsync(step, ct).ConfigureAwait(false);
-
-        if (step.Terminal)
-        {
-            if (_navigator!.State.FrameDepth > 1)
-            {
-                // Child workflow finished — pop and resume the parent. TerminalOutcome
-                // chooses the parent's onSuccess vs onFailure resume target.
-                var success = step.TerminalOutcome == TerminalOutcome.Success;
-                var resumed = await _navigator.PopFrameAsync(success, ct).ConfigureAwait(false);
-                if (resumed is not null)
-                {
-                    await EnterStepAsync(resumed, ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    await EndSessionAsync($"terminal stage '{step.Id}' reached at root", ct).ConfigureAwait(false);
-                }
-            }
-            else
-            {
-                await EndSessionAsync($"terminal stage '{step.Id}' reached", ct).ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Push the current step's prompt and guard-wrapped tool surface (including the
+    /// Push the resolved step's prompt and guard-wrapped tool surface (including the
     /// synthesized <see cref="IvrAdvanceTool"/> when the step can advance) onto the
     /// realtime backend, and emit <see cref="StrategyEvent.WorkflowStepEntered"/> for
-    /// observers. Called once on entry from <see cref="PushInitialStateAsync"/> and again
-    /// after every successful navigator transition driven by an advance function call.
+    /// observers.
     /// </summary>
-    private async Task ApplyStageAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken)
+    private async Task RenderStepAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken)
     {
-        var tools = _navigator!.WrapToolsWithCurrentGuards(step.AvailableTools ?? []).ToList();
+        var tools = _session.Navigator.WrapToolsWithCurrentGuards(step.AvailableTools ?? []).ToList();
 
         if (!step.Terminal)
         {
@@ -304,8 +221,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             }
         }
 
-
-        var prompt = _navigator.BuildCurrentStepPrompt(_conversationContext);
+        var prompt = _session.Navigator.BuildCurrentStepPrompt(_conversationContext);
 
         await _backend.StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
 
@@ -379,13 +295,11 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Pump inbound DTMF tones from the caller edge. Each digit is handled stage-aware
-    /// when the current step has <c>scripted.dtmf</c> configuration (menu options or
-    /// buffered <c>collect</c> validator), and otherwise forwarded to the realtime model
-    /// as an inline user text turn so the LLM can react conversationally. Mirrors the
-    /// logic in <see cref="Dtmf.DtmfStreamingStrategy"/> intentionally (copy-not-extract
-    /// per the design call); a future refactor could pull this into a shared
-    /// <c>DtmfInputProcessor</c> helper consumed by every non-DTMF strategy.
+    /// Pump inbound DTMF tones from the caller edge through the shared
+    /// <see cref="Dtmf.DtmfInputProcessor"/>. Per-strategy nuances (forwarding
+    /// unrecognized digits to the realtime model as inline user text turns,
+    /// surfacing rejections as inline LLM hints, etc.) live in
+    /// <see cref="RealtimeVoiceDtmfSink"/>.
     /// </summary>
     private async Task PumpInboundDtmfAsync(StrategyStartContext context, CancellationToken ct)
     {
@@ -398,7 +312,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                     continue;
                 }
 
-                await HandleDtmfToneAsync(tone, ct).ConfigureAwait(false);
+                await _dtmfProcessor!.ProcessAsync(tone, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
@@ -409,297 +323,79 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
     #endregion
 
-    #region DTMF Handling
-    private async Task HandleDtmfToneAsync(DtmfTone tone, CancellationToken ct)
+    /// <summary>
+    /// Realtime-voice flavor of <see cref="IDtmfStrategySink"/>. All caller-facing side
+    /// effects surface as inline user-text turns into the realtime backend so the model
+    /// can react conversationally; transitions re-enter the navigator-aware
+    /// <see cref="ApplyStepAsync"/> pipeline so subflow / terminal routing stays uniform
+    /// with the advance-tool path.
+    /// </summary>
+    private sealed class RealtimeVoiceDtmfSink(RealtimeVoiceStrategy strategy) : IDtmfStrategySink
     {
-        var step = _navigator?.CurrentStep;
-        if (step is null)
+        public Task ApplyStepAsync(RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => strategy.ApplyStepAsync(step, ct);
+
+        public Task RejectAsync(DtmfActionResult.Reject reject, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync(
+                !string.IsNullOrEmpty(reject.ErrorPrompt)
+                    ? $"[DTMF input rejected: {reject.ErrorPrompt}]"
+                    : $"[DTMF input rejected on step {step.Id}]",
+                ct);
+
+        public Task RepeatAsync(DtmfActionResult.Repeat repeat, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync("[Caller selection unclear, please repeat the options]", ct);
+
+        public Task EndSessionAsync(string reason, CancellationToken ct)
+            => strategy.EndSessionAsync(reason, ct);
+
+        public async Task TransferAsync(DtmfActionResult.Transfer transfer, CancellationToken ct)
         {
-            return;
-        }
-
-        // Always surface the digit for observability, even when we end up handling it
-        // by simply forwarding to the LLM.
-        await _events.Writer.WriteAsync(
-            new StrategyEvent.DtmfRecognized(tone.Digit.ToString(), step.Id, DateTimeOffset.UtcNow),
-            ct).ConfigureAwait(false);
-
-        var dtmf = step.StepScriptedConfiguration?.Dtmf;
-        var hasMenu = dtmf?.MenuOptions is { Count: > 0 };
-        var hasCollect = dtmf?.DigitCollectionValidator is not null
-            || !string.IsNullOrEmpty(dtmf?.OnValidNextStepId);
-
-        if (hasMenu)
-        {
-            await HandleMenuDigitAsync(step, tone.Digit, ct).ConfigureAwait(false);
-            return;
-        }
-
-        if (hasCollect)
-        {
-            await HandleCollectedDigitAsync(step, dtmf!, tone.Digit, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // LLM-aware fallback: hand the digit to the model as a user text turn so it can
-        // react in voice (e.g. "You pressed 1, let me look that up for you").
-        try
-        {
-            await _backend.SendUserTextAsync($"[Caller pressed {tone.Digit}]", ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Realtime backend rejected synthetic user text for DTMF digit '{Digit}' on step {StepId}",
-                tone.Digit, step.Id);
-        }
-    }
-
-    private async Task HandleMenuDigitAsync(RealtimeIvrWorkflowStep step, char digit, CancellationToken ct)
-    {
-        if (_navigator is null || !_navigator.TryResolveDtmfDigit(digit, out var option))
-        {
-            // Unrecognized digit on a menu stage — surface to the model as text so it
-            // can prompt the caller to retry rather than ignoring silently.
-            try
-            {
-                await _backend.SendUserTextAsync(
-                    $"[Caller pressed {digit} — not a valid option on this menu]", ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to forward unmatched DTMF digit '{Digit}' to backend", digit);
-            }
-            return;
-        }
-
-        WorkflowState.Set($"{step.Id}_selection", option.Label);
-
-        var actionResult = await _navigator.InvokeMenuActionAsync(option, extraArguments: null, ct).ConfigureAwait(false);
-        await DispatchActionResultAsync(actionResult, step, ct).ConfigureAwait(false);
-    }
-
-    private async Task HandleCollectedDigitAsync(
-        RealtimeIvrWorkflowStep step,
-        StepDtmfConfiguration dtmf,
-        char digit,
-        CancellationToken ct)
-    {
-        var terminator = dtmf.TerminationDigitChar;
-        var maxDigits = dtmf.MaxNumberOfDigits <= 0 ? int.MaxValue : dtmf.MaxNumberOfDigits;
-
-        string? collected = null;
-        lock (_dtmfBuffer)
-        {
-            if (digit == terminator)
-            {
-                collected = _dtmfBuffer.ToString();
-                _dtmfBuffer.Clear();
-            }
-            else
-            {
-                _dtmfBuffer.Append(digit);
-                if (_dtmfBuffer.Length >= maxDigits)
-                {
-                    collected = _dtmfBuffer.ToString();
-                    _dtmfBuffer.Clear();
-                }
-            }
-        }
-
-        if (string.IsNullOrEmpty(collected))
-        {
-            return;
-        }
-
-        if (dtmf.MinNumberOfDigits > 0 && collected.Length < dtmf.MinNumberOfDigits)
-        {
-            // Too few digits — surface so LLM can prompt for completion.
-            try
-            {
-                await _backend.SendUserTextAsync(
-                    $"[Caller entered '{collected}' but {dtmf.MinNumberOfDigits} digits are required]",
-                    ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to forward incomplete DTMF buffer to backend");
-            }
-            return;
-        }
-
-        if (_navigator is null)
-        {
-            return;
-        }
-
-        if (dtmf.DigitCollectionValidator is { } validator)
-        {
-            var stateKey = dtmf.CollectedStateKey ?? $"{step.Id}_collected";
-            var extra = new Dictionary<string, object?>
-            {
-                [dtmf.DigitsParameterName] = collected,
-            };
-
-            var actionResult = await _navigator.InvokeActionAsync(
-                validator,
-                dtmf.DigitCollectionArguments,
-                extraArguments: extra,
-                successNextStepId: dtmf.OnValidNextStepId,
-                failurePrompt: dtmf.OnInvalidPrompt,
-                failureAudio: dtmf.OnInvalidAudioFile,
+            await strategy._outbound.Writer.WriteAsync(
+                new OutboundDirective.TransferCall(
+                    transfer.TargetIdentifier,
+                    transfer.Kind switch
+                    {
+                        TransferKindHint.TeamsUser => TransferKind.BlindToTeamsUser,
+                        TransferKindHint.Consultative => TransferKind.Consultative,
+                        _ => TransferKind.BlindToPhoneNumber,
+                    },
+                    DateTimeOffset.UtcNow,
+                    transfer.Reason),
                 ct).ConfigureAwait(false);
-
-            if (actionResult is DtmfActionResult.Transition or DtmfActionResult.Complete)
-            {
-                WorkflowState.Set(stateKey, collected);
-            }
-
-            await DispatchActionResultAsync(actionResult, step, ct).ConfigureAwait(false);
-            return;
+            await strategy.EndSessionAsync("DTMF triggered transfer", ct).ConfigureAwait(false);
         }
 
-        // No validator: store under the default key and walk the first transition, if any.
-        WorkflowState.Set(dtmf.CollectedStateKey ?? $"{step.Id}_collected", collected);
-        if (dtmf.OnValidNextStepId is { Length: > 0 } onValid)
+        public Task EscalateAsync(string reason, CancellationToken ct)
+            => strategy._events.Writer.WriteAsync(
+                new StrategyEvent.EscalationRequested(reason, DateTimeOffset.UtcNow),
+                ct).AsTask();
+
+        public Task OnUnmatchedMenuDigitAsync(DtmfTone tone, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync($"[Caller pressed {tone.Digit} — not a valid option on this menu]", ct);
+
+        public Task OnUnconfiguredDigitAsync(DtmfTone tone, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync($"[Caller pressed {tone.Digit}]", ct);
+
+        public Task OnIncompleteBufferAsync(string collected, int minRequired, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync(
+                $"[Caller entered '{collected}' but {minRequired} digits are required]",
+                ct);
+
+        public Task OnTransitionBlockedAsync(string targetStepId, string reason, RealtimeIvrWorkflowStep step, CancellationToken ct)
+            => SendBackendNoteAsync($"[Transition to '{targetStepId}' blocked: {reason}]", ct);
+
+        private async Task SendBackendNoteAsync(string note, CancellationToken ct)
         {
-            await DispatchActionResultAsync(new DtmfActionResult.Transition(onValid), step, ct).ConfigureAwait(false);
+            try
+            {
+                await strategy._backend.SendUserTextAsync(note, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                strategy._logger.LogWarning(ex, "Failed to surface DTMF note to backend: {Note}", note);
+            }
         }
     }
-
-    private async Task DispatchActionResultAsync(
-        DtmfActionResult result,
-        RealtimeIvrWorkflowStep step,
-        CancellationToken ct)
-    {
-        switch (result)
-        {
-            case DtmfActionResult.Transition transition when _navigator is not null:
-            {
-                // Phase 3: route through EvaluateTransitionAsync so per-transition
-                // requires / per-DTMF-option requires trigger an auth-resolver detour
-                // before the transition fires. EnterStepAsyncLocked still owns the
-                // subflow-push / terminal-pop / normal-render branching from Phase 1.
-                var eval = await _navigator.EvaluateTransitionAsync(transition.NextStepId, ct).ConfigureAwait(false);
-                switch (eval)
-                {
-                    case TransitionEvaluation.Allowed allowed:
-                    {
-                        var tr = _navigator.TransitionTo(allowed.Target.Id);
-                        if (tr.Succeeded && tr.NewStep is not null)
-                        {
-                            await EnterStepAsyncLocked(tr.NewStep, ct).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            _logger.LogWarning(
-                                "DTMF requested transition to '{Target}' but it was rejected after Allowed evaluation: {Reason}",
-                                allowed.Target.Id, tr.Reason);
-                        }
-                        break;
-                    }
-                    case TransitionEvaluation.RequiresDetour detour:
-                    {
-                        WorkflowState.Set(
-                            PendingIntent.StateKey,
-                            new PendingIntent(detour.Target.Id, _navigator.Definition.Name));
-                        _logger.LogInformation(
-                            "DTMF transition to '{Target}' detouring through '{Subflow}' to satisfy '{Guard}'.",
-                            detour.Target.Id, detour.ResolverWorkflowId, detour.UnmetGuard.GetType().Name);
-                        var childInitial = await _navigator.PushSubflowAsync(
-                            detour.ResolverWorkflowId,
-                            returnToStepId: detour.Target.Id,
-                            failureReturnStepId: detour.Target.OnUnauthorizedStepId
-                                ?? _navigator.Definition.UnauthorizedFailureStepId,
-                            detour.MinVersion,
-                            detour.MaxVersion,
-                            ct).ConfigureAwait(false);
-                        await EnterStepAsyncLocked(childInitial, ct).ConfigureAwait(false);
-                        break;
-                    }
-                    case TransitionEvaluation.BlockedNoResolver blocked:
-                        _logger.LogWarning(
-                            "DTMF transition to '{Target}' blocked: {Reason} (no resolver for guard '{Guard}')",
-                            transition.NextStepId, blocked.Reason, blocked.UnmetGuard.GetType().Name);
-                        // Surface the rejection to the model so it can re-prompt.
-                        try
-                        {
-                            await _backend.SendUserTextAsync(
-                                $"[Transition to '{transition.NextStepId}' blocked: {blocked.Reason}]", ct).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to surface DTMF detour rejection to backend");
-                        }
-                        break;
-                    case TransitionEvaluation.Invalid invalid:
-                        _logger.LogWarning(
-                            "DTMF requested transition to '{Target}' but it was rejected: {Reason}",
-                            transition.NextStepId, invalid.Reason);
-                        break;
-                }
-                break;
-            }
-
-            case DtmfActionResult.Reject reject:
-                try
-                {
-                    var msg = !string.IsNullOrEmpty(reject.ErrorPrompt)
-                        ? $"[DTMF input rejected: {reject.ErrorPrompt}]"
-                        : $"[DTMF input rejected on step {step.Id}]";
-                    await _backend.SendUserTextAsync(msg, ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to surface DTMF rejection to backend");
-                }
-                break;
-
-            case DtmfActionResult.Complete:
-                await EndSessionAsync("DTMF action completed the workflow", ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Transfer transfer:
-                await _outbound.Writer.WriteAsync(
-                    new OutboundDirective.TransferCall(
-                        transfer.TargetIdentifier,
-                        transfer.Kind switch
-                        {
-                            TransferKindHint.TeamsUser => TransferKind.BlindToTeamsUser,
-                            TransferKindHint.Consultative => TransferKind.Consultative,
-                            _ => TransferKind.BlindToPhoneNumber,
-                        },
-                        DateTimeOffset.UtcNow,
-                        transfer.Reason),
-                    ct).ConfigureAwait(false);
-                await EndSessionAsync("DTMF triggered transfer", ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.HangUp:
-                await EndSessionAsync("DTMF triggered hang-up", ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Escalate escalate:
-                await _events.Writer.WriteAsync(
-                    new StrategyEvent.EscalationRequested(escalate.Reason, DateTimeOffset.UtcNow),
-                    ct).ConfigureAwait(false);
-                break;
-
-            case DtmfActionResult.Repeat:
-                // Realtime tier: the model owns prompting; surfacing a hint lets it re-ask.
-                try
-                {
-                    await _backend.SendUserTextAsync(
-                        "[Caller selection unclear, please repeat the options]", ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to surface DTMF repeat to backend");
-                }
-                break;
-        }
-    }
-    #endregion
 
 
     private async Task RunAgentLoopAsync(CancellationToken ct)
@@ -794,7 +490,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     /// </summary>
     private async Task EndSessionAsync(string reason, CancellationToken ct)
     {
-        _navigator?.Complete();
+        _session.Complete();
 
         await _events.Writer.WriteAsync(
             new StrategyEvent.AgentUtterance(_backend.AgentId, $"[session ending: {reason}]", DateTimeOffset.UtcNow),

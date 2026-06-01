@@ -30,7 +30,7 @@ public sealed class IvrWorkflowCatalog : IIvrWorkflowCatalog
         _loader = loader;
     }
 
-    public IReadOnlyCollection<string> Ids => _byId.Keys.ToArray();
+    public IReadOnlyCollection<string> Ids => [.. _byId.Keys];
 
     public IReadOnlyCollection<int> VersionsFor(string workflowId)
     {
