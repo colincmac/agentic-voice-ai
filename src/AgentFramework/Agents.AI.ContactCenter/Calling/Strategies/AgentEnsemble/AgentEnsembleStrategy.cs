@@ -363,10 +363,11 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
     /// <summary>
     /// Push the current stage's prompt and guard-wrapped tool surface (including the
-    /// synthesized <see cref="IvrAdvanceTool"/> when the stage can advance) onto
-    /// <paramref name="primary"/>, and emit <see cref="StrategyEvent.WorkflowStepEntered"/>
-    /// for observers. Called on session start, after every primary swap, and after every
-    /// successful navigator transition driven by an advance call.
+    /// synthesized <c>advance_to_*</c> functions from <see cref="IvrAdvanceFunctions"/>
+    /// when the stage can advance) onto <paramref name="primary"/>, and emit
+    /// <see cref="StrategyEvent.WorkflowStepEntered"/> for observers. Called on session
+    /// start, after every primary swap, and after every successful navigator transition
+    /// driven by an advance call.
     /// </summary>
     private async Task ApplyStageOnAsync(IConversationalAgent primary, RealtimeIvrWorkflowStep step, CancellationToken ct)
     {
@@ -374,11 +375,11 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
         if (!step.Terminal)
         {
-            // Build an invoker scoped to the current primary so the advance tool re-arms
-            // the same backend it was pushed onto. The invoker runs under the realtime
-            // client's UseFunctionInvocation() pipeline and returns AdvanceToolResult to
-            // the model, replacing the old out-of-band FunctionCalled handler.
-            var invoker = new IvrAdvanceToolInvoker(
+            // Build a function set scoped to the current primary so each advance tool
+            // re-arms the same backend it was pushed onto. The functions run under the
+            // realtime client's UseFunctionInvocation() pipeline and return
+            // AdvanceToolResult to the model.
+            var advanceFunctions = new IvrAdvanceFunctions(
                 _navigator,
                 async (nextStep, innerCt) =>
                 {
@@ -389,13 +390,9 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
                         await _cts.CancelAsync().ConfigureAwait(false);
                     }
                 },
-                _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
+                _loggerFactory?.CreateLogger<IvrAdvanceFunctions>());
 
-            var advance = IvrAdvanceTool.TryCreate(step, invoker);
-            if (advance is not null)
-            {
-                tools.Add(advance);
-            }
+            tools.AddRange(advanceFunctions.BuildForStep(step));
         }
 
         await primary.Backend.UpdateToolsAsync(tools, ct).ConfigureAwait(false);
@@ -407,17 +404,18 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     }
 
     /// <summary>
-    /// Surface backend tool invocations to observers. The IVR <c>advance</c> tool runs
-    /// inline via <see cref="IvrAdvanceToolInvoker"/> under the realtime client's
-    /// function-invocation pipeline, so this method no longer mutates the navigator.
+    /// Surface backend tool invocations to observers. The IVR <c>advance_to_*</c>
+    /// functions run inline via <see cref="IvrAdvanceFunctions"/> under the realtime
+    /// client's function-invocation pipeline, so this method no longer mutates the
+    /// navigator.
     /// </summary>
     private Task HandleFunctionCallAsync(IConversationalAgent primary, RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
     {
-        if (string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
+        if (IvrAdvanceFunctions.IsAdvanceFunctionName(call.Name))
         {
             _logger.LogDebug(
-                "Advance tool fired on ensemble primary {AgentId}; transition handled inline by IvrAdvanceToolInvoker.",
-                primary.AgentId);
+                "Advance function '{Function}' fired on ensemble primary {AgentId}; transition handled inline by IvrAdvanceFunctions.",
+                call.Name, primary.AgentId);
         }
 
         return Task.CompletedTask;

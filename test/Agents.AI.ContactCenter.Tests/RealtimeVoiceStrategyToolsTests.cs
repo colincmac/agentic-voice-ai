@@ -138,7 +138,7 @@ public class RealtimeVoiceStrategyToolsTests
         Assert.Single(backend.ToolUpdates);
         var pushed = backend.ToolUpdates[0];
         Assert.Equal(2, pushed.Count);
-        Assert.Contains(pushed, t => t.Name == IvrAdvanceTool.AdvanceToolName);
+        Assert.Contains(pushed, t => t.Name == "advance_to_confirm");
 
         await strategy.StopAsync();
     }
@@ -194,14 +194,15 @@ public class RealtimeVoiceStrategyToolsTests
         // assertions below observe only the transition-driven events.
         await DrainEventsAsync(strategy, expected: 2);
 
-        // The advance tool now runs inline under UseFunctionInvocation() — invoke it directly
-        // on the pushed tool surface to exercise the IvrAdvanceToolInvoker path.
+        // The advance pipeline now exposes one function per target (advance_to_{stage});
+        // invoke advance_to_confirm directly on the pushed surface to exercise the
+        // IvrAdvanceFunctions runtime path.
         var pushed = backend.ToolUpdates[0];
         var advance = Assert.IsAssignableFrom<AIFunction>(
-            pushed.Single(t => t.Name == IvrAdvanceTool.AdvanceToolName));
+            pushed.Single(t => t.Name == "advance_to_confirm"));
 
         var raw = await advance.InvokeAsync(
-            new AIFunctionArguments { ["next_stage"] = "confirm" },
+            new AIFunctionArguments { ["reason"] = "caller confirmed" },
             TestContext.Current.CancellationToken);
 
         // AIFunctionFactory serializes the returned AdvanceToolResult through JSON so the
@@ -218,7 +219,7 @@ public class RealtimeVoiceStrategyToolsTests
         Assert.Equal("confirm", strategy.WorkflowState.CurrentStepName);
         Assert.True(backend.ToolUpdates.Count >= 2, $"expected >= 2 tool updates, got {backend.ToolUpdates.Count}");
         var lastTools = backend.ToolUpdates[^1];
-        Assert.DoesNotContain(lastTools, t => t.Name == IvrAdvanceTool.AdvanceToolName);
+        Assert.DoesNotContain(lastTools, t => IvrAdvanceFunctions.IsAdvanceFunctionName(t.Name));
 
         await strategy.StopAsync();
     }

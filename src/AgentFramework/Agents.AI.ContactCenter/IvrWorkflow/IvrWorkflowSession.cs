@@ -10,7 +10,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// <summary>
 /// Per-call IVR collaborator bundle. Holds the navigator, its mutable state, the
 /// compiled workflow definition, the catalog used for subflow resolution, and a
-/// lazily-created <see cref="IvrAdvanceToolInvoker"/>. Strategies receive a single
+/// lazily-created <see cref="IvrAdvanceFunctions"/> set. Strategies receive a single
 /// session instead of resolving each piece from <see cref="IServiceProvider"/>.
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ public sealed class IvrWorkflowSession
 {
     private readonly object _invokerLock = new();
     private readonly ILoggerFactory? _loggerFactory;
-    private IvrAdvanceToolInvoker? _advanceInvoker;
+    private IvrAdvanceFunctions? _advanceFunctions;
 
     internal IvrWorkflowSession(
         RealtimeIvrWorkflowDefinition definition,
@@ -52,28 +52,28 @@ public sealed class IvrWorkflowSession
     public IIvrWorkflowCatalog Catalog { get; }
 
     /// <summary>
-    /// Lazily create (or return) the advance-tool invoker bound to <paramref name="applyStageAsync"/>.
-    /// The first caller wins; subsequent calls return the same instance regardless of the
-    /// callback they passed in. Strategies that use the realtime <c>advance</c> tool call
-    /// this once during start.
+    /// Lazily create (or return) the advance-function builder bound to
+    /// <paramref name="applyStageAsync"/>. The first caller wins; subsequent calls return
+    /// the same instance regardless of the callback they passed in. Strategies that
+    /// expose IVR navigation as <c>advance_to_*</c> tools call this once during start.
     /// </summary>
-    public IvrAdvanceToolInvoker GetOrCreateAdvanceInvoker(
+    public IvrAdvanceFunctions GetOrCreateAdvanceFunctions(
         Func<RealtimeIvrWorkflowStep, CancellationToken, Task> applyStageAsync)
     {
         ArgumentNullException.ThrowIfNull(applyStageAsync);
 
-        if (_advanceInvoker is not null)
+        if (_advanceFunctions is not null)
         {
-            return _advanceInvoker;
+            return _advanceFunctions;
         }
 
         lock (_invokerLock)
         {
-            _advanceInvoker ??= new IvrAdvanceToolInvoker(
+            _advanceFunctions ??= new IvrAdvanceFunctions(
                 Navigator,
                 applyStageAsync,
-                _loggerFactory?.CreateLogger<IvrAdvanceToolInvoker>());
-            return _advanceInvoker;
+                _loggerFactory?.CreateLogger<IvrAdvanceFunctions>());
+            return _advanceFunctions;
         }
     }
 

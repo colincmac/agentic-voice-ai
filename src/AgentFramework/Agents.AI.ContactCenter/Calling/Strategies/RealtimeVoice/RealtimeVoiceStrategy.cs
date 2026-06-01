@@ -37,7 +37,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly CancellationTokenSource _cts = new();
-    private IvrAdvanceToolInvoker? _advanceInvoker;
+    private IvrAdvanceFunctions? _advanceFunctions;
     private DtmfInputProcessor? _dtmfProcessor;
     private Task? _agentLoop;
     private Task? _audioPump;
@@ -97,10 +97,9 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Bind the advance invoker now that we know the apply pipeline; the session
-        // returns the same instance on subsequent calls.
-        _advanceInvoker = _session.GetOrCreateAdvanceInvoker(
-            (step, ct) => ApplyStepAsync(step, ct));
+        // Bind the advance-function builder now that we know the apply pipeline; the
+        // session returns the same instance on subsequent calls.
+        _advanceFunctions = _session.GetOrCreateAdvanceFunctions(ApplyStepAsync);
 
         // Build the shared DTMF input processor. Strategy-specific side effects are
         // routed through the realtime sink (forward as inline LLM text turns).
@@ -204,9 +203,9 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
     /// <summary>
     /// Push the resolved step's prompt and guard-wrapped tool surface (including the
-    /// synthesized <see cref="IvrAdvanceTool"/> when the step can advance) onto the
-    /// realtime backend, and emit <see cref="StrategyEvent.WorkflowStepEntered"/> for
-    /// observers.
+    /// synthesized <c>advance_to_*</c> functions from <see cref="IvrAdvanceFunctions"/>
+    /// when the step can advance) onto the realtime backend, and emit
+    /// <see cref="StrategyEvent.WorkflowStepEntered"/> for observers.
     /// </summary>
     private async Task RenderStepAsync(RealtimeIvrWorkflowStep step, CancellationToken cancellationToken)
     {
@@ -214,11 +213,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         if (!step.Terminal)
         {
-            var advance = IvrAdvanceTool.TryCreate(step, _advanceInvoker!);
-            if (advance is not null)
-            {
-                tools.Add(advance);
-            }
+            tools.AddRange(_advanceFunctions!.BuildForStep(step));
         }
 
         var prompt = _session.Navigator.BuildCurrentStepPrompt(_conversationContext);
@@ -323,6 +318,88 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
     }
     #endregion
 
+    private async Task RunAgentLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var update in _backend.RunAsync(ct).ConfigureAwait(false))
+            {
+                switch (update)
+                {
+                    case RealtimeBackendUpdate.Audio audio when !_suspended:
+                        await _outbound.Writer.WriteAsync(
+                            new OutboundDirective.Audio(
+                                new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _backend.AgentId)),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.Transcript transcript:
+                        await _events.Writer.WriteAsync(
+                            new StrategyEvent.Transcript(transcript.Speaker, transcript.Text, transcript.IsFinal, transcript.At),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.AgentText text:
+                        await _events.Writer.WriteAsync(
+                            new StrategyEvent.AgentUtterance(_backend.AgentId, text.Text, text.At),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.FunctionCalled call:
+                        await _events.Writer.WriteAsync(
+                            new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.UserSpeechStarted speech when !_suspended:
+                        // Caller started speaking. Tell the caller edge to stop playing any
+                        // queued agent audio so we don't talk over the caller (barge-in).
+                        await _outbound.Writer.WriteAsync(
+                            new OutboundDirective.StopPlayback(speech.At),
+                            ct).ConfigureAwait(false);
+                        break;
+
+                    case RealtimeBackendUpdate.Faulted fault:
+                        _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
+                        await _events.Writer.WriteAsync(
+                            new StrategyEvent.Faulted(fault.Message, fault.Exception, fault.At),
+                            CancellationToken.None).ConfigureAwait(false);
+                        return; // give the composite a chance to swap us out
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Realtime agent loop crashed");
+            using (var faultSpan = _telemetry.StartChildActivity("contact_center.strategy.agent_loop.faulted", _callId))
+            {
+                CallingActivitySource.SetError(faultSpan, ex);
+            }
+            await _events.Writer.WriteAsync(
+                new StrategyEvent.Faulted(ex.Message, ex, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Wind the strategy down when the workflow lands on a terminal stage. We mark the
+    /// workflow complete, emit an <see cref="StrategyEvent.EscalationRequested"/>-style
+    /// hint, and signal the agent loop to exit. The session host owns hang-up itself.
+    /// </summary>
+    private async Task EndSessionAsync(string reason, CancellationToken ct)
+    {
+        _session.Complete();
+
+        await _events.Writer.WriteAsync(
+            new StrategyEvent.AgentUtterance(_backend.AgentId, $"[session ending: {reason}]", DateTimeOffset.UtcNow),
+            CancellationToken.None).ConfigureAwait(false);
+
+        // Close the agent loop so the session moves to teardown. Use a separate cancel so
+        // the in-flight ApplyStageAsync above can complete cleanly.
+        await _cts.CancelAsync().ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Realtime-voice flavor of <see cref="IDtmfStrategySink"/>. All caller-facing side
     /// effects surface as inline user-text turns into the realtime backend so the model
@@ -395,109 +472,5 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                 strategy._logger.LogWarning(ex, "Failed to surface DTMF note to backend: {Note}", note);
             }
         }
-    }
-
-
-    private async Task RunAgentLoopAsync(CancellationToken ct)
-    {
-        try
-        {
-            await foreach (var update in _backend.RunAsync(ct).ConfigureAwait(false))
-            {
-                switch (update)
-                {
-                    case RealtimeBackendUpdate.Audio audio when !_suspended:
-                        await _outbound.Writer.WriteAsync(
-                            new OutboundDirective.Audio(
-                                new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _backend.AgentId)),
-                            ct).ConfigureAwait(false);
-                        break;
-
-                    case RealtimeBackendUpdate.Transcript transcript:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.Transcript(transcript.Speaker, transcript.Text, transcript.IsFinal, transcript.At),
-                            ct).ConfigureAwait(false);
-                        break;
-
-                    case RealtimeBackendUpdate.AgentText text:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.AgentUtterance(_backend.AgentId, text.Text, text.At),
-                            ct).ConfigureAwait(false);
-                        break;
-
-                    case RealtimeBackendUpdate.FunctionCalled call:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At),
-                            ct).ConfigureAwait(false);
-                        await HandleFunctionCallAsync(call, ct).ConfigureAwait(false);
-                        break;
-
-                    case RealtimeBackendUpdate.UserSpeechStarted speech when !_suspended:
-                        // Caller started speaking. Tell the caller edge to stop playing any
-                        // queued agent audio so we don't talk over the caller (barge-in).
-                        await _outbound.Writer.WriteAsync(
-                            new OutboundDirective.StopPlayback(speech.At),
-                            ct).ConfigureAwait(false);
-                        break;
-
-                    case RealtimeBackendUpdate.Faulted fault:
-                        _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.Faulted(fault.Message, fault.Exception, fault.At),
-                            CancellationToken.None).ConfigureAwait(false);
-                        return; // give the composite a chance to swap us out
-                }
-            }
-        }
-        catch (OperationCanceledException) { /* shutdown */ }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Realtime agent loop crashed");
-            using (var faultSpan = _telemetry.StartChildActivity("contact_center.strategy.agent_loop.faulted", _callId))
-            {
-                CallingActivitySource.SetError(faultSpan, ex);
-            }
-            await _events.Writer.WriteAsync(
-                new StrategyEvent.Faulted(ex.Message, ex, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Surface backend tool invocations to observers. The IVR <c>advance</c> tool runs
-    /// inline under <c>UseFunctionInvocation()</c> via <see cref="IvrAdvanceToolInvoker"/>,
-    /// which performs the navigator transition and re-arms the realtime backend itself —
-    /// so this method no longer mutates the workflow state machine. Other tool calls are
-    /// owned by the backend's function-invocation pipeline; the strategy only emits a
-    /// <see cref="StrategyEvent.FunctionCalled"/> event for tracing.
-    /// </summary>
-    private Task HandleFunctionCallAsync(RealtimeBackendUpdate.FunctionCalled call, CancellationToken ct)
-    {
-        if (string.Equals(call.Name, IvrAdvanceTool.AdvanceToolName, StringComparison.Ordinal))
-        {
-            _logger.LogDebug(
-                "Advance tool fired on call {CallId}; transition handled inline by IvrAdvanceToolInvoker.",
-                _callId);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Wind the strategy down when the workflow lands on a terminal stage. We mark the
-    /// workflow complete, emit an <see cref="StrategyEvent.EscalationRequested"/>-style
-    /// hint, and signal the agent loop to exit. The session host owns hang-up itself.
-    /// </summary>
-    private async Task EndSessionAsync(string reason, CancellationToken ct)
-    {
-        _session.Complete();
-
-        await _events.Writer.WriteAsync(
-            new StrategyEvent.AgentUtterance(_backend.AgentId, $"[session ending: {reason}]", DateTimeOffset.UtcNow),
-            CancellationToken.None).ConfigureAwait(false);
-
-        // Close the agent loop so the session moves to teardown. Use a separate cancel so
-        // the in-flight ApplyStageAsync above can complete cleanly.
-        await _cts.CancelAsync().ConfigureAwait(false);
     }
 }
