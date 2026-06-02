@@ -17,53 +17,48 @@ namespace Showcase.Agent.VoiceAgent.Tools;
 /// mock account from <see cref="InMemoryCallerDirectory"/> claims (<c>balance</c> +
 /// <c>balancePending</c>) so each seeded caller returns a deterministic figure.
 /// </summary>
-public static class BalanceLookupTools
+public class BalanceLookupTools(ILogger<BalanceLookupTools> logger) : IAIToolCollection
 {
-    public static AITool LookupBalanceTool(
+    ILogger<BalanceLookupTools> _logger = logger;
+
+    [Description("Look up the verified caller's current account balance. Only callable after the caller has completed multi-factor verification. Returns available and pending amounts in USD.")]
+    [RequiresCallerVerification(CallerVerificationLevel.MultiFactor, FailureMessage = "Balance access requires multi-factor verification.")]
+    BalanceLookupResult LookupBalance(
         InMemoryCallerDirectory directory,
-        ILoggerFactory? loggerFactory = null)
+        CallerAuthenticationState callerAuthenticationState)
     {
-        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("LookupBalance");
+        var state = callerAuthenticationState;
+        var identity = state.Identity;
 
-        [Description("Look up the verified caller's current account balance. Only callable after the caller has completed multi-factor verification. Returns available and pending amounts in USD.")]
-        [RequiresCallerVerification(CallerVerificationLevel.MultiFactor, FailureMessage = "Balance access requires multi-factor verification.")]
-        BalanceLookupResult LookupBalance(IServiceProvider services)
+        var record = directory.FindByUserId(identity.UserId);
+        if (record is null)
         {
-            var state = services.GetRequiredService<CallerAuthenticationState>();
-            var identity = state.Identity;
-
-            var record = directory.FindByUserId(identity.UserId);
-            if (record is null)
-            {
-                logger.LogWarning("Balance lookup failed: no directory record for {UserId}", identity.UserId);
-                return new BalanceLookupResult(false, identity.UserId, identity.DisplayName, null, null, null, null, "No account on file for this caller.");
-            }
-
-            var available = TryReadDecimal(record.Claims, "balance");
-            var pending = TryReadDecimal(record.Claims, "balancePending");
-            var tier = record.Claims.TryGetValue("accountTier", out var tierClaim) ? tierClaim?.ToString() : null;
-
-            if (available is null)
-            {
-                return new BalanceLookupResult(false, identity.UserId, identity.DisplayName, null, null, "USD", tier, "Balance is not available right now.");
-            }
-
-            logger.LogInformation(
-                "Returned balance for {UserId} ({DisplayName}): available={Available} pending={Pending}",
-                identity.UserId, identity.DisplayName, available, pending);
-
-            return new BalanceLookupResult(
-                Success: true,
-                AccountId: identity.UserId,
-                AccountHolder: identity.DisplayName,
-                AvailableBalance: available,
-                PendingBalance: pending ?? 0m,
-                Currency: "USD",
-                AccountTier: tier,
-                Message: "Balance retrieved.");
+            _logger.LogWarning("Balance lookup failed: no directory record for {UserId}", identity.UserId);
+            return new BalanceLookupResult(false, identity.UserId, identity.DisplayName, null, null, null, null, "No account on file for this caller.");
         }
 
-        return AIFunctionFactory.Create((Delegate)LookupBalance);
+        var available = TryReadDecimal(record.Claims, "balance");
+        var pending = TryReadDecimal(record.Claims, "balancePending");
+        var tier = record.Claims.TryGetValue("accountTier", out var tierClaim) ? tierClaim?.ToString() : null;
+
+        if (available is null)
+        {
+            return new BalanceLookupResult(false, identity.UserId, identity.DisplayName, null, null, "USD", tier, "Balance is not available right now.");
+        }
+
+        _logger.LogInformation(
+            "Returned balance for {UserId} ({DisplayName}): available={Available} pending={Pending}",
+            identity.UserId, identity.DisplayName, available, pending);
+
+        return new BalanceLookupResult(
+            Success: true,
+            AccountId: identity.UserId,
+            AccountHolder: identity.DisplayName,
+            AvailableBalance: available,
+            PendingBalance: pending ?? 0m,
+            Currency: "USD",
+            AccountTier: tier,
+            Message: "Balance retrieved.");
     }
 
     private static decimal? TryReadDecimal(IReadOnlyDictionary<string, object?> claims, string key)
@@ -82,6 +77,11 @@ public static class BalanceLookupTools
             string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => null,
         };
+    }
+
+    public IEnumerable<AITool> AsAITools()
+    {
+        yield return AIFunctionFactory.Create(LookupBalance);
     }
 }
 

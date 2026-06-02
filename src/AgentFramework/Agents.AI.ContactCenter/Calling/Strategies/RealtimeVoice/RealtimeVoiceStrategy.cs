@@ -37,8 +37,8 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly CancellationTokenSource _cts = new();
-    private IvrAdvanceFunctions? _advanceFunctions;
-    private DtmfInputProcessor? _dtmfProcessor;
+    private readonly IvrAdvanceFunctions _advanceFunctions;
+    private readonly DtmfInputProcessor _dtmfProcessor;
     private Task? _agentLoop;
     private Task? _audioPump;
     private Task? _dtmfPump;
@@ -68,6 +68,19 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
         _session = session;
         _logger = loggerFactory.CreateLogger<RealtimeVoiceStrategy>();
         _telemetry = telemetry;
+
+        // Bind the advance-function builder now that we know the apply pipeline; the
+        // session returns the same instance on subsequent calls.
+        _advanceFunctions = _session.GetOrCreateAdvanceFunctions(ApplyStepAsync);
+
+        // Build the shared DTMF input processor. Strategy-specific side effects are
+        // routed through the realtime sink (forward as inline LLM text turns).
+        _dtmfProcessor = new DtmfInputProcessor(
+            _session,
+            new RealtimeVoiceDtmfSink(this),
+            _events.Writer,
+            _logger);
+
     }
 
     public StrategyKind Kind => StrategyKind.RealtimeVoice;
@@ -97,17 +110,6 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
             await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Bind the advance-function builder now that we know the apply pipeline; the
-        // session returns the same instance on subsequent calls.
-        _advanceFunctions = _session.GetOrCreateAdvanceFunctions(ApplyStepAsync);
-
-        // Build the shared DTMF input processor. Strategy-specific side effects are
-        // routed through the realtime sink (forward as inline LLM text turns).
-        _dtmfProcessor = new DtmfInputProcessor(
-            _session,
-            new RealtimeVoiceDtmfSink(this),
-            _events.Writer,
-            _logger);
 
         // Authentication and the first prompt push need caller metadata, so they always run
         // here in StartAsync — even when the backend was prewarmed without an attached edge.
@@ -213,7 +215,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
 
         if (!step.Terminal)
         {
-            tools.AddRange(_advanceFunctions!.BuildForStep(step));
+            tools.AddRange(_advanceFunctions.BuildForStep(step));
         }
 
         var prompt = _session.Navigator.BuildCurrentStepPrompt(_conversationContext);
@@ -307,7 +309,7 @@ public sealed class RealtimeVoiceStrategy : IConversationStrategy
                     continue;
                 }
 
-                await _dtmfProcessor!.ProcessAsync(tone, ct).ConfigureAwait(false);
+                await _dtmfProcessor.ProcessAsync(tone, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }

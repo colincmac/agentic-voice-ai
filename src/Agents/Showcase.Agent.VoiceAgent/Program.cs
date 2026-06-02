@@ -7,6 +7,7 @@ using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.DependencyInjection;
 using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Hosting;
 using Agents.AI.Realtime;
@@ -93,6 +94,8 @@ builder.Services.AddAzureSpeech(builder.Configuration.GetSection(AzureSpeechServ
 builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
+builder.Services.AddScoped<IAIToolCollection, WorkflowStateTools>();
+builder.Services.AddScoped<IAIToolCollection, BalanceLookupTools>();
 
 // Mock SMS-OTP MFA: in-process sender that logs the generated code and stashes it in
 // LastIssuedOtpRegistry so the diagnostics API can surface it during demo runs.
