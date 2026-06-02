@@ -5,7 +5,8 @@ using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.ContactCenter.IvrWorkflow.DependencyInjection;
+using Agents.AI.ContactCenter.IvrWorkflow.Authorization;
+using Agents.AI.ContactCenter.IvrWorkflow.Loading;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
@@ -20,8 +21,6 @@ using Microsoft.Agents.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Azure;
-using OpenTelemetry.Resources;
-using Pipelines.Sockets.Unofficial.Arenas;
 using Showcase.Agent.VoiceAgent;
 using Showcase.Agent.VoiceAgent.Apis;
 using Showcase.Agent.VoiceAgent.Authentication;
@@ -31,44 +30,29 @@ using Showcase.Agent.VoiceAgent.Workflow;
 using Showcase.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
-//builder.Services.AddGrpc();
+
 var azureSection = builder.Configuration.GetSection("Azure");
 var tenantId = azureSection["TenantId"];
 
 var credential = new AzureCliCredential();
 builder.Services.AddAzureClients(clientBuilder =>
 {
-    // Make this the default for clients created by the factory
     clientBuilder.UseCredential(credential);
 });
 builder.AddServiceDefaults();
 
-
 builder.Services.AddHttpClient();
 
-// Retrieve the endpoint
 var appConfigEndpoint = builder.Configuration.GetConnectionString("appconfig");
-
 if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 {
     builder.Configuration.AddAzureAppConfiguration(appConfigEndpoint);
 }
 
-//builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-//    .AddMicrosoftIdentityWebApi(builder.Configuration)
-//    .EnableTokenAcquisitionToCallDownstreamApi();
+// ============================================================================
+//  AI model clients
+// ============================================================================
 
-//builder.AddAgentIdentityManagement();
-
-//builder.Services.AddAgentIdentities();
-//builder.Services.AddInMemoryTokenCaches();
-//builder.AddDecentralizedIDOptions();
-
-
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-//builder.Services.AddOpenApi();
-
-// AI Model Clients
 builder.AddKeyedChatClient("slm")
     .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
 
@@ -89,47 +73,76 @@ builder.Services.AddAzureSpeech(builder.Configuration.GetSection(AzureSpeechServ
     options.Credential = new AzureCliCredential();
 });
 
-// E2E showcase: register the auth-aware DTMF workflow as the default and the realtime
-// equivalent under a tier-keyed slot, so the CallingApi can pick either via ?tier=.
+// ============================================================================
+//  Showcase demo infrastructure (caller directory, OTP, etc.)
+// ============================================================================
+
 builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
+
+// Per-call scoped IAIToolCollection implementations the new INamedAIFunctionProvider
+// auto-discovers. These tools reach scoped state (CallerAuthenticationState,
+// ICallSessionAccessor) so they must be scoped, not singleton.
 builder.Services.AddScoped<IAIToolCollection, WorkflowStateTools>();
 builder.Services.AddScoped<IAIToolCollection, BalanceLookupTools>();
 
-// Mock SMS-OTP MFA: in-process sender that logs the generated code and stashes it in
-// LastIssuedOtpRegistry so the diagnostics API can surface it during demo runs.
+// Mock SMS-OTP MFA infrastructure.
 builder.Services.AddSingleton<LastIssuedOtpRegistry>();
 builder.Services.AddSingleton<ISmsOtpSender, LoggingSmsOtpSender>();
-// SmsOtpAttempt is consumed by SmsOtpAuthenticator + SmsOtpTools within the same call scope.
 builder.Services.AddScoped<SmsOtpAttempt>();
 
-// Declarative YAML IVR framework: loads workflow definitions from
-// Workflow\Samples\*.yaml (copied to the app output via the csproj content glob),
-// compiles them into RealtimeIvrWorkflowDefinition instances, and exposes the
-// caller-auth tools (`pin-validator`, `confirm-identity`, `transfer-to-agent`) under
-// names the YAML samples reference. Showcase predicates and additional sources can
-// be appended here.
-builder.Services.AddIvrWorkflowFramework(b => b
-    .AddFileSystemSource(Path.Combine(AppContext.BaseDirectory, DemoWorkflowIds.SamplesDirectory))
-    .AddTool("pin-validator", sp => PinValidationTools.ValidatePinTool(
-        sp.GetRequiredService<InMemoryCallerDirectory>(),
-        sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("confirm-identity", sp => PinValidationTools.ConfirmIdentityTool(
-        sp.GetRequiredService<InMemoryCallerDirectory>(),
-        sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("request-otp", sp => SmsOtpTools.RequestOtpTool(
-        sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("submit-otp", sp => SmsOtpTools.SubmitOtpTool(
-        sp.GetRequiredService<ILoggerFactory>()))
-    // .AddTool("lookup-balance", sp => BalanceLookupTools.LookupBalanceTool(
-    //     sp.GetRequiredService<InMemoryCallerDirectory>(),
-    //     sp.GetRequiredService<ILoggerFactory>()))
-    // .AddTool("record-caller-name", sp => WorkflowStateTools.RecordCallerNameTool(
-    //     sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
-        DemoWorkflowIds.DefaultEscalationNumber)));
+// ============================================================================
+//  Tool registrations — keyed AIFunction DI (Phase-1 primitives).
+//  Each tool referenced from YAML by name must resolve through INamedAIFunctionProvider.
+// ============================================================================
 
+builder.Services.AddNamedAIFunction(
+    "pin-validator",
+    sp => (AIFunction)PinValidationTools.ValidatePinTool(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()),
+    ServiceLifetime.Singleton);
+
+builder.Services.AddNamedAIFunction(
+    "confirm-identity",
+    sp => (AIFunction)PinValidationTools.ConfirmIdentityTool(
+        sp.GetRequiredService<InMemoryCallerDirectory>(),
+        sp.GetRequiredService<ILoggerFactory>()),
+    ServiceLifetime.Singleton);
+
+builder.Services.AddNamedAIFunction(
+    "request-otp",
+    sp => (AIFunction)SmsOtpTools.RequestOtpTool(sp.GetRequiredService<ILoggerFactory>()),
+    ServiceLifetime.Singleton);
+
+builder.Services.AddNamedAIFunction(
+    "submit-otp",
+    sp => (AIFunction)SmsOtpTools.SubmitOtpTool(sp.GetRequiredService<ILoggerFactory>()),
+    ServiceLifetime.Singleton);
+
+builder.Services.AddNamedAIFunction(
+    "transfer-to-agent",
+    _ => (AIFunction)TransferTools.BuildTransferToAgentTool(ShowcaseWorkflowIds.DefaultEscalationNumber),
+    ServiceLifetime.Singleton);
+
+// ============================================================================
+//  YAML call workflows (Phase-3/6 — loaded into ICallWorkflowCatalog)
+// ============================================================================
+
+builder.Services.AddCallWorkflowsFromDirectory(
+    Path.Combine(AppContext.BaseDirectory, ShowcaseWorkflowIds.SamplesDirectory));
+
+// Showcase tells the calling APIs which workflow id + tier to start new calls on.
+builder.Services.AddSingleton(new CallEntryConfig
+{
+    WorkflowId = ShowcaseWorkflowIds.AuthenticatedRealtimeBank,
+    PreferredTier = AgentTier.RealtimeVoice,
+});
+
+// ============================================================================
+//  Realtime AI agent (kept — used by AddRealtimeVoiceStrategy to wire the backend)
+// ============================================================================
 
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
@@ -155,49 +168,37 @@ builder.AddRealtimeAIAgent(
             });
     });
 
-
-builder.Services.AddSingleton<RealtimeIvrWorkflowDefinition>(sp =>
-    DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedRealtime));
-
-builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
-    nameof(AgentTier.DtmfOnly),
-    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedDtmf));
-
-builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
-    nameof(AgentTier.RealtimeVoice),
-    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.AuthenticatedRealtime));
-
-builder.Services.AddKeyedSingleton<RealtimeIvrWorkflowDefinition>(
-    nameof(AgentTier.IntentNlu),
-    (sp, _) => DemoWorkflowLoader.Load(sp, DemoWorkflowIds.NluWithDtmfFallback));
+// ============================================================================
+//  Call session container — new strategies bound to the workflow id.
+// ============================================================================
+//  Wiring order: caller auth first (so the filter can resolve scoped state),
+//  then AddRealtimeVoiceStrategy to register IRealtimeVoiceBackend + agent wrapping,
+//  then the new-model factories which shadow the legacy ones at their respective
+//  tiers via DI registration order (last-wins on resolve).
+//
+//  The CallerVerificationFilter is wired into the realtime agent's function-invocation
+//  middleware (defense-in-depth against the model invoking a guarded tool).
 
 builder.AddCallSessionContainer()
     .AddDistributedCallState(DistributedCallStateBackend.InMemory)
-    // Inner factories — the composite below shadows the top tier and reuses these
-    // through DI. Order matters: register the inner tiers BEFORE the composite so
-    // the composite's lookup finds them.
-    .AddRealtimeVoiceStrategy(realtimeAgentServiceKey: AgentConfig.TriageAgent)
-    .AddNluStrategy(chatClientServiceKey: "slm")
-    .AddDtmfStreamingStrategy()
-    .AddCallControlTools()
-    // Caller authentication: ANI lookup against the in-memory directory plus the
-    // anonymous fallback so unknown callers still walk the workflow as guests. PIN
-    // elevation routes through the orchestrator via PinAuthenticator + IPinValidator
-    // so PIN-collecting tools mutate state through the same pipeline as ANI.
     .AddCallerAuthentication()
     .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
     .AddPinAuthenticator<InMemoryPinValidator>()
-    // Demo MFA second factor: SMS OTP. Uses LoggingSmsOtpSender + the framework's
-    // InMemoryChallengeStore registered by AddCallerAuthentication() above. The SmsOtpAttempt
-    // scoped buffer the SmsOtpTools fill is added here so it shares the call's DI scope.
     .AddCallerAuthenticator<SmsOtpAuthenticator>()
-    // Where the composite (and any DTMF "press 0 for agent" tool) sends escalations.
-    .AddTransferEscalationTarget(DemoWorkflowIds.DefaultEscalationNumber)
-    // Composite chain: RealtimeVoice → IntentNlu → DtmfOnly. The composite registers as a
-    // Tier 0 (RealtimeVoice) factory, shadowing the inner Realtime factory above thanks to
-    // last-wins resolution in CallSessionFactory. Per-call IvrWorkflowState (workflow step,
-    // collected data, transcript) and CallerAuthenticationState are preserved across each
-    // mid-call swap so the caller doesn't have to re-authenticate when the tier degrades.
+    .AddCallControlTools()
+    .AddTransferEscalationTarget(ShowcaseWorkflowIds.DefaultEscalationNumber)
+    // AddRealtimeVoiceStrategy registers IRealtimeVoiceBackend (used by the new strategy)
+    // and wires CallerVerificationFilter as defense-in-depth at function-invocation time.
+    .AddRealtimeVoiceStrategy(
+        realtimeAgentServiceKey: AgentConfig.TriageAgent,
+        middlewareOverride: CallerVerificationFilter.Middleware)
+    .AddNluStrategy(chatClientServiceKey: "slm")
+    .AddDtmfStreamingStrategy()
+    // New-model factories — these shadow the legacy factories at their tier slots
+    // (CallSessionFactory builds a dict keyed by tier; later registrations win).
+    .AddRealtimeCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
+    .AddNluCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
+    .AddDtmfCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
     .AddCompositeFallbackStrategy(
         topTier: AgentTier.RealtimeVoice,
         AgentTier.RealtimeVoice,
@@ -207,52 +208,35 @@ builder.AddCallSessionContainer()
 // Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
-// Startup-time warm-up of the per-tier strategy factories and keyed workflow definitions.
+// Startup-time prewarm of factories + catalog (boot-time validation of all YAML blueprints).
 builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
 
-// TEAMS
-builder.AddAgentApplicationOptions();
+// ============================================================================
+//  Teams
+// ============================================================================
 
-// builder.AddAgent((sp) =>
-// {
-//     var chatAgent = sp.GetRequiredKeyedService<AIAgent>("pirate");
-//     var options = sp.GetRequiredService<AgentApplicationOptions>();
-//     return new TeamsAIAgent(options, chatAgent);
-// });
+builder.AddAgentApplicationOptions();
 builder.Services.AddSingleton<IStorage, MemoryStorage>();
 
-// End TEAMS
 var app = builder.Build();
 
 app.UseRouting();
 app.UseWebSockets();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-//app.UseHttpsRedirection();
-
-//app.UseAuthentication();
-//app.UseAuthorization();
-//app.MapAgentIdentityManagement();
 
 app.MapGet("/", async ([FromServices] AuthorizingRealtimeAIAgent agent, CancellationToken cancellationToken) =>
 {
     var session = await agent.CreateRealtimeSessionAsync(null, cancellationToken);
     return "Testing";
 });
-//app.MapTeams();
-
 
 app.MapCallAutomation();
 app.MapOperatorCalls();
 app.MapAuthDiagnostics();
-// app.MapOperatorDashboardHub();
-
-//app.MapAgentDiscovery("/agents");
 app.MapDefaultEndpoints();
 
 app.Run();

@@ -19,10 +19,13 @@ public sealed class RealtimeVoiceStrategyFactory : IConversationStrategyFactory
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(workflow,
+            "The legacy RealtimeVoiceStrategyFactory requires a non-null workflow. Use RealtimeCallWorkflowStrategyFactory + ICallWorkflowCatalog for the new model.");
+
         var backend = services.GetRequiredService<IRealtimeVoiceBackend>();
         var loggerFactory = services.GetRequiredService<ILoggerFactory>();
         var telemetry = services.GetRequiredService<CallingTelemetry>();

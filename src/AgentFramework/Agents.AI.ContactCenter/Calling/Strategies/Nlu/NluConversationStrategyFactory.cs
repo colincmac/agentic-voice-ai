@@ -21,10 +21,13 @@ public sealed class NluConversationStrategyFactory : IConversationStrategyFactor
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(workflow,
+            "The legacy NluConversationStrategyFactory requires a non-null workflow. Use NluCallWorkflowStrategyFactory + ICallWorkflowCatalog for the new model.");
+
         var intentAgent = services.GetRequiredService<IvrIntentAgent>();
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
         var escalation = services.GetService<TransferEscalationTarget>();

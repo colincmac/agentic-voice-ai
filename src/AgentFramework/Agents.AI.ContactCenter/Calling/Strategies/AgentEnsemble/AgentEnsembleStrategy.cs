@@ -19,7 +19,7 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
     private const int RecentBufferSize = 25;
 
     private readonly IAgentEnsemble _ensemble;
-    private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly RealtimeIvrWorkflowDefinition? _workflow;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger _logger;
 
@@ -51,7 +51,7 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
 
     public AgentEnsembleStrategy(
         IAgentEnsemble ensemble,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom = null,
         ILoggerFactory? loggerFactory = null)
     {
@@ -82,6 +82,9 @@ public sealed class AgentEnsembleStrategy : IConversationStrategy
             return;
         }
         _startContext = context;
+
+        ArgumentNullException.ThrowIfNull(_workflow,
+            "AgentEnsembleStrategy requires a non-null RealtimeIvrWorkflowDefinition.");
 
         _navigator = new IvrWorkflowNavigator(
             _workflow,

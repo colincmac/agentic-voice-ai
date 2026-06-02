@@ -16,7 +16,7 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.Composite;
 public sealed class CompositeFallbackStrategy : IConversationStrategy
 {
     private readonly IReadOnlyList<IConversationStrategyFactory> _orderedFactories;
-    private readonly RealtimeIvrWorkflowDefinition _workflow;
+    private readonly RealtimeIvrWorkflowDefinition? _workflow;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -41,7 +41,7 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
 
     public CompositeFallbackStrategy(
         IEnumerable<IConversationStrategyFactory> orderedFactories,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         ILoggerFactory? loggerFactory = null)
     {
         _orderedFactories = orderedFactories.ToArray();

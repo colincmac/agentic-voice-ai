@@ -12,12 +12,13 @@ using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
 using Microsoft.AspNetCore.Mvc;
+using Showcase.Agent.VoiceAgent.Workflow;
 
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 /// <summary>
-/// ACS Call Automation endpoints. The answer mode is selected by the registered
-/// <see cref="RealtimeIvrWorkflowDefinition"/>'s <see cref="AgentTier"/>:
+/// ACS Call Automation endpoints. The answer mode is selected by the showcase's
+/// <see cref="CallEntryConfig.PreferredTier"/>:
 /// <list type="bullet">
 ///   <item><see cref="AgentTier.RealtimeVoice"/> — answers with a bidirectional media WebSocket;
 ///         the WSS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
@@ -41,9 +42,9 @@ public static class CallingApi
             [FromBody] EventGridEvent[] incomingEvents,
             CancellationToken cancellationToken = default) =>
         {
-            // Tier comes from the registered workflow definition (driven by YAML
-            // strategy.primary). 
-            var workflowTier = services.Workflow.Tier;
+            // Tier comes from the showcase's CallEntryConfig (preferred tier for new calls;
+            // composite fallback handles degradation per ADR).
+            var workflowTier = services.EntryConfig.PreferredTier;
             var useStreaming = services.Options.Value.Acs.UseWebsocketForMediaStreaming;
 
             foreach (var evt in incomingEvents)
@@ -68,7 +69,7 @@ public static class CallingApi
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
                         incoming.ServerCallId,
-                        services.Workflow.Name,
+                        services.EntryConfig.WorkflowId,
                         workflowTier);
 
                     var callbackUri = new Uri(
@@ -193,7 +194,7 @@ public static class CallingApi
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
                     "Media WebSocket established for CallConnectionId={CallConnectionId}, Tier={Tier}",
-                    callConnectionId, services.Workflow.Tier);
+                    callConnectionId, services.EntryConfig.PreferredTier);
 
                 // Pod-pinned bi-di stream — claim streaming ownership before the
                 // session starts so the very first mid-call callback can find us.
@@ -450,12 +451,13 @@ public static class CallingApi
         string modeLabel,
         CancellationToken cancellationToken)
     {
-        var tier = services.Workflow.Tier;
+        var tier = services.EntryConfig.PreferredTier;
         var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
         {
             CallId = callId,
             CallerEdge = edge,
-            Workflow = services.Workflow,
+            // New-model strategy factories ignore Workflow and resolve from ICallWorkflowCatalog.
+            Workflow = null,
             PreferredTier = tier,
         }, cancellationToken).ConfigureAwait(false);
 

@@ -298,7 +298,7 @@ internal sealed class ControllableStrategyFactory : IConversationStrategyFactory
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
         => ValueTask.FromResult<IConversationStrategy>(_strategy);

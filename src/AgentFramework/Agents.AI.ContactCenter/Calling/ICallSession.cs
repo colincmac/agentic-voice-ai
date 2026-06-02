@@ -128,7 +128,14 @@ public interface ICallSessionFactory
 public sealed record CallSessionPrewarmRequest
 {
     public required string CallId { get; init; }
-    public required RealtimeIvrWorkflowDefinition Workflow { get; init; }
+
+    /// <summary>
+    /// Legacy <see cref="IvrWorkflow.RealtimeIvrWorkflowDefinition"/> the chosen strategy
+    /// factory will receive. Strategies that source their workflow from elsewhere (e.g.
+    /// the new <see cref="IvrWorkflow.Catalog.ICallWorkflowCatalog"/>) ignore this field;
+    /// supply <see langword="null"/> from those call sites.
+    /// </summary>
+    public RealtimeIvrWorkflowDefinition? Workflow { get; init; }
 
     /// <summary>Override tier resolution. When null, defaults to <see cref="AgentTier.DtmfOnly"/>.</summary>
     public AgentTier? PreferredTier { get; init; }
@@ -138,7 +145,14 @@ public sealed record CallSessionRequest
 {
     public required string CallId { get; init; }
     public required ICallEdge CallerEdge { get; init; }
-    public required RealtimeIvrWorkflowDefinition Workflow { get; init; }
+
+    /// <summary>
+    /// Legacy <see cref="IvrWorkflow.RealtimeIvrWorkflowDefinition"/> the chosen strategy
+    /// factory will receive. Strategies that source their workflow from elsewhere (e.g.
+    /// the new <see cref="IvrWorkflow.Catalog.ICallWorkflowCatalog"/>) ignore this field;
+    /// supply <see langword="null"/> from those call sites.
+    /// </summary>
+    public RealtimeIvrWorkflowDefinition? Workflow { get; init; }
 
     /// <summary>Override tier resolution. When null, the registered <c>IAgentTierResolver</c> picks.</summary>
     public AgentTier? PreferredTier { get; init; }
@@ -171,7 +185,7 @@ public interface IConversationStrategyFactory
     ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default);
 }

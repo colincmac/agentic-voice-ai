@@ -27,12 +27,13 @@ public sealed class DtmfCallWorkflowStrategyFactory : IConversationStrategyFacto
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(callId);
         ArgumentNullException.ThrowIfNull(services);
+        // workflow is intentionally ignored — see RealtimeCallWorkflowStrategyFactory.
 
         var catalog = services.GetRequiredService<ICallWorkflowCatalog>();
         var compiled = catalog.Get(_workflowId);

@@ -15,10 +15,13 @@ public sealed class DtmfStreamingStrategyFactory : IConversationStrategyFactory
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(workflow,
+            "The legacy DtmfStreamingStrategyFactory requires a non-null workflow. Use DtmfCallWorkflowStrategyFactory + ICallWorkflowCatalog for the new model.");
+
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();
         var loggerFactory = services.GetService<ILoggerFactory>();
         var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
@@ -35,10 +38,13 @@ public sealed class DtmfVerbStrategyFactory : IConversationStrategyFactory
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
+        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(workflow,
+            "The legacy DtmfVerbStrategyFactory requires a non-null workflow.");
+
         var loggerFactory = services.GetService<ILoggerFactory>();
         var sessionFactory = services.GetService<IIvrWorkflowSessionFactory>() ?? new IvrWorkflowSessionFactory();
         var session = sessionFactory.Create(workflow, restoreFrom, services);
