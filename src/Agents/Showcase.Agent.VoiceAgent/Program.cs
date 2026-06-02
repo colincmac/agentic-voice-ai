@@ -172,12 +172,10 @@ builder.AddRealtimeAIAgent(
 //  Call session container — new strategies bound to the workflow id.
 // ============================================================================
 //  Wiring order: caller auth first (so the filter can resolve scoped state),
-//  then AddRealtimeVoiceStrategy to register IRealtimeVoiceBackend + agent wrapping,
-//  then the new-model factories which shadow the legacy ones at their respective
-//  tiers via DI registration order (last-wins on resolve).
-//
-//  The CallerVerificationFilter is wired into the realtime agent's function-invocation
-//  middleware (defense-in-depth against the model invoking a guarded tool).
+//  then AddRealtimeAgentBackend to register IRealtimeVoiceBackend + agent wrapping,
+//  then the per-workflow strategy factories. The CallerVerificationFilter is wired
+//  into the realtime agent's function-invocation middleware (defense-in-depth
+//  against the model invoking a guarded tool).
 
 builder.AddCallSessionContainer()
     .AddDistributedCallState(DistributedCallStateBackend.InMemory)
@@ -187,15 +185,13 @@ builder.AddCallSessionContainer()
     .AddCallerAuthenticator<SmsOtpAuthenticator>()
     .AddCallControlTools()
     .AddTransferEscalationTarget(ShowcaseWorkflowIds.DefaultEscalationNumber)
-    // AddRealtimeVoiceStrategy registers IRealtimeVoiceBackend (used by the new strategy)
-    // and wires CallerVerificationFilter as defense-in-depth at function-invocation time.
-    .AddRealtimeVoiceStrategy(
+    // Backend infrastructure (IRealtimeVoiceBackend + AuthorizingRealtimeAIAgent +
+    // function-invocation middleware). The new strategies pull from this backend.
+    .AddRealtimeAgentBackend(
         realtimeAgentServiceKey: AgentConfig.TriageAgent,
         middlewareOverride: CallerVerificationFilter.Middleware)
-    .AddNluStrategy(chatClientServiceKey: "slm")
-    .AddDtmfStreamingStrategy()
-    // New-model factories — these shadow the legacy factories at their tier slots
-    // (CallSessionFactory builds a dict keyed by tier; later registrations win).
+    .AddIntentAgent(chatClientServiceKey: "slm")
+    // Per-tier strategy factories bound to the canonical workflow id.
     .AddRealtimeCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
     .AddNluCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
     .AddDtmfCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)

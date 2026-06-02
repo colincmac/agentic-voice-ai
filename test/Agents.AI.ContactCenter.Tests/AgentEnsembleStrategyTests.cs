@@ -5,6 +5,7 @@ using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Calling.Strategies.AgentEnsemble;
+using Agents.AI.ContactCenter.Tests.Helpers;
 
 namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
 

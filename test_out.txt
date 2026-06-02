@@ -1,0 +1,74 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Extensions.AI -> C:\source\ai-agent-showcase\src\AgentFramework\Extensions.AI\bin\Debug\net10.0\Extensions.AI.dll
+  AI.TestingFramework -> C:\source\ai-agent-showcase\test\AI.TestingFramework\bin\Debug\net10.0\AI.TestingFramework.dll
+  Agents.AI -> C:\source\ai-agent-showcase\src\AgentFramework\Agents.AI\bin\Debug\net10.0\Agents.AI.dll
+  Agents.AI.Extensions -> C:\source\ai-agent-showcase\src\AgentFramework\Agents.AI.Extensions\bin\Debug\net10.0\Agents.AI.Extensions.dll
+  Agents.AI.ContactCenter -> C:\source\ai-agent-showcase\src\AgentFramework\Agents.AI.ContactCenter\bin\Debug\net10.0\Agents.AI.ContactCenter.dll
+  Agents.AI.ContactCenter.Tests -> C:\source\ai-agent-showcase\test\Agents.AI.ContactCenter.Tests\bin\Debug\net10.0\Agents.AI.ContactCenter.Tests.dll
+Test run for C:\source\ai-agent-showcase\test\Agents.AI.ContactCenter.Tests\bin\Debug\net10.0\Agents.AI.ContactCenter.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.5+1b188a7b0a (64-bit .NET 10.0.8)
+[xUnit.net 00:00:00.60]   Discovering: Agents.AI.ContactCenter.Tests (app domain = off, method display = ClassAndMethod, method display options = None)
+[xUnit.net 00:00:01.37]   Discovered:  Agents.AI.ContactCenter.Tests (407 test cases to be run)
+[xUnit.net 00:00:01.71]   Starting:    Agents.AI.ContactCenter.Tests (parallel test collections = on [16 threads], stop on fail = on, explicit = off, seed = 1212102259)
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Always_AllowsAll [39 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Catalog.CallWorkflowCatalogTests.Catalog_DuplicateWorkflowId_Throws [38 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.IvrScriptedMapperTests.Empty_document_returns_null [39 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.NamedEdgePredicateProviderTests.Resolve_UnknownName_Throws [46 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_FailsOnUnknownTransitionTarget [49 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EvaluateTransition_Blocked_WhenNoFallback [57 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.NamedEdgePredicateProviderTests.Register_SameName_LastWins [3 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.StateHas_AllowsWhenKeyPresent [5 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Catalog.CallWorkflowCatalogTests.Catalog_Get_UnknownIdThrows [5 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.StagePromptRendererTests.RenderRealtimePrompt_IncludesInstructionsAndExamples [68 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.NamedEdgePredicateProviderTests.Resolve_ReturnsRegisteredPredicate [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.StagePromptRendererTests.RenderRealtimePrompt_IncludesBasePromptAndStageGoal [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.StateEquals_DeniesMismatch [3 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.StagePromptRendererTests.RenderRealtimePrompt_IncludesAvailableTransitionsWithLabels [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EvaluateTransition_BeforeEnterInitial_Throws [9 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.StagePromptRendererTests.RenderRealtimePrompt_IncludesCollectedState [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.StagePromptRendererTests.RenderRealtimePrompt_OmitsTransitionsSectionOnTerminalStages [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.ApplyTransition_ToBlockedFallback_ProgressesToFallback [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EnterInitialStage_ResumesFromPriorState [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.All_ShortCircuitsOnFirstDeny [4 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.StateEquals_AllowsExactMatch [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.All_AllowsWhenAllPass [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Catalog.CallWorkflowCatalogTests.AddCallWorkflow_CompilesAndExposesViaCatalog [12 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_HappyPath_ProducesAllStagesAndEdges [18 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Stage_FindEdgeBy_ReturnsExpected [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_FailsOnUnknownOnBlocked [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.ApplyTransition_AdvancesCurrentStageAndState [7 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_AggregatesEveryErrorIntoOneException [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EnterInitialStage_PositionsAtInitial [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.IvrScriptedMapperTests.Reports_out_of_range_threshold_and_bad_uri [23 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EvaluateTransition_Invalid_WhenNoEdge [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.TierSwap_StatePreserved_NavigatorResumesAtCorrectStage [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_AuthPredicate_IsEvaluatedAtRuntime [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_FailsOnDuplicateStageId [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EvaluateTransition_Allowed_WhenPredicatePasses [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Not_InvertsDeny [6 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_FailsOnMissingInitialStage [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Not_InvertsAllow [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Navigation.CallWorkflowNavigatorTests.EvaluateTransition_BlockedRoutedTo_WhenOnBlockedDeclared [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.AuthVerificationLevel_DeniesWhenLevelIsLower [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_NamedPredicate_FailsWhenProviderMissing [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.AuthVerificationLevel_DeniesWhenNoState [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.WorkflowGraphCompilerTests.Compile_NamedPredicate_ResolvesThroughProvider [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Any_ReturnsLastDenialWhenAllDeny [3 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.StateHas_DeniesWhenKeyMissing [1 ms]
+[xUnit.net 00:00:02.01]   Finished:    Agents.AI.ContactCenter.Tests (ID = '3bbab60f023bf896b12099a437eac0c01ac3aede45b39d68794b296b786e75e7')
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Never_AlwaysDeniesWithReason [< 1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.AuthVerificationLevel_AllowsWhenLevelMet [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Predicates.BuiltInPredicatesTests.Any_ShortCircuitsOnFirstAllow [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.IvrScriptedMapperTests.Dtmf_only_emits_dtmf_sub_config_and_null_nlu [25 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Authorization.CallerVerificationFilterTests.RequirementUnmet_ShortCircuitsWithFailureMessage [138 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation.IvrScriptedMapperTests.Lowers_shared_prompts_knobs_and_nlu_overrides [26 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Authorization.CallerVerificationFilterTests.NoRequirement_PassesThrough [1 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Authorization.CallerVerificationFilterTests.RequirementUnresolvableState_FailsClosed [2 ms]
+  Passed Agents.AI.ContactCenter.Tests.IvrWorkflow.Authorization.CallerVerificationFilterTests.RequirementMet_Invokes [2 ms]
+
+Test Run Successful.
+Total tests: 54
+     Passed: 54
+ Total time: 2.8290 Seconds

@@ -152,15 +152,21 @@ public sealed class CallSessionContainerBuilder
 
     /// <summary>
     /// Registers the Tier 0 realtime voice strategy. Resolves the production
-    /// <see cref="AuthorizingRealtimeAIAgent"/> at session-create time and wraps
-    /// it in <see cref="AuthorizingAgentRealtimeBackend"/>.
+    /// <summary>
+    /// Registers the realtime backend infrastructure used by the new
+    /// <c>RealtimeCallWorkflowStrategy</c> (Phase 5+): per-call agent session registry,
+    /// tool-approval plumbing, the call-scoped <see cref="AuthorizingRealtimeAIAgent"/>,
+    /// and the <see cref="IRealtimeVoiceBackend"/> adapter that wraps it. This is the
+    /// successor to the legacy <c>AddRealtimeVoiceStrategy</c>; it intentionally does
+    /// <em>not</em> register a strategy factory \u2014 callers wire those via
+    /// <c>AddRealtimeCallWorkflowStrategy(workflowId)</c>.
     /// </summary>
     /// <param name="realtimeAgentServiceKey">
     /// Optional keyed-service key for the underlying <see cref="RealtimeAIAgent"/>.
     /// When set, resolves the agent registered under that key (e.g. <c>"TriageAgent"</c>).
     /// When null, resolves the unkeyed <see cref="RealtimeAIAgent"/>.
     /// </param>
-    public CallSessionContainerBuilder AddRealtimeVoiceStrategy(
+    public CallSessionContainerBuilder AddRealtimeAgentBackend(
         string? realtimeAgentServiceKey = null,
         RealtimeAgentRunOptions? runOptions = null,
         AgentFunctionInvocationMiddleware? middlewareOverride = null)
@@ -192,42 +198,6 @@ public sealed class CallSessionContainerBuilder
             var loggerFactory = sp.GetService<ILoggerFactory>();
             return new AuthorizingAgentRealtimeBackend(agent, runOptions: runOptions, loggerFactory);
         });
-        Services.AddSingleton<IConversationStrategyFactory, RealtimeVoiceStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the streaming DTMF strategy. Pairs with
-    /// <see cref="AcsCallerStreamEdge"/> and emits locally synthesized PCM through the
-    /// bidirectional media WebSocket. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
-    /// to be registered separately for prompt playback.
-    /// </summary>
-    public CallSessionContainerBuilder AddDtmfStreamingStrategy()
-    {
-        Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the verb-based DTMF strategy. Pairs with
-    /// <see cref="AcsCallAutomationEdge"/> and emits SpeakText + CollectDtmf
-    /// directives instead of locally synthesized PCM. Requires no
-    /// <see cref="Media.Audio.ISpeechSynthesizer"/>
-    /// since the platform handles TTS via attached Cognitive Services.
-    /// </summary>
-    public CallSessionContainerBuilder AddDtmfVerbStrategy()
-    {
-        Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the default <see cref="DashboardProjectionObserver"/> so dashboard
-    /// snapshots are populated from <see cref="StrategyEvent"/>s.
-    /// </summary>
-    public CallSessionContainerBuilder AddDashboardProjectionObserver()
-    {
-        Services.AddSingleton<ICallObserver, DashboardProjectionObserver>();
         return this;
     }
 
@@ -244,12 +214,13 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers the Tier 3 NLU strategy (<see cref="NluConversationStrategy"/>). Requires an
-    /// <see cref="Agents.AI.ContactCenter.Agents.IntentAgent.IvrIntentAgent"/> (which owns
-    /// speech recognition + JSON intent classification) and
-    /// <see cref="Media.Audio.ISpeechSynthesizer"/> to be registered separately.
+    /// Registers the IVR intent agent used by the new <c>NluCallWorkflowStrategy</c>.
+    /// Successor to the legacy <c>AddNluStrategy</c>; intentionally does not register
+    /// a strategy factory \u2014 callers wire that via <c>AddNluCallWorkflowStrategy(workflowId)</c>.
+    /// Requires <see cref="Media.Audio.ISpeechSynthesizer"/> to be registered separately
+    /// for prompt playback.
     /// </summary>
-    public CallSessionContainerBuilder AddNluStrategy(string? chatClientServiceKey = null, Action<IvrIntentAgentOptions>? configureOptions = null)
+    public CallSessionContainerBuilder AddIntentAgent(string? chatClientServiceKey = null, Action<IvrIntentAgentOptions>? configureOptions = null)
     {
         var options = new IvrIntentAgentOptions();
         configureOptions?.Invoke(options);
@@ -258,7 +229,7 @@ public sealed class CallSessionContainerBuilder
             .AddOptions<IvrIntentAgentOptions>()
             .Configure(o => configureOptions?.Invoke(o))
             .ValidateDataAnnotations()
-            .ValidateOnStart(); 
+            .ValidateOnStart();
 
         Builder.AddAIAgent(options.Name, (sp, key) =>
         {
@@ -275,8 +246,6 @@ public sealed class CallSessionContainerBuilder
 
         Services.TryAddSingleton<IvrIntentAgent>(sp => sp.GetRequiredKeyedService<IvrIntentAgent>(options.Name));
 
-        Services.AddSingleton<IConversationStrategyFactory, NluConversationStrategyFactory>();
-        
         return this;
     }
 
