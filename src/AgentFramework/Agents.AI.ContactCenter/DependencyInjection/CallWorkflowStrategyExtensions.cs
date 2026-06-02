@@ -1,3 +1,5 @@
+using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
+using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.IvrWorkflow.Execution;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +33,44 @@ public static class CallWorkflowStrategyExtensions
         builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
         builder.Services.AddSingleton<Calling.IConversationStrategyFactory>(
             _ => new RealtimeCallWorkflowStrategyFactory(workflowId));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Register an <see cref="NluCallWorkflowStrategy"/> factory bound to <paramref name="workflowId"/>.
+    /// Requires an <see cref="Agents.IntentAgent.IvrIntentAgent"/> and
+    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI (the legacy
+    /// <c>AddNluStrategy(...)</c> already wires the intent agent).
+    /// </summary>
+    public static CallSessionContainerBuilder AddNluCallWorkflowStrategy(
+        this CallSessionContainerBuilder builder,
+        string workflowId)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(workflowId);
+
+        builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
+        builder.Services.AddSingleton<Calling.IConversationStrategyFactory>(
+            _ => new NluCallWorkflowStrategyFactory(workflowId));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Register a <see cref="DtmfCallWorkflowStrategy"/> factory bound to <paramref name="workflowId"/>.
+    /// Requires an <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI for SSML/text playback.
+    /// </summary>
+    public static CallSessionContainerBuilder AddDtmfCallWorkflowStrategy(
+        this CallSessionContainerBuilder builder,
+        string workflowId)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(workflowId);
+
+        builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
+        builder.Services.AddSingleton<Calling.IConversationStrategyFactory>(
+            _ => new DtmfCallWorkflowStrategyFactory(workflowId));
 
         return builder;
     }
