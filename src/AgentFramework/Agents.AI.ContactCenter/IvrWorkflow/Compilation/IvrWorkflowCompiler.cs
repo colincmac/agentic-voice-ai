@@ -178,7 +178,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
         Dictionary<string, List<string>> intentExamples,
         List<string> errors)
     {
-        // Phase 2: stage import — pull a leaf stage from another workflow at compile time
+        // Stage import — pull a leaf stage from another workflow at compile time
         // and inline it under the local alias. No frame, no return contract; behaves
         // identically to a stage authored inline.
         if (stage.Import is { } importDoc)
@@ -186,7 +186,7 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
             return CompileImportStage(stage, importDoc, workflowPolicy, errors);
         }
 
-        // Phase 1: subflow stages compile to a marker step the navigator pushes onto
+        // Subflow stages compile to a marker step the navigator pushes onto
         // its frame stack at entry time. They carry no prompt / tools / DTMF config —
         // those come from the child workflow's stages.
         if (string.Equals(stage.Type, "subflow", StringComparison.OrdinalIgnoreCase))
@@ -821,8 +821,8 @@ public sealed class IvrWorkflowCompiler : IIvrWorkflowCompiler
     }
 
     /// <summary>
-    /// Phase 3: lower per-transition <c>requires:</c> into compiled
-    /// <see cref="TransitionRule"/> records. The same transition is also represented as a
+    /// Per-transition <c>requires:</c> into compiled <see cref="TransitionRule"/> records.
+    /// The same transition is also represented as a
     /// <c>ConversationState.Transitions</c> entry (for legacy consumers that only need
     /// the target id); this list adds the guard metadata the navigator's auth-resolver
     /// detour needs.

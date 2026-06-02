@@ -122,11 +122,11 @@ builder.Services.AddIvrWorkflowFramework(b => b
         sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("submit-otp", sp => SmsOtpTools.SubmitOtpTool(
         sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("lookup-balance", sp => BalanceLookupTools.LookupBalanceTool(
-        sp.GetRequiredService<InMemoryCallerDirectory>(),
-        sp.GetRequiredService<ILoggerFactory>()))
-    .AddTool("record-caller-name", sp => WorkflowStateTools.RecordCallerNameTool(
-        sp.GetRequiredService<ILoggerFactory>()))
+    // .AddTool("lookup-balance", sp => BalanceLookupTools.LookupBalanceTool(
+    //     sp.GetRequiredService<InMemoryCallerDirectory>(),
+    //     sp.GetRequiredService<ILoggerFactory>()))
+    // .AddTool("record-caller-name", sp => WorkflowStateTools.RecordCallerNameTool(
+    //     sp.GetRequiredService<ILoggerFactory>()))
     .AddTool("transfer-to-agent", _ => TransferTools.BuildTransferToAgentTool(
         DemoWorkflowIds.DefaultEscalationNumber)));
 

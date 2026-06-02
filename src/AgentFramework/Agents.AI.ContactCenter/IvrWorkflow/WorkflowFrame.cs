@@ -6,12 +6,12 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// on, when the step started, and (Phase 1+) where to return when the workflow exits.
 /// </summary>
 /// <remarks>
-/// Phase 0 of the composable-workflow refactor: only a single frame is ever pushed
+/// Only a single frame is ever pushed
 /// (by the navigator on entry), and the existing <see cref="IvrWorkflowState.CurrentStepName"/>
 /// / <see cref="IvrWorkflowState.CurrentStepIndex"/> / <see cref="IvrWorkflowState.StepStartedAt"/>
 /// properties read and write through the top frame so every existing caller keeps working
 /// unchanged. The <see cref="ReturnToStepId"/> and <see cref="FailureReturnStepId"/> hooks
-/// are placeholders consumed by the Phase 1 subflow push/pop machinery; they are unused
+/// are placeholders consumed by the subflow push/pop machinery; they are unused
 /// today but reserve the in-memory shape now so we don't have to bump it later.
 /// </remarks>
 public sealed class WorkflowFrame
@@ -28,7 +28,7 @@ public sealed class WorkflowFrame
     /// <summary>
     /// Content version of the workflow this frame is executing. Phase 2 will start sourcing
     /// this from <c>CompiledIvrWorkflow.Version</c> / the YAML <c>version.content</c> field;
-    /// Phase 0 defaults to <c>1</c> for parity with the existing single-version model.
+    /// Defaults to <c>1</c> for parity with the existing single-version model.
     /// </summary>
     public int WorkflowVersion { get; init; } = 1;
 

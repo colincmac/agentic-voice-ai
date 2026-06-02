@@ -397,11 +397,11 @@ public sealed class IvrWorkflowNavigator : IIvrWorkflowNavigator
             "Popped subflow '{WorkflowId}' (success={Success}); resumed parent '{ParentWorkflow}' at step '{StepId}'.",
             popped.WorkflowId, success, parent.WorkflowId, resumed.Id);
 
-        // Phase 3 chained-detour: re-evaluate the resume target's stage-level guards
+        // Chained-detour: re-evaluate the resume target's stage-level guards
         // against the (now mutated) state. If a guard still fails and the parent
         // workflow has a matching auth-resolver, push another subflow with the same
         // returnToStepId so the chain can be completed automatically (e.g. PIN → OTP for
-        // an MFA-gated balance stage). Phase 1 cycle detection on PushSubflowAsync
+        // an MFA-gated balance stage). Cycle detection on PushSubflowAsync
         // prevents infinite chains by refusing to push a workflow already on the stack.
         if (success && resumed.Guards.Count > 0)
         {

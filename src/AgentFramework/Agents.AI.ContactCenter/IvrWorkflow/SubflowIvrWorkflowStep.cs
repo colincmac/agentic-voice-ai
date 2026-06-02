@@ -11,7 +11,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// from <c>IIvrWorkflowCatalog</c> and enters its initial step.
 /// </summary>
 /// <remarks>
-/// Phase 1 subflow stages are realtime-tier-only. DTMF/NLU tiers don't push frames
+/// Subflow stages are realtime-tier-only. DTMF/NLU tiers don't push frames
 /// today — encountering a subflow stage in those tiers degrades to "no prompt, no
 /// menu" until Phase 3 wires per-tier subflow handling. The compiler emits a warning
 /// when a subflow stage is reached via the scripted path.

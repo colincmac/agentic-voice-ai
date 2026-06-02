@@ -7,9 +7,9 @@ namespace Agents.AI.ContactCenter.IvrWorkflow;
 /// resolver chain can satisfy the guard.
 /// </summary>
 /// <remarks>
-/// Phase 3 — pairs with the workflow-level <c>authResolvers:</c> table on
+/// Pairs with the workflow-level <c>authResolvers:</c> table on
 /// <see cref="RealtimeIvrWorkflowDefinition.AuthResolvers"/>. The strategy is
-/// responsible for acting on the result: pushing the subflow (Phase 1 machinery) for
+/// responsible for acting on the result: pushing the subflow for
 /// <see cref="RequiresDetour"/>, applying the transition for <see cref="Allowed"/>,
 /// or surfacing a rejection for <see cref="BlockedNoResolver"/>.
 /// </remarks>
