@@ -52,7 +52,6 @@ public sealed class CompositeFallbackStrategyFactory : IConversationStrategyFact
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
@@ -86,7 +85,7 @@ public sealed class CompositeFallbackStrategyFactory : IConversationStrategyFact
                 $"Register at least one of: {string.Join(", ", OrderedTiers)}.");
         }
 
-        IConversationStrategy strategy = new CompositeFallbackStrategy(ordered, workflow, loggerFactory);
+        IConversationStrategy strategy = new CompositeFallbackStrategy(ordered, loggerFactory);
 
         // CompositeFallbackStrategy itself doesn't accept restoreFrom — it threads state from
         // the inner's WorkflowState during fallback. When the call session restores a workflow

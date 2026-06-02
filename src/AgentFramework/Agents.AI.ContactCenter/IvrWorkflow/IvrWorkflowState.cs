@@ -17,13 +17,12 @@ public sealed class IvrWorkflowState
     private readonly List<string> _completedSteps = [];
     private readonly List<ChatMessage> _transcript = [];
     private readonly List<RealtimeConversationUtterance> _conversationHistory = [];
-    // Stack of active workflow invocations (top = innermost subflow). Phase 0 only ever
-    // contains a single frame; Phase 1 introduces push/pop for delegated sub-workflows.
-    // Always accessed under _lock.
-    private readonly Stack<WorkflowFrame> _frames = new();
 
     private readonly Lock _lock = new();
     private string? _workflowId;
+    private string? _currentStepName;
+    private int _currentStepIndex = -1;
+    private DateTimeOffset? _stepStartedAt;
     /// <summary>
     /// Gets a thread-safe snapshot of the transcript messages.
     /// </summary>
@@ -101,11 +100,7 @@ public sealed class IvrWorkflowState
     public string? SessionId { get; init; }
 
     /// <summary>
-    /// Gets the name of the currently executing step. Back-compat shim — reads the top
-    /// <see cref="WorkflowFrame.CurrentStepId"/> on <see cref="Frames"/>. Setting this
-    /// updates the top frame, lazily creating an anonymous frame (empty
-    /// <see cref="WorkflowFrame.WorkflowId"/>) when none exists yet so legacy callers that
-    /// wrote the property before going through the navigator continue to work.
+    /// Gets or sets the id of the currently executing stage.
     /// </summary>
     public string? CurrentStepName
     {
@@ -113,14 +108,14 @@ public sealed class IvrWorkflowState
         {
             lock (_lock)
             {
-                return _frames.Count > 0 ? _frames.Peek().CurrentStepId : null;
+                return _currentStepName;
             }
         }
         set
         {
             lock (_lock)
             {
-                EnsureTopFrameLocked(value ?? string.Empty).CurrentStepId = value ?? string.Empty;
+                _currentStepName = value;
             }
             LastModifiedAt = DateTimeOffset.UtcNow;
         }
@@ -128,8 +123,7 @@ public sealed class IvrWorkflowState
 
 
     /// <summary>
-    /// Gets the index of the currently executing step. Back-compat shim — reads the top
-    /// <see cref="WorkflowFrame.CurrentStepIndex"/>.
+    /// Gets or sets the index of the currently executing step.
     /// </summary>
     public int CurrentStepIndex
     {
@@ -137,34 +131,34 @@ public sealed class IvrWorkflowState
         {
             lock (_lock)
             {
-                return _frames.Count > 0 ? _frames.Peek().CurrentStepIndex : -1;
+                return _currentStepIndex;
             }
         }
         set
         {
             lock (_lock)
             {
-                EnsureTopFrameLocked(string.Empty).CurrentStepIndex = value;
+                _currentStepIndex = value;
             }
             LastModifiedAt = DateTimeOffset.UtcNow;
         }
     }
 
-    /// <summary>When the current step was entered. Back-compat shim over the top frame.</summary>
+    /// <summary>When the current step was entered.</summary>
     public DateTimeOffset? StepStartedAt
     {
         get
         {
             lock (_lock)
             {
-                return _frames.Count > 0 ? _frames.Peek().StepStartedAt : null;
+                return _stepStartedAt;
             }
         }
         set
         {
             lock (_lock)
             {
-                EnsureTopFrameLocked(string.Empty).StepStartedAt = value;
+                _stepStartedAt = value;
             }
             LastModifiedAt = DateTimeOffset.UtcNow;
         }
@@ -339,93 +333,6 @@ public sealed class IvrWorkflowState
     public IReadOnlyDictionary<string, object?> ToSnapshot()
     {
         return new Dictionary<string, object?>(_data);
-    }
-
-    /// <summary>
-    /// Snapshot of the current workflow-frame stack, top-of-stack first. Phase 0 always
-    /// returns at most one frame; Phase 1 will return one per active sub-workflow.
-    /// </summary>
-    public IReadOnlyList<WorkflowFrame> Frames
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _frames.Count == 0 ? [] : _frames.ToArray();
-            }
-        }
-    }
-
-    /// <summary>The innermost active frame, or <see langword="null"/> when no workflow is active.</summary>
-    public WorkflowFrame? CurrentFrame
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _frames.Count > 0 ? _frames.Peek() : null;
-            }
-        }
-    }
-
-    /// <summary>Number of frames currently on the stack.</summary>
-    public int FrameDepth
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _frames.Count;
-            }
-        }
-    }
-
-    /// <summary>Push a new frame onto the stack (e.g. when entering a sub-workflow).</summary>
-    public void PushFrame(WorkflowFrame frame)
-    {
-        ArgumentNullException.ThrowIfNull(frame);
-        lock (_lock)
-        {
-            _frames.Push(frame);
-        }
-        LastModifiedAt = DateTimeOffset.UtcNow;
-    }
-
-    /// <summary>Pop the innermost frame. Returns the popped frame, or <see langword="null"/> when the stack is empty.</summary>
-    public WorkflowFrame? PopFrame()
-    {
-        WorkflowFrame? popped;
-        lock (_lock)
-        {
-            popped = _frames.Count > 0 ? _frames.Pop() : null;
-        }
-        if (popped is not null)
-        {
-            LastModifiedAt = DateTimeOffset.UtcNow;
-        }
-        return popped;
-    }
-
-    /// <summary>
-    /// Returns the top frame, or pushes an anonymous one (empty <see cref="WorkflowFrame.WorkflowId"/>)
-    /// when none exists. Called by the back-compat setters of <see cref="CurrentStepName"/>,
-    /// <see cref="CurrentStepIndex"/>, and <see cref="StepStartedAt"/> so legacy callers
-    /// that mutate those properties before the navigator pushes a real frame still work.
-    /// Caller must already hold <c>_lock</c>.
-    /// </summary>
-    private WorkflowFrame EnsureTopFrameLocked(string fallbackStepId)
-    {
-        if (_frames.Count > 0)
-        {
-            return _frames.Peek();
-        }
-        var frame = new WorkflowFrame
-        {
-            WorkflowId = string.Empty,
-            CurrentStepId = fallbackStepId,
-        };
-        _frames.Push(frame);
-        return frame;
     }
 
     /// <summary>

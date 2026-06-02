@@ -90,7 +90,6 @@ public sealed class CallSessionFactory : ICallSessionFactory
             var strategy = await factory.CreateAsync(
                 request.CallId,
                 scope.ServiceProvider,
-                request.Workflow,
                 restoreFrom: null,
                 linked.Token).ConfigureAwait(false);
 
@@ -246,7 +245,6 @@ public sealed class CallSessionFactory : ICallSessionFactory
             return await factory.CreateAsync(
                 request.CallId,
                 scope.ServiceProvider,
-                request.Workflow,
                 restoreFrom: null,
                 cancellationToken).ConfigureAwait(false);
         }

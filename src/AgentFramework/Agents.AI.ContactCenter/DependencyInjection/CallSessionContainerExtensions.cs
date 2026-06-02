@@ -124,15 +124,6 @@ public static class CallSessionContainerExtensions
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
-        // Per-call IVR workflow session bundle (navigator + catalog + advance invoker).
-        // The empty catalog is only used when no real IIvrWorkflowCatalog was registered
-        // via AddIvrWorkflowFramework — subflow lookups against the empty catalog throw
-        // with a clear message.
-        services.TryAddSingleton<IIvrWorkflowCatalog, EmptyIvrWorkflowCatalog>();
-        services.TryAddSingleton<IIvrWorkflowSessionFactory, IvrWorkflowSessionFactory>();
-
-
-
         builder.AddCallSessionContainerTelemetry();
         return new CallSessionContainerBuilder(builder);
 

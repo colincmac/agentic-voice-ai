@@ -16,7 +16,6 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.Composite;
 public sealed class CompositeFallbackStrategy : IConversationStrategy
 {
     private readonly IReadOnlyList<IConversationStrategyFactory> _orderedFactories;
-    private readonly RealtimeIvrWorkflowDefinition? _workflow;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -41,7 +40,6 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
 
     public CompositeFallbackStrategy(
         IEnumerable<IConversationStrategyFactory> orderedFactories,
-        RealtimeIvrWorkflowDefinition? workflow,
         ILoggerFactory? loggerFactory = null)
     {
         _orderedFactories = orderedFactories.ToArray();
@@ -49,7 +47,6 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
         {
             throw new ArgumentException("At least one factory is required", nameof(orderedFactories));
         }
-        _workflow = workflow;
         _logger = loggerFactory?.CreateLogger<CompositeFallbackStrategy>() ?? NullLogger<CompositeFallbackStrategy>.Instance;
     }
 
@@ -138,7 +135,6 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
             next = await factory.CreateAsync(
                 _startContext!.CallId,
                 _startContext.Services,
-                _workflow,
                 restoreFrom,
                 ct).ConfigureAwait(false);
         }

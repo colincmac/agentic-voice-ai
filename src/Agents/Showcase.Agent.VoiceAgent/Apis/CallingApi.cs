@@ -439,9 +439,9 @@ public static class CallingApi
     /// <summary>
     /// Shared session-start path for both verb and streaming modes. Builds a
     /// <see cref="CallSessionRequest"/> whose <see cref="CallSessionRequest.PreferredTier"/>
-    /// matches the registered workflow's <see cref="RealtimeIvrWorkflowDefinition.Tier"/>,
-    /// so the DI-resolved <c>IConversationStrategyFactory</c> for that tier (typically the
-    /// composite chain registered last) is selected automatically.
+    /// is taken from the showcase <see cref="CallEntryConfig"/>; the DI-resolved
+    /// <c>IConversationStrategyFactory</c> for that tier (typically the composite chain
+    /// registered last) is selected automatically.
     /// </summary>
     private static async Task<ICallSession> StartCallSessionAsync(
         CallingServices services,
@@ -456,8 +456,6 @@ public static class CallingApi
         {
             CallId = callId,
             CallerEdge = edge,
-            // New-model strategy factories ignore Workflow and resolve from ICallWorkflowCatalog.
-            Workflow = null,
             PreferredTier = tier,
         }, cancellationToken).ConfigureAwait(false);
 

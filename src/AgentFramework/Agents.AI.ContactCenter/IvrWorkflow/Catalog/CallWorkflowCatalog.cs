@@ -6,7 +6,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 /// Process-wide read-only catalog of compiled call workflows. The new design (Phase 3+)
 /// loads + compiles every workflow at host startup, so the catalog is a flat dictionary
 /// keyed by <see cref="CompiledCallWorkflow.Id"/>. Replaces the lazy version-range matching
-/// of the legacy <see cref="IIvrWorkflowCatalog"/>.
+/// of the legacy <c>IIvrWorkflowCatalog</c>.
 /// </summary>
 public interface ICallWorkflowCatalog
 {

@@ -12,16 +12,10 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 /// <summary>
 /// Factory that constructs <see cref="RealtimeCallWorkflowStrategy"/> instances from a
 /// pre-registered <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/> resolved out
-/// of the <see cref="ICallWorkflowCatalog"/> by id. Implements the legacy
+/// of the <see cref="ICallWorkflowCatalog"/> by id. Implements the
 /// <see cref="IConversationStrategyFactory"/> contract so the existing
-/// <c>CallSessionFactory</c> + composite-fallback infrastructure can drive it unchanged.
+/// <c>CallSessionFactory</c> + composite-fallback infrastructure can drive it.
 /// </summary>
-/// <remarks>
-/// The legacy <see cref="RealtimeIvrWorkflowDefinition"/> argument supplied per call is
-/// <em>ignored</em> — the new factory binds to a workflow id at registration time. This
-/// lets new-model strategies coexist with legacy strategies in the same call session
-/// container during the Phase 5 migration.
-/// </remarks>
 public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyFactory
 {
     private readonly string _workflowId;
@@ -37,14 +31,11 @@ public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyF
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(callId);
         ArgumentNullException.ThrowIfNull(services);
-        // workflow is intentionally ignored — the new factory binds to a workflow id
-        // at registration time and resolves the compiled workflow from the catalog.
 
         var catalog = services.GetRequiredService<ICallWorkflowCatalog>();
         var compiled = catalog.Get(_workflowId);

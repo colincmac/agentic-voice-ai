@@ -195,25 +195,6 @@ internal sealed class CallFixture : IAsyncDisposable
 
     public static async Task<CallFixture> StartAsync(SupervisorMode supervisorMode)
     {
-        var workflow = new RealtimeIvrWorkflowDefinition
-        {
-            Name = "supervisor-test",
-            BasePrompt = new RealtimePrompt(),
-            Steps =
-            [
-                new RealtimeIvrWorkflowStep
-                {
-                    Id = "greeting",
-                    ConversationState = new ConversationState
-                    {
-                        Id = "greeting",
-                        Description = "test",
-                        Instructions = ["greet"]
-                    }
-                }
-            ]
-        };
-
         var strategy = new ControllableStrategy();
 
         var services = new ServiceCollection().BuildServiceProvider();
@@ -236,7 +217,6 @@ internal sealed class CallFixture : IAsyncDisposable
         {
             CallId = "call-supervisor",
             CallerEdge = caller,
-            Workflow = workflow,
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -299,7 +279,6 @@ internal sealed class ControllableStrategyFactory : IConversationStrategyFactory
     public ValueTask<IConversationStrategy> CreateAsync(
         string callId,
         IServiceProvider services,
-        RealtimeIvrWorkflowDefinition? workflow,
         IvrWorkflowState? restoreFrom,
         CancellationToken cancellationToken = default)
         => ValueTask.FromResult<IConversationStrategy>(_strategy);

@@ -30,7 +30,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-own-1",
             CallerEdge = new FakeOwnershipEdge("call-own-1"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -76,7 +75,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-conflict",
             CallerEdge = edge,
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         }));
 
@@ -106,7 +104,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-no-own",
             CallerEdge = new FakeOwnershipEdge("call-no-own"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -123,7 +120,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-release",
             CallerEdge = new FakeOwnershipEdge("call-release"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -158,7 +154,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-throw",
             CallerEdge = new FakeOwnershipEdge("call-throw"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -187,7 +182,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-no-own-end",
             CallerEdge = new FakeOwnershipEdge("call-no-own-end"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -224,25 +218,6 @@ public class CallSessionOwnershipTests
 
         return (factory, registry, ownership, heartbeat, identity, services);
     }
-
-    private static RealtimeIvrWorkflowDefinition BuildWorkflow() => new()
-    {
-        Name = "ownership-test",
-        BasePrompt = new RealtimePrompt(),
-        Steps =
-        [
-            new RealtimeIvrWorkflowStep
-            {
-                Id = "step-1",
-                ConversationState = new ConversationState
-                {
-                    Id = "step-1",
-                    Description = "test",
-                    Instructions = ["hi"]
-                }
-            }
-        ]
-    };
 
     private sealed class MutableClusterIdentity : IClusterIdentity
     {
@@ -299,7 +274,6 @@ public class CallSessionOwnershipTests
         public ValueTask<IConversationStrategy> CreateAsync(
             string callId,
             IServiceProvider services,
-            RealtimeIvrWorkflowDefinition? workflow,
             IvrWorkflowState? restoreFrom,
             CancellationToken cancellationToken = default)
             => ValueTask.FromResult<IConversationStrategy>(new FakeOwnershipStrategy());
