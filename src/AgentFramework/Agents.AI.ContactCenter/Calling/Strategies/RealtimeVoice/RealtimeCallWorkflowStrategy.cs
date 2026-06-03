@@ -293,7 +293,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
                         continue;
                     }
 
-                    var outcome = await _executor.AdvanceToAsync(edge.TargetStageId, ct).ConfigureAwait(false);
+                    var outcome = await _executor.AdvanceAlongAsync(edge, ct).ConfigureAwait(false);
                     if (outcome is AdvanceOutcome.Denied or AdvanceOutcome.Invalid)
                     {
                         var reason = outcome switch

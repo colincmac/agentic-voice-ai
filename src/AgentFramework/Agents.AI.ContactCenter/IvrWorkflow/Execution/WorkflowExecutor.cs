@@ -98,36 +98,78 @@ public sealed class WorkflowExecutor
                 .EvaluateTransitionAsync(targetStageId, cancellationToken)
                 .ConfigureAwait(false);
 
-            switch (evaluation)
-            {
-                case NewEval.Allowed allowed:
-                {
-                    var newStage = _session.Navigator.ApplyTransition(allowed.Edge);
-                    await _renderAsync(newStage, cancellationToken).ConfigureAwait(false);
-                    return new AdvanceOutcome.Advanced(newStage);
-                }
-
-                case NewEval.BlockedRoutedTo routed:
-                {
-                    var newStage = _session.Navigator.ApplyTransition(routed.FallbackEdge);
-                    await _renderAsync(newStage, cancellationToken).ConfigureAwait(false);
-                    return new AdvanceOutcome.AdvancedToFallback(newStage, routed.Reason);
-                }
-
-                case NewEval.Blocked blocked:
-                    return new AdvanceOutcome.Denied(blocked.Reason);
-
-                case NewEval.Invalid invalid:
-                    return new AdvanceOutcome.Invalid(invalid.Reason);
-
-                default:
-                    throw new InvalidOperationException(
-                        $"Unhandled transition evaluation: {evaluation.GetType().Name}.");
-            }
+            return await ApplyEvaluationAsync(evaluation, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Attempt to advance along a specific <paramref name="edge"/> from the current stage.
+    /// Preferred over <see cref="AdvanceToAsync(string, CancellationToken)"/> when the caller
+    /// already holds the resolved edge (model <c>advance</c> tool, scripted DTMF menu, NLU
+    /// intent map) so edge identity — label + predicate — is preserved for stages with
+    /// multiple edges to the same target.
+    /// </summary>
+    public async ValueTask<AdvanceOutcome> AdvanceAlongAsync(
+        CompiledStageEdge edge,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(edge);
+
+        // Stage transitions are atomic — acquire the lock uncancelled so a partially-
+        // applied transition can't leave the navigator and transport out of sync.
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            var evaluation = await _session.Navigator
+                .EvaluateTransitionAsync(edge, cancellationToken)
+                .ConfigureAwait(false);
+
+            return await ApplyEvaluationAsync(evaluation, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Apply a <see cref="TransitionEvaluation"/> produced under the transition lock: commit
+    /// the edge (or its onBlocked fallback) via the navigator and fire the render callback.
+    /// Callers must hold <see cref="_gate"/>.
+    /// </summary>
+    private async ValueTask<AdvanceOutcome> ApplyEvaluationAsync(
+        TransitionEvaluation evaluation,
+        CancellationToken cancellationToken)
+    {
+        switch (evaluation)
+        {
+            case NewEval.Allowed allowed:
+            {
+                var newStage = _session.Navigator.ApplyTransition(allowed.Edge);
+                await _renderAsync(newStage, cancellationToken).ConfigureAwait(false);
+                return new AdvanceOutcome.Advanced(newStage);
+            }
+
+            case NewEval.BlockedRoutedTo routed:
+            {
+                var newStage = _session.Navigator.ApplyTransition(routed.FallbackEdge);
+                await _renderAsync(newStage, cancellationToken).ConfigureAwait(false);
+                return new AdvanceOutcome.AdvancedToFallback(newStage, routed.Reason);
+            }
+
+            case NewEval.Blocked blocked:
+                return new AdvanceOutcome.Denied(blocked.Reason);
+
+            case NewEval.Invalid invalid:
+                return new AdvanceOutcome.Invalid(invalid.Reason);
+
+            default:
+                throw new InvalidOperationException(
+                    $"Unhandled transition evaluation: {evaluation.GetType().Name}.");
         }
     }
 

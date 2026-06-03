@@ -191,7 +191,7 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
             return;
         }
 
-        await _executor.AdvanceToAsync(edge.TargetStageId, ct).ConfigureAwait(false);
+        await _executor.AdvanceAlongAsync(edge, ct).ConfigureAwait(false);
     }
 
     internal static bool LooksLikeSsml(string? text)

@@ -35,10 +35,27 @@ public interface ICallWorkflowNavigator
     /// <summary>
     /// Evaluate the outgoing edge from <see cref="CurrentStage"/> targeting
     /// <paramref name="targetStageId"/>. Does not mutate state — call
-    /// <see cref="ApplyTransitionAsync"/> with the result's edge to commit.
+    /// <see cref="ApplyTransition"/> with the result's edge to commit.
     /// </summary>
+    /// <remarks>
+    /// When the current stage has multiple outgoing edges to <paramref name="targetStageId"/>
+    /// (distinct labels/predicates), this resolves the <em>first</em> matching edge. Callers
+    /// that already hold the exact edge should prefer
+    /// <see cref="EvaluateTransitionAsync(CompiledStageEdge, CancellationToken)"/> to avoid
+    /// collapsing to the wrong predicate.
+    /// </remarks>
     ValueTask<TransitionEvaluation> EvaluateTransitionAsync(
         string targetStageId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Evaluate a specific outgoing <paramref name="edge"/> from <see cref="CurrentStage"/>.
+    /// Preserves edge identity (label + predicate) so workflows with multiple edges to the
+    /// same target stage route deterministically. Does not mutate state — call
+    /// <see cref="ApplyTransition"/> with the result's edge to commit.
+    /// </summary>
+    ValueTask<TransitionEvaluation> EvaluateTransitionAsync(
+        CompiledStageEdge edge,
         CancellationToken cancellationToken = default);
 
     /// <summary>

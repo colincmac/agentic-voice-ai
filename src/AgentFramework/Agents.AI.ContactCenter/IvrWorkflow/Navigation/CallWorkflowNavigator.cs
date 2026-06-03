@@ -75,7 +75,7 @@ public sealed class CallWorkflowNavigator : ICallWorkflowNavigator
         return _currentStage;
     }
 
-    public async ValueTask<TransitionEvaluation> EvaluateTransitionAsync(
+    public ValueTask<TransitionEvaluation> EvaluateTransitionAsync(
         string targetStageId,
         CancellationToken cancellationToken = default)
     {
@@ -87,9 +87,21 @@ public sealed class CallWorkflowNavigator : ICallWorkflowNavigator
         var edge = current.FindEdgeTo(targetStageId);
         if (edge is null)
         {
-            return new TransitionEvaluation.Invalid(
-                $"Stage '{current.Id}' has no outgoing transition to '{targetStageId}'.");
+            return new ValueTask<TransitionEvaluation>(new TransitionEvaluation.Invalid(
+                $"Stage '{current.Id}' has no outgoing transition to '{targetStageId}'."));
         }
+
+        return EvaluateTransitionAsync(edge, cancellationToken);
+    }
+
+    public async ValueTask<TransitionEvaluation> EvaluateTransitionAsync(
+        CompiledStageEdge edge,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(edge);
+
+        var current = _currentStage ?? throw new InvalidOperationException(
+            "Navigator has no current stage. Call EnterInitialStage() first.");
 
         var context = BuildEdgeContext();
         var result = await edge.Predicate(context, cancellationToken).ConfigureAwait(false);

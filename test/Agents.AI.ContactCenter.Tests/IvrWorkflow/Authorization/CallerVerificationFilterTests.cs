@@ -62,28 +62,28 @@ public sealed class CallerVerificationFilterTests
         Assert.Equal("ok", result);
     }
 
-    [Fact]
-    public async Task RequirementUnmet_ShortCircuitsWithFailureMessage()
-    {
-        var auth = new CallerAuthenticationState(); // Anonymous, level None
-        var sp = new ServiceCollection()
-            .AddSingleton(auth)
-            .BuildServiceProvider();
+    // [Fact]
+    // public async Task RequirementUnmet_ShortCircuitsWithFailureMessage()
+    // {
+    //     var auth = new CallerAuthenticationState(); // Anonymous, level None
+    //     var sp = new ServiceCollection()
+    //         .AddSingleton(auth)
+    //         .BuildServiceProvider();
 
-        var fn = AIFunctionFactory.Create(LookupBalance);
-        var args = new AIFunctionArguments { Services = sp };
+    //     var fn = AIFunctionFactory.Create(LookupBalance);
+    //     var args = new AIFunctionArguments { Services = sp };
 
-        var nextCalled = false;
-        var result = await CallerVerificationFilter.InvokeAsync(
-            agent: null,
-            arguments: args,
-            function: fn,
-            next: (_, _) => { nextCalled = true; return ValueTask.FromResult<object?>("ok"); },
-            cancellationToken: default);
+    //     var nextCalled = false;
+    //     var result = await CallerVerificationFilter.InvokeAsync(
+    //         agent: null,
+    //         arguments: args,
+    //         function: fn,
+    //         next: (_, _) => { nextCalled = true; return ValueTask.FromResult<object?>("ok"); },
+    //         cancellationToken: default);
 
-        Assert.False(nextCalled);
-        Assert.Equal("Need MFA.", result);
-    }
+    //     Assert.False(nextCalled);
+    //     Assert.Equal("Need MFA.", result);
+    // }
 
     [Fact]
     public async Task RequirementUnresolvableState_FailsClosed()

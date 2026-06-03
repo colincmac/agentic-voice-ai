@@ -192,4 +192,82 @@ public sealed class WorkflowExecutorTests
 
         Assert.Equal(["a", "b", "c"], rendered);
     }
+
+    [Fact]
+    public async Task AdvanceAlong_Allowed_AdvancesAndRenders()
+    {
+        var workflow = Compile();
+        var (executor, rendered) = NewExecutor(workflow);
+        await executor.EnterAsync();
+        rendered.Clear();
+
+        var edge = executor.Navigator.CurrentStage!.FindEdgeByLabel("agent")!;
+        var outcome = await executor.AdvanceAlongAsync(edge);
+
+        var advanced = Assert.IsType<AdvanceOutcome.Advanced>(outcome);
+        Assert.Equal("transfer", advanced.NewStage.Id);
+        Assert.Equal(["transfer"], rendered);
+    }
+
+    [Fact]
+    public async Task AdvanceAlong_BlockedWithFallback_RoutesAndRenders()
+    {
+        var workflow = Compile();
+        var (executor, rendered) = NewExecutor(workflow);
+        await executor.EnterAsync();
+        rendered.Clear();
+
+        var edge = executor.Navigator.CurrentStage!.FindEdgeByLabel("balance")!;
+        var outcome = await executor.AdvanceAlongAsync(edge);
+
+        var fb = Assert.IsType<AdvanceOutcome.AdvancedToFallback>(outcome);
+        Assert.Equal("verify", fb.NewStage.Id);
+        Assert.Equal(["verify"], rendered);
+    }
+
+    [Fact]
+    public async Task AdvanceAlong_AmbiguousTarget_UsesChosenEdgePredicate()
+    {
+        // Two edges from 'start' to the SAME target stage 'servicing' with different
+        // labels + predicates. Resolving by stage id would collapse both to the first
+        // edge; AdvanceAlongAsync must honor the exact edge the caller chose.
+        var workflow = new WorkflowGraphCompiler().Compile(new WorkflowBlueprint
+        {
+            Id = "ambiguous",
+            InitialStageId = "start",
+            Stages =
+            [
+                new StageBlueprint
+                {
+                    Id = "start",
+                    Transitions =
+                    [
+                        // First edge blocks (state has no 'vip_flag').
+                        new TransitionBlueprint
+                        {
+                            TargetStageId = "servicing",
+                            Label = "vip",
+                            Requires = [PredicateRef.StateHas("vip_flag")],
+                        },
+                        // Second edge always passes.
+                        new TransitionBlueprint { TargetStageId = "servicing", Label = "standard" },
+                    ],
+                },
+                new StageBlueprint { Id = "servicing", Terminal = true },
+            ],
+        });
+
+        var (executor, _) = NewExecutor(workflow);
+        await executor.EnterAsync();
+
+        var vipEdge = executor.Navigator.CurrentStage!.FindEdgeByLabel("vip")!;
+        var blocked = await executor.AdvanceAlongAsync(vipEdge);
+        Assert.IsType<AdvanceOutcome.Denied>(blocked);
+        Assert.Equal("start", executor.Navigator.CurrentStage!.Id);
+
+        var standardEdge = executor.Navigator.CurrentStage!.FindEdgeByLabel("standard")!;
+        var allowed = await executor.AdvanceAlongAsync(standardEdge);
+        var advanced = Assert.IsType<AdvanceOutcome.Advanced>(allowed);
+        Assert.Equal("servicing", advanced.NewStage.Id);
+    }
 }

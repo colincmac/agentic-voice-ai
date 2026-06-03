@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using Microsoft.Extensions.AI;
 
@@ -45,11 +47,11 @@ public static class AdvanceFunctionBuilder
             return null;
         }
 
-        var labelsByLabel = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var edgesByLabel = new Dictionary<string, CompiledStageEdge>(StringComparer.OrdinalIgnoreCase);
         foreach (var edge in stage.OutgoingEdges)
         {
             // Last edge wins on label collision — matches the navigator's lookup semantics.
-            labelsByLabel[edge.Label] = edge.TargetStageId;
+            edgesByLabel[edge.Label] = edge;
         }
 
         var description = BuildDescription(stage);
@@ -63,17 +65,19 @@ public static class AdvanceFunctionBuilder
         {
             if (string.IsNullOrWhiteSpace(target))
             {
-                return AdvanceFunctionResult.Denied($"`target` is required and must be one of the listed labels. Valid labels: {string.Join(", ", labelsByLabel.Keys)}.");
+                return AdvanceFunctionResult.Denied($"`target` is required and must be one of the listed labels. Valid labels: {string.Join(", ", edgesByLabel.Keys)}.");
             }
 
-            if (!labelsByLabel.TryGetValue(target, out var targetStageId))
+            if (!edgesByLabel.TryGetValue(target, out var edge))
             {
                 return AdvanceFunctionResult.Denied(
                     $"'{target}' is not a valid transition label for stage '{stage.Id}'. " +
-                    $"Valid labels: {string.Join(", ", labelsByLabel.Keys)}.");
+                    $"Valid labels: {string.Join(", ", edgesByLabel.Keys)}.");
             }
 
-            var outcome = await executor.AdvanceToAsync(targetStageId, cancellationToken).ConfigureAwait(false);
+            // Advance along the *resolved edge* — not by target stage id — so stages with
+            // multiple edges to the same target evaluate the predicate the model chose.
+            var outcome = await executor.AdvanceAlongAsync(edge, cancellationToken).ConfigureAwait(false);
             return outcome switch
             {
                 AdvanceOutcome.Advanced advanced => AdvanceFunctionResult.Ok(advanced.NewStage.Id),
@@ -84,13 +88,42 @@ public static class AdvanceFunctionBuilder
             };
         }
 
-        return AIFunctionFactory.Create(
+        var inner = AIFunctionFactory.Create(
             AdvanceAsync,
             new AIFunctionFactoryOptions
             {
                 Name = FunctionName,
                 Description = description,
             });
+
+        // Constrain `target` to the stage's valid labels via a JSON-schema enum so a
+        // compliant model can't emit an out-of-range label. The deny-envelope above stays
+        // as defense-in-depth for models that ignore the constraint.
+        var schema = BuildEnumConstrainedSchema(inner.JsonSchema, edgesByLabel.Keys);
+        return new EnumConstrainedFunction(inner, schema);
+    }
+
+    /// <summary>
+    /// Clone <paramref name="baseSchema"/> and add an <c>enum</c> of <paramref name="labels"/>
+    /// to the <c>target</c> property. Returns the original schema unchanged if its shape
+    /// doesn't match the expected <c>{ properties: { target: {...} } }</c> layout.
+    /// </summary>
+    private static JsonElement BuildEnumConstrainedSchema(JsonElement baseSchema, IReadOnlyCollection<string> labels)
+    {
+        if (JsonNode.Parse(baseSchema.GetRawText()) is JsonObject root
+            && root["properties"] is JsonObject properties
+            && properties["target"] is JsonObject target)
+        {
+            var enumValues = new JsonArray();
+            foreach (var label in labels)
+            {
+                enumValues.Add(label);
+            }
+            target["enum"] = enumValues;
+            return JsonSerializer.SerializeToElement(root);
+        }
+
+        return baseSchema;
     }
 
     private static string BuildDescription(CompiledStage stage)
@@ -109,6 +142,18 @@ public static class AdvanceFunctionBuilder
         }
         return sb.ToString().TrimEnd();
     }
+}
+
+/// <summary>
+/// Wraps the factory-built advance function to expose an <c>enum</c>-constrained
+/// <see cref="AIFunction.JsonSchema"/> for the <c>target</c> parameter while forwarding
+/// invocation to the inner function. Schema overriding is done here (rather than via
+/// <see cref="AIFunctionFactoryOptions"/>) so it's independent of the factory's schema hooks.
+/// </summary>
+internal sealed class EnumConstrainedFunction(AIFunction inner, JsonElement jsonSchema)
+    : DelegatingAIFunction(inner)
+{
+    public override JsonElement JsonSchema { get; } = jsonSchema;
 }
 
 /// <summary>Structured envelope returned by the advance function so the model can react deterministically.</summary>

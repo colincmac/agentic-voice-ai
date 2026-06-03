@@ -133,4 +133,61 @@ public sealed class AdvanceFunctionBuilderTests
         Assert.True(result.Advanced);
         Assert.Equal("agent", session.Navigator.CurrentStage!.Id);
     }
+
+    [Fact]
+    public void JsonSchema_ConstrainsTargetToStageLabels()
+    {
+        var workflow = TwoTransitionWorkflow();
+        var (executor, _, _) = NewExecutor(workflow);
+
+        var fn = AdvanceFunctionBuilder.BuildForStage(workflow.GetStage("welcome"), executor)!;
+
+        var target = fn.JsonSchema.GetProperty("properties").GetProperty("target");
+        Assert.True(target.TryGetProperty("enum", out var enumElement));
+        var values = enumElement.EnumerateArray().Select(e => e.GetString()!).ToArray();
+        Assert.Equal(["balance", "agent"], values);
+    }
+
+    [Fact]
+    public async Task Invoke_AmbiguousTarget_HonorsChosenEdgePredicate()
+    {
+        // Two edges to the SAME target stage with distinct labels + predicates. Resolving
+        // by stage id would collapse both to the first edge; the builder must advance along
+        // the exact edge the model selected.
+        var workflow = new WorkflowGraphCompiler().Compile(new WorkflowBlueprint
+        {
+            Id = "ambiguous",
+            InitialStageId = "start",
+            Stages =
+            [
+                new StageBlueprint
+                {
+                    Id = "start",
+                    Transitions =
+                    [
+                        new TransitionBlueprint
+                        {
+                            TargetStageId = "servicing",
+                            Label = "vip",
+                            Requires = [PredicateRef.StateHas("vip_flag")],
+                        },
+                        new TransitionBlueprint { TargetStageId = "servicing", Label = "standard" },
+                    ],
+                },
+                new StageBlueprint { Id = "servicing", Terminal = true },
+            ],
+        });
+        var (executor, session, _) = NewExecutor(workflow);
+        await executor.EnterAsync();
+
+        var fn = AdvanceFunctionBuilder.BuildForStage(workflow.GetStage("start"), executor)!;
+
+        var blocked = Deserialize(await fn.InvokeAsync(new AIFunctionArguments { ["target"] = "vip" }));
+        Assert.False(blocked.Advanced);
+        Assert.Equal("start", session.Navigator.CurrentStage!.Id);
+
+        var allowed = Deserialize(await fn.InvokeAsync(new AIFunctionArguments { ["target"] = "standard" }));
+        Assert.True(allowed.Advanced);
+        Assert.Equal("servicing", allowed.Stage);
+    }
 }

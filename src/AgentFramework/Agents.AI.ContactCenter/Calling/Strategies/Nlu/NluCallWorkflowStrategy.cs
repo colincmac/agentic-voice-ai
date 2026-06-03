@@ -191,7 +191,7 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
                     && menu.TryGetValue(tone.Digit, out var option)
                     && current.FindEdgeByLabel(option.TransitionLabel) is { } edge)
                 {
-                    await _executor.AdvanceToAsync(edge.TargetStageId, ct).ConfigureAwait(false);
+                    await _executor.AdvanceAlongAsync(edge, ct).ConfigureAwait(false);
                 }
             }
         }
@@ -304,7 +304,7 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
             return;
         }
 
-        var outcome = await _executor.AdvanceToAsync(edge.TargetStageId, ct).ConfigureAwait(false);
+        var outcome = await _executor.AdvanceAlongAsync(edge, ct).ConfigureAwait(false);
         if (outcome is AdvanceOutcome.Denied denied)
         {
             await SpeakAsync($"I can't do that right now: {denied.Reason}", SynthesizerInputFormat.Text, ct).ConfigureAwait(false);
