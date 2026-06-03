@@ -84,7 +84,5 @@ public static class CallerVerificationFilter
         return factory?.CreateLogger(typeof(CallerVerificationFilter).FullName!) ?? (ILogger)NullLogger.Instance;
     }
 
-    private static object BuildDenial(RequiresCallerVerificationAttribute requirement) =>
-        requirement.FailureMessage
-            ?? $"This action requires the caller to be verified at level '{requirement.MinimumLevel}' or higher.";
+    private static object BuildDenial(RequiresCallerVerificationAttribute requirement) => $"This action requires the caller to be verified at level '{requirement.MinimumLevel}' or higher.";
 }

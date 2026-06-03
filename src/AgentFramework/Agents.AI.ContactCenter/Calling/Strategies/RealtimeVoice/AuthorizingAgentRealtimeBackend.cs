@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Realtime;
 using Extensions.AI.Realtime;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 /// <summary>
-/// Production adapter that exposes <see cref="AuthorizingRealtimeAIAgent"/> through the
+/// Production adapter that exposes <see cref="AuthorizingAIAgent"/> through the
 /// <see cref="IRealtimeVoiceBackend"/> contract. Mirrors the translation that
 /// <see cref="Transports.RealtimeVoiceAgentTransport"/> performs today, but emits
 /// <see cref="RealtimeBackendUpdate"/> records instead of feeding them onto the legacy
@@ -22,24 +23,24 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 /// The adapter intentionally does not own the agent's session lifetime tied to a
 /// caller — it owns the backend connection. Disposal closes the realtime session.
 /// </remarks>
-public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
+public sealed class AIAgentBackend : IRealtimeVoiceBackend
 {
-    private readonly AuthorizingRealtimeAIAgent _agent;
+    private readonly AuthorizingAIAgent _agent;
     private readonly AgentRunOptions? _runOptions;
     private readonly ILogger _logger;
 
     private RealtimeAIAgentSession? _session;
     private int _disposed;
 
-    public AuthorizingAgentRealtimeBackend(
-        AuthorizingRealtimeAIAgent agent,
+    public AIAgentBackend(
+        AuthorizingAIAgent agent,
         AgentRunOptions? runOptions = null,
         ILoggerFactory? loggerFactory = null)
     {
         _agent = agent;
         _runOptions = runOptions;
-        _logger = loggerFactory?.CreateLogger<AuthorizingAgentRealtimeBackend>()
-                  ?? NullLogger<AuthorizingAgentRealtimeBackend>.Instance;
+        _logger = loggerFactory?.CreateLogger<AIAgentBackend>()
+                  ?? NullLogger<AIAgentBackend>.Instance;
 
         AgentId = agent.Id ?? Guid.NewGuid().ToString();
         AgentDisplayName = agent.Name ?? "Realtime Agent";
@@ -56,7 +57,7 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
             return;
         }
 
-        _session = await _agent.CreateRealtimeSessionAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        _session = await _agent.CreateSessionAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Realtime backend connected for agent {AgentId}", AgentId);
     }
 
@@ -97,13 +98,19 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
     public async ValueTask StartResponseAsync(IEnumerable<AITool>? tools = null, string? instruction = null, CancellationToken cancellationToken = default)
     {
         var session = EnsureSession();
-        if(tools is not null || !string.IsNullOrEmpty(instruction))
+
+        if (tools is not null || !string.IsNullOrEmpty(instruction))
         {
             var clientSession = session.ClientSession
                 ?? throw new InvalidOperationException(
-                    $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
+                    $"{nameof(AIAgentBackend)} session has no active realtime client session.");
 
-            var updated = CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools ?? []], instruction);
+            var updated = new RealtimeSessionOptions()
+            {
+                Tools = tools?.ToList(),
+                Instructions = instruction
+            };
+            //CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools ?? []], instruction);
             await _agent.SendAsync(
                 session,
                 new SessionUpdateRealtimeClientMessage(updated),
@@ -134,7 +141,7 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
         var session = EnsureSession();
         var clientSession = session.ClientSession
             ?? throw new InvalidOperationException(
-                $"{nameof(AuthorizingAgentRealtimeBackend)} session has no active realtime client session.");
+                $"{nameof(AIAgentBackend)} session has no active realtime client session.");
 
         var updated = CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools]);
 
@@ -221,7 +228,7 @@ public sealed class AuthorizingAgentRealtimeBackend : IRealtimeVoiceBackend
 
     private RealtimeAIAgentSession EnsureSession()
         => _session ?? throw new InvalidOperationException(
-            $"{nameof(AuthorizingAgentRealtimeBackend)} is not connected. Call {nameof(ConnectAsync)} first.");
+            $"{nameof(AIAgentBackend)} is not connected. Call {nameof(ConnectAsync)} first.");
 
     private async Task DrainStreamAsync(
         RealtimeAIAgentSession session,

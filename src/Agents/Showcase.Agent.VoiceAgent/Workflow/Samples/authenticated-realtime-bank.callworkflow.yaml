@@ -1,9 +1,9 @@
 id: authenticated-realtime-bank
 version: 1
 description: |
-  Voice-first ACME Bank concierge demonstrating Phase-5 per-transition `requires:` +
+  Voice-first ACME Bank concierge demonstrating per-transition requirements (`requires:`) +
   `onBlocked:` edges in the new self-contained YAML schema. The welcome stage offers
-  three options: balance (needs MFA), activate-card (needs KBA / PIN), and transfer.
+  three options -- balance (needs MFA), activate-card (needs KBA / PIN), and transfer.
   When a guarded transition fails, the navigator routes to the inline `verify` /
   `verify-mfa` stages — there are no subflows or imports.
 

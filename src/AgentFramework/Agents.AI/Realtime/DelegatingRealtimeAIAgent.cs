@@ -23,13 +23,13 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
     protected RealtimeAIAgent InnerAgent { get; } = innerAgent ?? throw new ArgumentNullException(nameof(innerAgent));
 
     /// <inheritdoc />
-    protected override string? IdCore => this.InnerAgent.Id;
+    protected override string? IdCore => InnerAgent.Id;
 
     /// <inheritdoc />
-    public override string? Name => this.InnerAgent.Name;
+    public override string? Name => InnerAgent.Name;
 
     /// <inheritdoc />
-    public override string? Description => this.InnerAgent.Description;
+    public override string? Description => InnerAgent.Description;
 
     /// <inheritdoc />
     public override object? GetService(Type serviceType, object? serviceKey = null)
@@ -39,19 +39,19 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
         // If the key is non-null, we don't know what it means so pass through to the inner service.
         return
             serviceKey is null && serviceType.IsInstanceOfType(this) ? this :
-            this.InnerAgent.GetService(serviceType, serviceKey);
+            InnerAgent.GetService(serviceType, serviceKey);
     }
 
     /// <inheritdoc />
-    public ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
+    public virtual ValueTask<RealtimeAIAgentSession> CreateSessionAsync(
         RealtimeSessionOptions? sessionOptions = null,
         CancellationToken cancellationToken = default)
     {
-        return InnerAgent.CreateRealtimeSessionAsync(sessionOptions, cancellationToken);
+        return InnerAgent.CreateSessionAsync(sessionOptions, cancellationToken);
     }
 
     /// <inheritdoc />
-    public Task SendAsync(
+    public virtual Task SendAsync(
         RealtimeAIAgentSession session,
         RealtimeClientMessage message,
         CancellationToken cancellationToken = default)
@@ -61,15 +61,15 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
     }
 
     /// <inheritdoc />
-    protected override ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default) => this.InnerAgent.CreateSessionAsync(cancellationToken);
+    protected override ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default) => InnerAgent.CreateSessionAsync(cancellationToken);
 
     /// <inheritdoc />
     protected override ValueTask<JsonElement> SerializeSessionCoreAsync(AgentSession session, JsonSerializerOptions? jsonSerializerOptions = null, CancellationToken cancellationToken = default)
-        => this.InnerAgent.SerializeSessionAsync(session, jsonSerializerOptions, cancellationToken);
+        => InnerAgent.SerializeSessionAsync(session, jsonSerializerOptions, cancellationToken);
 
     /// <inheritdoc />
     protected override ValueTask<AgentSession> DeserializeSessionCoreAsync(JsonElement serializedState, JsonSerializerOptions? jsonSerializerOptions = null, CancellationToken cancellationToken = default)
-        => this.InnerAgent.DeserializeSessionAsync(serializedState, jsonSerializerOptions, cancellationToken);
+        => InnerAgent.DeserializeSessionAsync(serializedState, jsonSerializerOptions, cancellationToken);
 
     /// <inheritdoc />
     protected override Task<AgentResponse> RunCoreAsync(
@@ -77,7 +77,7 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
         AgentSession? session = null,
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
-        => this.InnerAgent.RunAsync(messages, session, options, cancellationToken);
+        => InnerAgent.RunAsync(messages, session, options, cancellationToken);
 
     /// <inheritdoc />
     protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
@@ -85,7 +85,7 @@ public abstract class DelegatingRealtimeAIAgent(RealtimeAIAgent innerAgent) : AI
         AgentSession? session = null,
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
-        => this.InnerAgent.RunStreamingAsync(messages, session, options, cancellationToken);
+        => InnerAgent.RunStreamingAsync(messages, session, options, cancellationToken);
 }
 
 

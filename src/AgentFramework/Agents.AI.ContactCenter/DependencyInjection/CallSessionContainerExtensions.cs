@@ -1,15 +1,14 @@
+using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.AITools;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
-using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
@@ -146,7 +145,7 @@ public sealed class CallSessionContainerBuilder
     /// <summary>
     /// Registers the realtime backend infrastructure used by the new
     /// <c>RealtimeCallWorkflowStrategy</c> (Phase 5+): per-call agent session registry,
-    /// tool-approval plumbing, the call-scoped <see cref="AuthorizingRealtimeAIAgent"/>,
+    /// tool-approval plumbing, the call-scoped <see cref="AuthorizingAIAgent"/>,
     /// and the <see cref="IRealtimeVoiceBackend"/> adapter that wraps it. This is the
     /// successor to the legacy <c>AddRealtimeVoiceStrategy</c>; it intentionally does
     /// <em>not</em> register a strategy factory \u2014 callers wire those via
@@ -162,9 +161,9 @@ public sealed class CallSessionContainerBuilder
         RealtimeAgentRunOptions? runOptions = null,
         AgentFunctionInvocationMiddleware? middlewareOverride = null)
     {
-        Services.TryAddScoped<IAgentSessionRegistry, AgentSessionRegistry>();
         Services.TryAddSingleton<IToolApprovalStore, InMemoryToolApprovalStore>();
         Services.TryAddScoped<IToolApprovalHandlerProvider, ToolApprovalHandlerProvider>();
+        Services.TryAddScoped<IToolApprovalHandler, RequiresCallerVerificationHandler>();
 
         Services.TryAddScoped(sp =>
         {
@@ -172,22 +171,16 @@ public sealed class CallSessionContainerBuilder
                 ? sp.GetRequiredKeyedService<RealtimeAIAgent>(realtimeAgentServiceKey)
                 : sp.GetRequiredService<RealtimeAIAgent>();
 
-            var registry = sp.GetRequiredService<IAgentSessionRegistry>();
-            var toolCollections = sp.GetServices<IAIToolCollection>();
-
-            return new AuthorizingRealtimeAIAgent(
+            return new AuthorizingAIAgent(
                 agent,
-                registry,
-                delegateFunc: middlewareOverride,
-                toolCollections,
-                sp);
+                serviceProvider: sp);
         });
 
         Services.AddTransient<IRealtimeVoiceBackend>(sp =>
         {
-            var agent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
+            var agent = sp.GetRequiredService<AuthorizingAIAgent>();
             var loggerFactory = sp.GetService<ILoggerFactory>();
-            return new AuthorizingAgentRealtimeBackend(agent, runOptions: runOptions, loggerFactory);
+            return new AIAgentBackend(agent, runOptions: runOptions, loggerFactory);
         });
         return this;
     }

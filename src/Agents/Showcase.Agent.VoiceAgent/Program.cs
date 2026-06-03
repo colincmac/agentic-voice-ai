@@ -1,3 +1,4 @@
+using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Azure;
 using Agents.AI.ContactCenter.Calling;
@@ -54,19 +55,19 @@ if (!string.IsNullOrWhiteSpace(appConfigEndpoint))
 // ============================================================================
 
 builder.AddKeyedChatClient("slm")
-    .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
+    .UseOpenTelemetry();
 
 builder.AddKeyedChatClient("chat")
     .UseFunctionInvocation()
-    .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
+    .UseOpenTelemetry();
 
 builder.AddKeyedConversationClient("realtime")
     .UseFunctionInvocation()
-    .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
+    .UseOpenTelemetry();
 
 builder.AddKeyedConversationClient("voicelive")
     .UseFunctionInvocation()
-    .UseOpenTelemetry(sourceName: "Showcase.VoiceAgent");
+    .UseOpenTelemetry();
 
 builder.Services.AddAzureSpeech(builder.Configuration.GetSection(AzureSpeechServiceOptions.SectionName), options =>
 {
@@ -127,7 +128,7 @@ builder.Services.AddNamedAIFunction(
     ServiceLifetime.Singleton);
 
 // ============================================================================
-//  YAML call workflows (Phase-3/6 — loaded into ICallWorkflowCatalog)
+//  YAML call workflows loaded into ICallWorkflowCatalog
 // ============================================================================
 
 builder.Services.AddCallWorkflowsFromDirectory(
@@ -141,13 +142,13 @@ builder.Services.AddSingleton(new CallEntryConfig
 });
 
 // ============================================================================
-//  Realtime AI agent (kept — used by AddRealtimeVoiceStrategy to wire the backend)
+//  Realtime AI agent 
 // ============================================================================
 
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
     configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
-    liveConversationClientKey: "voicelive",
+    liveConversationClientKey: ConfigurationConstants.VoiceLiveConnectionString,
     configureOptions: agentOptions =>
     {
         agentOptions.SessionOptions = agentOptions.SessionOptions.With(
@@ -226,7 +227,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/", async ([FromServices] AuthorizingRealtimeAIAgent agent, CancellationToken cancellationToken) =>
 {
-    var session = await agent.CreateRealtimeSessionAsync(null, cancellationToken);
+    var session = await agent.CreateSessionAsync(null, cancellationToken);
     return "Testing";
 });
 

@@ -101,34 +101,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     /// </summary>
     public RealtimeSessionOptions? SessionOptions => _agentOptions?.SessionOptions;
 
-    /// <summary>
-    /// Creates a new realtime session via the underlying <see cref="IRealtimeClient"/> and returns
-    /// an <see cref="RealtimeAIAgentSession"/> that wraps it.
-    /// </summary>
-    /// <param name="sessionOptions">Optional session options that override the agent's defaults.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>A <see cref="RealtimeAIAgentSession"/> containing the active realtime session.</returns>
-    public virtual async ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
-        RealtimeSessionOptions? sessionOptions = null,
-        CancellationToken cancellationToken = default)
-    {
-        var effectiveOptions = sessionOptions ?? _agentOptions?.SessionOptions;
 
-        var loggingAgentName = GetLoggingAgentName();
-
-        _logger.LogDebug("Creating realtime session for agent '{AgentName}' (Id: {AgentId})", loggingAgentName, Id);
-
-        var clientSession = await RealtimeClient.CreateSessionAsync(effectiveOptions, cancellationToken).ConfigureAwait(false);
-
-        var session = new RealtimeAIAgentSession
-        {
-            ClientSession = clientSession,
-        };
-
-        _logger.LogDebug("Realtime session created for agent '{AgentName}' (Id: {AgentId})", loggingAgentName, Id);
-
-        return session;
-    }
 
     /// <summary>
     /// Sends a client message to the realtime session.
@@ -154,41 +127,12 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         await clientSession.SendAsync(message, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Streams server messages from the realtime session as <see cref="AgentResponseUpdate"/> instances.
-    /// </summary>
-    /// <param name="session">The agent session containing the active realtime client session.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>An async enumerable of <see cref="AgentResponseUpdate"/> instances from the realtime session.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">The session does not have an active realtime client session.</exception>
-    public async IAsyncEnumerable<AgentResponseUpdate> GetStreamingResponseAsync(
-        RealtimeAIAgentSession session,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        _ = Throw.IfNull(session);
-
-        var clientSession = session.ClientSession
-            ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
-
-        _logger.LogDebug("Starting streaming response from realtime session for agent '{AgentName}' (Id: {AgentId})", GetLoggingAgentName(), Id);
-
-        await foreach (var serverMessage in clientSession.GetStreamingResponseAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return new AgentResponseUpdate
-            {
-                AuthorName = Name,
-                AgentId = Id,
-                RawRepresentation = serverMessage,
-            };
-        }
-    }
 
     /// <inheritdoc/>
     /// <remarks>
     /// The <see cref="RealtimeAIAgent"/> does not support the standard request/response <see cref="AIAgent.RunAsync"/>
-    /// pattern. Use <see cref="CreateRealtimeSessionAsync"/>, <see cref="SendAsync"/>, and
-    /// <see cref="GetStreamingResponseAsync"/> instead.
+    /// pattern. Use <see cref="CreateSessionAsync"/>, <see cref="SendAsync"/>, and
+    /// <see cref="RunCoreStreamingAsync"/> instead.
     /// </remarks>
     /// <exception cref="NotSupportedException">Always thrown. Use the realtime session APIs instead.</exception>
     protected override Task<AgentResponse> RunCoreAsync(
@@ -199,16 +143,10 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     {
         throw new NotSupportedException(
             $"{nameof(RealtimeAIAgent)} does not support the standard RunAsync pattern. " +
-            $"Use {nameof(CreateRealtimeSessionAsync)}, {nameof(SendAsync)}, and {nameof(GetStreamingResponseAsync)} for realtime interactions.");
+            $"Use {nameof(CreateSessionAsync)}, {nameof(SendAsync)}, and {nameof(RunCoreStreamingAsync)} for realtime interactions.");
     }
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// The <see cref="RealtimeAIAgent"/> does not support the standard streaming <see cref="AIAgent.RunStreamingAsync"/>
-    /// pattern. Use <see cref="CreateRealtimeSessionAsync"/>, <see cref="SendAsync"/>, and
-    /// <see cref="GetStreamingResponseAsync"/> instead.
-    /// </remarks>
-    /// <exception cref="NotSupportedException">Always thrown. Use the realtime session APIs instead.</exception>
     protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
@@ -388,10 +326,32 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
             ?? RealtimeClient.GetService(serviceType, serviceKey));
     }
 
+    /// <summary>
+    /// Creates a new realtime session via the underlying <see cref="IRealtimeClient"/> and returns
+    /// an <see cref="RealtimeAIAgentSession"/> that wraps it.
+    /// </summary>
+    /// <param name="sessionOptions">Optional session options that override the agent's defaults.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="RealtimeAIAgentSession"/> containing the active realtime session.</returns>
+    public virtual async ValueTask<RealtimeAIAgentSession> CreateSessionAsync(
+        RealtimeSessionOptions? sessionOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveOptions = sessionOptions ?? _agentOptions?.SessionOptions;
+
+        var clientSession = await RealtimeClient.CreateSessionAsync(effectiveOptions, cancellationToken).ConfigureAwait(false);
+
+        var session = new RealtimeAIAgentSession
+        {
+            ClientSession = clientSession,
+        };
+        return session;
+    }
+
     /// <inheritdoc/>
     protected override async ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default)
     {
-        var clientSession = await RealtimeClient.CreateSessionAsync(_agentOptions?.SessionOptions, cancellationToken);
+        var clientSession = await RealtimeClient.CreateSessionAsync(_agentOptions?.SessionOptions, cancellationToken).ConfigureAwait(false);
         return new RealtimeAIAgentSession()
         {
             ClientSession = clientSession,
@@ -504,7 +464,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         return token?.ResponseUpdates?.ToList() ?? [];
     }
 
-    private string GetLoggingAgentName() => Name ?? "UnnamedAgent";
+    private string GetLoggingAgentName() => Name ?? "AnonymousAgent";
 
     /// <summary>
     /// Validates that all configured providers have unique <see cref="AIContextProvider.StateKeys"/> values
@@ -560,7 +520,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         var (sessionOptions, continuationToken) = GetSessionConfiguration(runOptions);
 
         //var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
-        agentSession ??= await this.CreateRealtimeSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
+        agentSession ??= await this.CreateSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
 
         if (agentSession is not RealtimeAIAgentSession typedSession)
         {

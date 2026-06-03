@@ -15,6 +15,7 @@ namespace Agents.AI.Realtime;
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public sealed class RealtimeAIAgentSession : AgentSession
 {
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RealtimeAIAgentSession"/> class.
     /// </summary>
@@ -23,34 +24,10 @@ public sealed class RealtimeAIAgentSession : AgentSession
     }
 
     [JsonConstructor]
-    internal RealtimeAIAgentSession(string? sessionId, AgentSessionStateBag? stateBag) : base(stateBag ?? new())
+    internal RealtimeAIAgentSession(AgentSessionStateBag? stateBag) : base(stateBag ?? new())
     {
-        this.RealtimeSessionId = sessionId;
     }
 
-    /// <summary>
-    /// Gets or sets the underlying realtime session identifier managed by the <see cref="IRealtimeClient"/>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This property may be null if the session has not yet been initialized with the realtime service.
-    /// Once a realtime session is created, this ID tracks the active session for reconnection and state management.
-    /// </para>
-    /// </remarks>
-    [JsonPropertyName("sessionId")]
-    public string? RealtimeSessionId
-    {
-        get;
-        internal set
-        {
-            if (string.IsNullOrWhiteSpace(field) && string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
-
-            field = value;
-        }
-    }
 
     /// <summary>
     /// Gets or sets the underlying <see cref="IRealtimeClientSession"/> associated with this agent session.
@@ -86,9 +63,4 @@ public sealed class RealtimeAIAgentSession : AgentSession
         return JsonSerializer.SerializeToElement(this, jso.GetTypeInfo(typeof(RealtimeAIAgentSession)));
     }
 
-    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
-    private string DebuggerDisplay =>
-        this.RealtimeSessionId is { } sessionId
-            ? $"RealtimeSessionId = {sessionId}, StateBag Count = {this.StateBag.Count}"
-            : $"StateBag Count = {this.StateBag.Count}";
 }

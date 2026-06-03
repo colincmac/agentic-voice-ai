@@ -63,7 +63,7 @@ public static class AdvanceFunctionBuilder
         {
             if (string.IsNullOrWhiteSpace(target))
             {
-                return AdvanceFunctionResult.Denied("`target` is required and must be one of the listed labels.");
+                return AdvanceFunctionResult.Denied($"`target` is required and must be one of the listed labels. Valid labels: {string.Join(", ", labelsByLabel.Keys)}.");
             }
 
             if (!labelsByLabel.TryGetValue(target, out var targetStageId))
