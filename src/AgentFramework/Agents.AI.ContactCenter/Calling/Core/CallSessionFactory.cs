@@ -1,6 +1,7 @@
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -76,6 +77,8 @@ public sealed class CallSessionFactory : ICallSessionFactory
         }
 
         var scope = _scopeFactory.CreateScope();
+        // Bind the chosen workflow on the prewarm scope so the strategy factory resolves it.
+        scope.ServiceProvider.GetService<CallWorkflowSelection>()?.Set(request.WorkflowId);
         var prewarmCts = new CancellationTokenSource();
         var linked = CancellationTokenSource.CreateLinkedTokenSource(prewarmCts.Token, cancellationToken);
 
@@ -242,6 +245,8 @@ public sealed class CallSessionFactory : ICallSessionFactory
     {
         try
         {
+            // Bind the chosen workflow on this scope so the strategy factory resolves it.
+            scope.ServiceProvider.GetService<CallWorkflowSelection>()?.Set(request.WorkflowId);
             return await factory.CreateAsync(
                 request.CallId,
                 scope.ServiceProvider,

@@ -9,17 +9,18 @@ using Microsoft.Extensions.Logging;
 namespace Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 
 /// <summary>
-/// Factory that constructs <see cref="DtmfCallWorkflowStrategy"/> instances bound to a
-/// pre-registered workflow id in the <see cref="ICallWorkflowCatalog"/>.
+/// Factory that constructs <see cref="DtmfCallWorkflowStrategy"/> instances from the
+/// <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/> chosen for the active call.
+/// The workflow is resolved per call via the scoped <see cref="CallWorkflowSelection"/>
+/// (falling back to <see cref="_defaultWorkflowId"/> and then the single registered workflow).
 /// </summary>
 public sealed class DtmfCallWorkflowStrategyFactory : IConversationStrategyFactory
 {
-    private readonly string _workflowId;
+    private readonly string? _defaultWorkflowId;
 
-    public DtmfCallWorkflowStrategyFactory(string workflowId)
+    public DtmfCallWorkflowStrategyFactory(string? defaultWorkflowId = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(workflowId);
-        _workflowId = workflowId;
+        _defaultWorkflowId = defaultWorkflowId;
     }
 
     public AgentTier Tier => AgentTier.DtmfOnly;
@@ -34,7 +35,8 @@ public sealed class DtmfCallWorkflowStrategyFactory : IConversationStrategyFacto
         ArgumentNullException.ThrowIfNull(services);
 
         var catalog = services.GetRequiredService<ICallWorkflowCatalog>();
-        var compiled = catalog.Get(_workflowId);
+        var selection = services.GetRequiredService<CallWorkflowSelection>();
+        var compiled = selection.Resolve(catalog, _defaultWorkflowId);
 
         var synthesizer = services.GetService<ISpeechSynthesizer>();
         var loggerFactory = services.GetService<ILoggerFactory>();

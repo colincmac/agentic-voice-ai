@@ -29,7 +29,7 @@ public static class HostApplicationBuilderAgentExtensions
             CreateOptions(name, description, instructions));
     }
 
-    public static IHostApplicationBuilder AddRealtimeAIAgent(this IHostApplicationBuilder builder, string name, string? description = null, string? instructions = null, string? liveConversationClientKey = null)
+    public static IHostApplicationBuilder AddRealtimeAIAgent(this IHostApplicationBuilder builder, string name, string? description = null, string? instructions = null, string? realtimeClientKey = null)
     {
         Throw.IfNull(builder);
         Throw.IfNullOrEmpty(name);
@@ -37,11 +37,11 @@ public static class HostApplicationBuilderAgentExtensions
         return RegisterRealtimeAIAgent(
             builder,
             name,
-            sp => GetRequiredRealtimeClient(sp, liveConversationClientKey),
+            sp => GetRequiredRealtimeClient(sp, realtimeClientKey),
             CreateOptions(name, description, instructions));
     }
 
-    public static IHostApplicationBuilder AddRealtimeAIAgent(this IHostApplicationBuilder builder, string name, IConfigurationSection configurationSection, string? liveConversationClientKey = null, Action<RealtimeAgentOptions>? configureOptions = null)
+    public static IHostApplicationBuilder AddRealtimeAIAgent(this IHostApplicationBuilder builder, string name, IConfigurationSection configurationSection, string? realtimeClientKey = null, Action<RealtimeAgentOptions>? configureOptions = null)
     {
         Throw.IfNull(builder);
         Throw.IfNullOrEmpty(name);
@@ -53,7 +53,7 @@ public static class HostApplicationBuilderAgentExtensions
         configureOptions?.Invoke(options);
         options.Name ??= name;
 
-        return builder.AddRealtimeAIAgent(name, options, liveConversationClientKey);
+        return builder.AddRealtimeAIAgent(name, options, realtimeClientKey);
     }
 
     public static IHostApplicationBuilder AddRealtimeAIAgent(this IHostApplicationBuilder builder, string name, RealtimeAgentOptions options, string? liveConversationClientKey = null)

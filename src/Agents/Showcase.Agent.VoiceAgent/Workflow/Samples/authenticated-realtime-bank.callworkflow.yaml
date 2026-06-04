@@ -13,8 +13,8 @@ basePrompt: |
   When you've satisfied the caller's intent, call `advance` with the matching label.
 
 commonTools:
-  - transfer-to-agent
-  - end-session
+  - transfer_to_agent
+  - hang_up_call
 
 initialStage: welcome
 
@@ -25,13 +25,13 @@ stages:
     realtime:
       instructions:
         - Greet the caller warmly.
-        - Ask for their first and last name; once given, call `record-caller-name` once.
+        - Ask for their first and last name; once given, call `record_caller_name` once.
         - Listen for the caller's intent. Don't ask for PINs or codes yourself — picking an intent triggers verification automatically.
       examples:
         - "Welcome to ACME Bank. Before we get started, could I get your first and last name?"
         - "Thanks, Jordan. I can help you check your balance, activate a card, or transfer to a representative — what would you like to do?"
       tools:
-        - record-caller-name
+        - record_caller_name
     scripted:
       ssml: |
         <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
@@ -151,9 +151,9 @@ stages:
     realtime:
       instructions:
         - Acknowledge the request, set expectations on wait time, and complete the transfer.
-        - Use `transfer-to-agent` with the configured escalation number.
+        - Use `transfer_to_agent` with the configured escalation number.
       tools:
-        - transfer-to-agent
+        - transfer_to_agent
     terminal: true
     terminalOutcome: escalated
 
@@ -162,6 +162,6 @@ stages:
     realtime:
       instructions:
         - Thank the caller by first name and end the call politely.
-        - Call `end-session` to terminate.
+        - Call `hang_up_call` to terminate.
     terminal: true
     terminalOutcome: success

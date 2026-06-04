@@ -14,7 +14,7 @@ public static class NamedEdgePredicateExtensions
     public static IServiceCollection AddNamedEdgePredicateProvider(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.TryAddScoped<INamedEdgePredicateProvider, NamedEdgePredicateProvider>();
+        services.TryAddSingleton<INamedEdgePredicateProvider, NamedEdgePredicateProvider>();
         return services;
     }
 

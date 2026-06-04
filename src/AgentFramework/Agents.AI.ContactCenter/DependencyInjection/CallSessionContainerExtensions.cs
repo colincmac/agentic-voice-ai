@@ -9,6 +9,7 @@ using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
@@ -121,6 +122,9 @@ public static class CallSessionContainerExtensions
         services.TryAddScoped<CallSessionAccessor>();
         services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
 
+        // Per-call workflow selection, bound by CallSessionFactory before the strategy is built.
+        services.TryAddScoped<CallWorkflowSelection>();
+
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
         builder.AddCallSessionContainerTelemetry();
@@ -133,57 +137,14 @@ public sealed class CallSessionContainerBuilder
 {
     public CallSessionContainerBuilder(IHostApplicationBuilder builder)
     {
-        Builder = builder;
+        HostApplicationBuilder = builder;
     }
 
-    public IHostApplicationBuilder Builder { get; }
+    public IHostApplicationBuilder HostApplicationBuilder { get; }
 
-    public IServiceCollection Services => Builder.Services;
+    public IServiceCollection Services => HostApplicationBuilder.Services;
 
-    /// <summary>
-    /// Registers the Tier 0 realtime voice strategy. Resolves the production
-    /// <summary>
-    /// Registers the realtime backend infrastructure used by the new
-    /// <c>RealtimeCallWorkflowStrategy</c> (Phase 5+): per-call agent session registry,
-    /// tool-approval plumbing, the call-scoped <see cref="AuthorizingAIAgent"/>,
-    /// and the <see cref="IRealtimeVoiceBackend"/> adapter that wraps it. This is the
-    /// successor to the legacy <c>AddRealtimeVoiceStrategy</c>; it intentionally does
-    /// <em>not</em> register a strategy factory \u2014 callers wire those via
-    /// <c>AddRealtimeCallWorkflowStrategy(workflowId)</c>.
-    /// </summary>
-    /// <param name="realtimeAgentServiceKey">
-    /// Optional keyed-service key for the underlying <see cref="RealtimeAIAgent"/>.
-    /// When set, resolves the agent registered under that key (e.g. <c>"TriageAgent"</c>).
-    /// When null, resolves the unkeyed <see cref="RealtimeAIAgent"/>.
-    /// </param>
-    public CallSessionContainerBuilder AddRealtimeAgentBackend(
-        string? realtimeAgentServiceKey = null,
-        RealtimeAgentRunOptions? runOptions = null,
-        AgentFunctionInvocationMiddleware? middlewareOverride = null)
-    {
-        Services.TryAddSingleton<IToolApprovalStore, InMemoryToolApprovalStore>();
-        Services.TryAddScoped<IToolApprovalHandlerProvider, ToolApprovalHandlerProvider>();
-        Services.TryAddScoped<IToolApprovalHandler, RequiresCallerVerificationHandler>();
 
-        Services.TryAddScoped(sp =>
-        {
-            var agent = !string.IsNullOrEmpty(realtimeAgentServiceKey)
-                ? sp.GetRequiredKeyedService<RealtimeAIAgent>(realtimeAgentServiceKey)
-                : sp.GetRequiredService<RealtimeAIAgent>();
-
-            return new AuthorizingAIAgent(
-                agent,
-                serviceProvider: sp);
-        });
-
-        Services.AddTransient<IRealtimeVoiceBackend>(sp =>
-        {
-            var agent = sp.GetRequiredService<AuthorizingAIAgent>();
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-            return new AIAgentBackend(agent, runOptions: runOptions, loggerFactory);
-        });
-        return this;
-    }
 
     /// <summary>
     /// Registers <see cref="CallControlTools"/> as a scoped <see cref="IAIToolCollection"/>
@@ -197,41 +158,6 @@ public sealed class CallSessionContainerBuilder
         return this;
     }
 
-    /// <summary>
-    /// Registers the IVR intent agent used by the new <c>NluCallWorkflowStrategy</c>.
-    /// Successor to the legacy <c>AddNluStrategy</c>; intentionally does not register
-    /// a strategy factory \u2014 callers wire that via <c>AddNluCallWorkflowStrategy(workflowId)</c>.
-    /// Requires <see cref="Media.Audio.ISpeechSynthesizer"/> to be registered separately
-    /// for prompt playback.
-    /// </summary>
-    public CallSessionContainerBuilder AddIntentAgent(string? chatClientServiceKey = null, Action<IvrIntentAgentOptions>? configureOptions = null)
-    {
-        var options = new IvrIntentAgentOptions();
-        configureOptions?.Invoke(options);
-
-        Services
-            .AddOptions<IvrIntentAgentOptions>()
-            .Configure(o => configureOptions?.Invoke(o))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-
-        Builder.AddAIAgent(options.Name, (sp, key) =>
-        {
-            var chatClient = chatClientServiceKey is null
-                ? sp.GetRequiredService<IChatClient>()
-                : sp.GetRequiredKeyedService<IChatClient>(chatClientServiceKey);
-
-            var recognizer = sp.GetService<ISpeechRecognizer>();
-            var resolvedOptions = sp.GetRequiredService<IOptions<IvrIntentAgentOptions>>().Value;
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-
-            return new IvrIntentAgent(chatClient, recognizer, resolvedOptions, loggerFactory);
-        });
-
-        Services.TryAddSingleton<IvrIntentAgent>(sp => sp.GetRequiredKeyedService<IvrIntentAgent>(options.Name));
-
-        return this;
-    }
 
     /// <summary>
     /// Registers a transfer escalation target so strategies that emit
@@ -306,17 +232,17 @@ public sealed class CallSessionContainerBuilder
     {
         if (useRedis)
         {
-            Builder.AddRedisCallOwnershipDirectory();
-            Builder.AddRedisWebhookIdempotencyStore();
-            Builder.AddRedisPodHeartbeat();
-            Builder.AddHttpWebhookForwarder();
+            HostApplicationBuilder.AddRedisCallOwnershipDirectory();
+            HostApplicationBuilder.AddRedisWebhookIdempotencyStore();
+            HostApplicationBuilder.AddRedisPodHeartbeat();
+            HostApplicationBuilder.AddHttpWebhookForwarder();
         }
         else
         {
-            Builder.AddInMemoryCallOwnershipDirectory();
-            Builder.AddInMemoryWebhookIdempotencyStore();
-            Builder.AddInMemoryPodHeartbeat();
-            Builder.AddInMemoryWebhookForwarder();
+            HostApplicationBuilder.AddInMemoryCallOwnershipDirectory();
+            HostApplicationBuilder.AddInMemoryWebhookIdempotencyStore();
+            HostApplicationBuilder.AddInMemoryPodHeartbeat();
+            HostApplicationBuilder.AddInMemoryWebhookForwarder();
         }
 
         return this;

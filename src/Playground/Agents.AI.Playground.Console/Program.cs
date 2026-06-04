@@ -69,7 +69,7 @@ builder.AddKeyedConversationClient("voicelive")
 builder.AddRealtimeAIAgent(
     name: "TriageAgent",
     configurationSection: builder.Configuration.GetSection("TriageAgent"),
-    liveConversationClientKey: "voicelive");
+    realtimeClientKey: "voicelive");
 builder.Services.AddHttpLogging();
 var app = builder.Build();
 app.UseHttpLogging();

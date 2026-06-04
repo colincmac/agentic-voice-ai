@@ -131,6 +131,12 @@ public sealed record CallSessionPrewarmRequest
 
     /// <summary>Override tier resolution. When null, defaults to <see cref="AgentTier.DtmfOnly"/>.</summary>
     public AgentTier? PreferredTier { get; init; }
+
+    /// <summary>
+    /// The call workflow to drive this call. When null, the strategy's registered default
+    /// workflow id is used, falling back to the single registered workflow when unambiguous.
+    /// </summary>
+    public string? WorkflowId { get; init; }
 }
 
 public sealed record CallSessionRequest
@@ -140,6 +146,12 @@ public sealed record CallSessionRequest
 
     /// <summary>Override tier resolution. When null, the registered <c>IAgentTierResolver</c> picks.</summary>
     public AgentTier? PreferredTier { get; init; }
+
+    /// <summary>
+    /// The call workflow to drive this call. When null, the strategy's registered default
+    /// workflow id is used, falling back to the single registered workflow when unambiguous.
+    /// </summary>
+    public string? WorkflowId { get; init; }
 
     /// <summary>Observers to start with the call. Defaults from DI are added on top.</summary>
     public IReadOnlyList<ICallObserver>? Observers { get; init; }

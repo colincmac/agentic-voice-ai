@@ -10,19 +10,21 @@ using Microsoft.Extensions.Logging;
 namespace Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 
 /// <summary>
-/// Factory that constructs <see cref="NluCallWorkflowStrategy"/> instances bound to a
-/// pre-registered workflow id in the <see cref="ICallWorkflowCatalog"/>. Implements the
-/// legacy <see cref="IConversationStrategyFactory"/> contract so the existing
+/// Factory that constructs <see cref="NluCallWorkflowStrategy"/> instances from the
+/// <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/> chosen for the active call.
+/// The workflow is resolved per call via the scoped <see cref="CallWorkflowSelection"/>
+/// (falling back to <see cref="_defaultWorkflowId"/> and then the single registered workflow),
+/// so a single registration serves every workflow on the host. Implements the
+/// <see cref="IConversationStrategyFactory"/> contract so the existing
 /// <c>CallSessionFactory</c> + composite-fallback infrastructure can drive it unchanged.
 /// </summary>
 public sealed class NluCallWorkflowStrategyFactory : IConversationStrategyFactory
 {
-    private readonly string _workflowId;
+    private readonly string? _defaultWorkflowId;
 
-    public NluCallWorkflowStrategyFactory(string workflowId)
+    public NluCallWorkflowStrategyFactory(string? defaultWorkflowId = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(workflowId);
-        _workflowId = workflowId;
+        _defaultWorkflowId = defaultWorkflowId;
     }
 
     public AgentTier Tier => AgentTier.IntentNlu;
@@ -37,7 +39,8 @@ public sealed class NluCallWorkflowStrategyFactory : IConversationStrategyFactor
         ArgumentNullException.ThrowIfNull(services);
 
         var catalog = services.GetRequiredService<ICallWorkflowCatalog>();
-        var compiled = catalog.Get(_workflowId);
+        var selection = services.GetRequiredService<CallWorkflowSelection>();
+        var compiled = selection.Resolve(catalog, _defaultWorkflowId);
 
         var intentAgent = services.GetRequiredService<IvrIntentAgent>();
         var synthesizer = services.GetRequiredService<ISpeechSynthesizer>();

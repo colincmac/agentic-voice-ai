@@ -42,6 +42,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     private readonly ILogger _logger;
     private readonly HashSet<string> _aiContextProviderStateKeys;
 
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RealtimeAIAgent"/> class.
     /// </summary>

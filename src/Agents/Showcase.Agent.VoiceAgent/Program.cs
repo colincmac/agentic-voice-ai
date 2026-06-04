@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
+using Agents.AI.ContactCenter.AITools;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Azure;
 using Agents.AI.ContactCenter.Calling;
@@ -87,6 +88,7 @@ builder.Services.AddSingleton<CallerAuthStateRegistry>();
 // ICallSessionAccessor) so they must be scoped, not singleton.
 builder.Services.AddScoped<IAIToolCollection, WorkflowStateTools>();
 builder.Services.AddScoped<IAIToolCollection, BalanceLookupTools>();
+builder.Services.AddScoped<IAIToolCollection, CallControlTools>();
 
 // Mock SMS-OTP MFA infrastructure.
 builder.Services.AddSingleton<LastIssuedOtpRegistry>();
@@ -123,7 +125,7 @@ builder.Services.AddNamedAIFunction(
     ServiceLifetime.Singleton);
 
 builder.Services.AddNamedAIFunction(
-    "transfer-to-agent",
+    "transfer_to_agent",
     _ => (AIFunction)TransferTools.BuildTransferToAgentTool(ShowcaseWorkflowIds.DefaultEscalationNumber),
     ServiceLifetime.Singleton);
 
@@ -142,13 +144,13 @@ builder.Services.AddSingleton(new CallEntryConfig
 });
 
 // ============================================================================
-//  Realtime AI agent 
+//  Realtime AI agent
 // ============================================================================
 
 builder.AddRealtimeAIAgent(
     name: AgentConfig.TriageAgent,
     configurationSection: builder.Configuration.GetSection($"{AgentConfig.SectionName}:{AgentConfig.TriageAgent}"),
-    liveConversationClientKey: ConfigurationConstants.VoiceLiveConnectionString,
+    realtimeClientKey: ConfigurationConstants.VoiceLiveConnectionString,
     configureOptions: agentOptions =>
     {
         agentOptions.SessionOptions = agentOptions.SessionOptions.With(
@@ -184,16 +186,12 @@ builder.AddCallSessionContainer()
     .AddCallerAuthenticator<AniIdentityLookupAuthenticator>()
     .AddPinAuthenticator<InMemoryPinValidator>()
     .AddCallerAuthenticator<SmsOtpAuthenticator>()
-    .AddCallControlTools()
     .AddTransferEscalationTarget(ShowcaseWorkflowIds.DefaultEscalationNumber)
-    // Backend infrastructure (IRealtimeVoiceBackend + AuthorizingRealtimeAIAgent +
-    // function-invocation middleware). The new strategies pull from this backend.
-    .AddRealtimeAgentBackend(
-        realtimeAgentServiceKey: AgentConfig.TriageAgent,
-        middlewareOverride: CallerVerificationFilter.Middleware)
-    .AddIntentAgent(chatClientServiceKey: "slm")
-    // Per-tier strategy factories bound to the canonical workflow id.
-    .AddRealtimeCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
+    // Per-tier strategy factories. The default workflow id is used when a call doesn't
+    // specify CallSessionRequest.WorkflowId; with a single registered workflow it's optional.
+    .AddRealtimeCallWorkflowStrategy(
+        defaultWorkflowId: ShowcaseWorkflowIds.AuthenticatedRealtimeBank,
+        realtimeAgentServiceKey: AgentConfig.TriageAgent)
     .AddNluCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
     .AddDtmfCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
     .AddCompositeFallbackStrategy(
@@ -206,7 +204,7 @@ builder.AddCallSessionContainer()
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
 // Startup-time prewarm of factories + catalog (boot-time validation of all YAML blueprints).
-builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
+//builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
 
 // ============================================================================
 //  Teams

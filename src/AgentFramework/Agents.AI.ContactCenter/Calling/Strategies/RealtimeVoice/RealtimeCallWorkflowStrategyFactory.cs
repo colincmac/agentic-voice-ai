@@ -10,20 +10,21 @@ using Microsoft.Extensions.Logging;
 namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
 /// <summary>
-/// Factory that constructs <see cref="RealtimeCallWorkflowStrategy"/> instances from a
-/// pre-registered <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/> resolved out
-/// of the <see cref="ICallWorkflowCatalog"/> by id. Implements the
+/// Factory that constructs <see cref="RealtimeCallWorkflowStrategy"/> instances from the
+/// <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/> chosen for the active call.
+/// The workflow is resolved per call via the scoped <see cref="CallWorkflowSelection"/>
+/// (falling back to <see cref="_defaultWorkflowId"/> and then the single registered workflow),
+/// so a single registration serves every workflow on the host. Implements the
 /// <see cref="IConversationStrategyFactory"/> contract so the existing
 /// <c>CallSessionFactory</c> + composite-fallback infrastructure can drive it.
 /// </summary>
 public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyFactory
 {
-    private readonly string _workflowId;
+    private readonly string? _defaultWorkflowId;
 
-    public RealtimeCallWorkflowStrategyFactory(string workflowId)
+    public RealtimeCallWorkflowStrategyFactory(string? defaultWorkflowId = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(workflowId);
-        _workflowId = workflowId;
+        _defaultWorkflowId = defaultWorkflowId;
     }
 
     public AgentTier Tier => AgentTier.RealtimeVoice;
@@ -38,7 +39,8 @@ public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyF
         ArgumentNullException.ThrowIfNull(services);
 
         var catalog = services.GetRequiredService<ICallWorkflowCatalog>();
-        var compiled = catalog.Get(_workflowId);
+        var selection = services.GetRequiredService<CallWorkflowSelection>();
+        var compiled = selection.Resolve(catalog, _defaultWorkflowId);
 
         var backend = services.GetRequiredService<IRealtimeVoiceBackend>();
         var toolProvider = services.GetRequiredService<INamedAIFunctionProvider>();
