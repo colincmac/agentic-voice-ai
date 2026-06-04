@@ -193,12 +193,13 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         }
 
         List<RealtimeServerMessage> responseUpdates = [];
+        List<AgentResponseUpdate> turnUpdates = [];
 
         while (hasUpdates)
         {
 
             var update = responseUpdatesEnumerator.Current;
-
+            var turnFinished = false;
             if (update is not null)
             {
                 responseUpdates.Add(update);
@@ -208,6 +209,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                     AuthorName = Name,
                     RawRepresentation = update,
                     MessageId = update.MessageId,
+                    CreatedAt = DateTime.UtcNow,
                 };
 
                 switch (update)
@@ -233,6 +235,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                         else if (responseMessage.Type == RealtimeServerMessageType.ResponseDone)
                         {
                             wrapped.Contents.Add(new RealtimeResponseFinishedContent(responseMessage.ResponseId));
+                            turnFinished = true;
                         }
                         if (responseMessage.Usage is not null)
                         {
@@ -257,6 +260,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                                 wrapped.Contents.Add(content);
                             }
                         }
+
                         break;
 
                     case InputAudioTranscriptionRealtimeServerMessage transcriptionMessage:
@@ -301,11 +305,17 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                         // yield with RawRepresentation only.
                         break;
                 }
-
+                turnUpdates.Add(wrapped);
                 yield return wrapped;
 
                 hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
 
+                if (turnFinished)
+                {
+                    // TODO use AI Context Provider to store finished turns, and yield them on new calls with a continuation token, instead of relying on the client to keep track of turn updates with the continuation token.
+                    //await NotifyAIContextProviderOfSuccessAsync();
+                    turnFinished = false;
+                }
             }
         }
     }
@@ -416,13 +426,20 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     {
         if (this.AIContextProviders is { Count: > 0 } contextProviders)
         {
-#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-            AIContextProvider.InvokedContext invokedContext = new AIContextProvider.InvokedContext(this, session, inputMessages, responseMessages);
-#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-
-            foreach (var contextProvider in contextProviders)
+            try
             {
-                await contextProvider.InvokedAsync(invokedContext, cancellationToken).ConfigureAwait(false);
+#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+                AIContextProvider.InvokedContext invokedContext = new AIContextProvider.InvokedContext(this, session, inputMessages, responseMessages);
+#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+                foreach (var contextProvider in contextProviders)
+                {
+                    await contextProvider.InvokedAsync(invokedContext, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception)
+            {
+                // Log and swallow exceptions from the context provider to avoid impacting the agent's execution.
+                // The context provider should handle its own exceptions and not let them propagate up to the agent.
             }
         }
     }
