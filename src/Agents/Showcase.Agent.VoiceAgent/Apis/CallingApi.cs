@@ -17,8 +17,7 @@ using Showcase.Agent.VoiceAgent.Workflow;
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 /// <summary>
-/// ACS Call Automation endpoints. The answer mode is selected by the showcase's
-/// <see cref="CallEntryConfig.PreferredTier"/>:
+/// ACS Call Automation endpoints.
 /// <list type="bullet">
 ///   <item><see cref="AgentTier.RealtimeVoice"/> — answers with a bidirectional media WebSocket;
 ///         the WSS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
@@ -33,6 +32,9 @@ public static class CallingApi
     public const string CALLBACK_PATH = "/automation/callbacks";
     public const string MEDIA_STREAMING_PATH_WSS = "/automation/media/wss";
 
+    public const string DEFAULT_WORKFLOW_ID = ShowcaseWorkflowIds.AuthenticatedRealtimeBank;
+    public const AgentTier DEFAULT_AGENT_TIER = AgentTier.RealtimeVoice;
+
     public static void MapCallAutomation(this IEndpointRouteBuilder endpoints, [StringSyntax("Route")] string path = "calling")
     {
         var routeGroup = endpoints.MapGroup(path).AllowAnonymous();
@@ -44,7 +46,6 @@ public static class CallingApi
         {
             // Tier comes from the showcase's CallEntryConfig (preferred tier for new calls;
             // composite fallback handles degradation per ADR).
-            var workflowTier = services.EntryConfig.PreferredTier;
             var useStreaming = services.Options.Value.Acs.UseWebsocketForMediaStreaming;
 
             foreach (var evt in incomingEvents)
@@ -69,8 +70,8 @@ public static class CallingApi
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
                         incoming.ServerCallId,
-                        services.EntryConfig.WorkflowId,
-                        workflowTier);
+                        CallingApi.DEFAULT_WORKFLOW_ID,
+                        CallingApi.DEFAULT_AGENT_TIER);
 
                     var callbackUri = new Uri(
                         services.Options.Value.Acs.CallBackUri,
@@ -194,7 +195,7 @@ public static class CallingApi
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
                     "Media WebSocket established for CallConnectionId={CallConnectionId}, Tier={Tier}",
-                    callConnectionId, services.EntryConfig.PreferredTier);
+                    callConnectionId, CallingApi.DEFAULT_AGENT_TIER);
 
                 // Pod-pinned bi-di stream — claim streaming ownership before the
                 // session starts so the very first mid-call callback can find us.
@@ -230,7 +231,7 @@ public static class CallingApi
 
                 var callId = $"call_{callConnectionId}";
                 var session = await StartCallSessionAsync(
-                    services, callId, edge, logger, "Streaming", httpContext.RequestAborted)
+                    services, callId, edge, httpContext.RequestAborted)
                     .ConfigureAwait(false);
 
                 await WaitForCallEndAsync(session, httpContext.RequestAborted);
@@ -432,7 +433,7 @@ public static class CallingApi
 
         var callId = $"call_{callConnection.CallConnectionId}";
         await StartCallSessionAsync(
-            services, callId, edge, services.Logger, "Verb-mode", cancellationToken)
+            services, callId, edge, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -447,21 +448,17 @@ public static class CallingApi
         CallingServices services,
         string callId,
         ICallEdge edge,
-        ILogger logger,
-        string modeLabel,
         CancellationToken cancellationToken)
     {
-        var tier = services.EntryConfig.PreferredTier;
         var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
         {
             CallId = callId,
             CallerEdge = edge,
-            PreferredTier = tier,
+            PreferredTier = DEFAULT_AGENT_TIER,
+            WorkflowId = DEFAULT_WORKFLOW_ID,
         }, cancellationToken).ConfigureAwait(false);
 
         await session.StartAsync(cancellationToken).ConfigureAwait(false);
-        logger.LogInformation(
-            "{Mode} call session {CallId} started ({Tier})", modeLabel, callId, tier);
         return session;
     }
 

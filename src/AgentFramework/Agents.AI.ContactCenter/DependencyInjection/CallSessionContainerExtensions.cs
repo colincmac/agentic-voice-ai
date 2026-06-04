@@ -1,30 +1,19 @@
-using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
-using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.AITools;
-using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
-using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.Extensions.SessionManagement;
-using Agents.AI.Extensions.ToolApproval;
-using Agents.AI.Realtime;
 using Azure.Communication.CallAutomation;
-using Microsoft.Agents.AI.Hosting;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -93,10 +82,6 @@ public static class CallSessionContainerExtensions
 
         builder.Services.ConfigureOpenTelemetryMeterProvider((sp, builder) =>
             builder.AddMeter(CallingActivitySource.MeterName));
-        //builder.Services
-        //    .AddOpenTelemetry()
-        //    .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
-        //    .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
 
         return builder;
     }
@@ -125,9 +110,13 @@ public static class CallSessionContainerExtensions
         // Per-call workflow selection, bound by CallSessionFactory before the strategy is built.
         services.TryAddScoped<CallWorkflowSelection>();
 
+        services.AddScoped<IAIToolCollection, CallControlTools>();
+
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
         builder.AddCallSessionContainerTelemetry();
+
+
         return new CallSessionContainerBuilder(builder);
 
     }
@@ -143,20 +132,6 @@ public sealed class CallSessionContainerBuilder
     public IHostApplicationBuilder HostApplicationBuilder { get; }
 
     public IServiceCollection Services => HostApplicationBuilder.Services;
-
-
-
-    /// <summary>
-    /// Registers <see cref="CallControlTools"/> as a scoped <see cref="IAIToolCollection"/>
-    /// so the realtime agent can hang up or transfer the live call. Resolves the
-    /// scoped <see cref="ICallSessionAccessor"/> bound by <c>CallSessionFactory</c>,
-    /// so this only works inside the per-call DI scope.
-    /// </summary>
-    public CallSessionContainerBuilder AddCallControlTools()
-    {
-        Services.AddScoped<IAIToolCollection, CallControlTools>();
-        return this;
-    }
 
 
     /// <summary>

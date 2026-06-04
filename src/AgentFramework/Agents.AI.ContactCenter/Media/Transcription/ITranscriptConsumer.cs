@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace Agents.AI.ContactCenter.Media.Transcription;
 
 /// <summary>

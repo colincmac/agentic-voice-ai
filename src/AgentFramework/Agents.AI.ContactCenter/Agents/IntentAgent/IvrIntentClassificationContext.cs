@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.Agents.IntentAgent;

@@ -22,7 +22,6 @@ public sealed class CallingServices(
     [FromServices] ICallSessionFactory sessionFactory,
     [FromServices] ICallSessionRegistry sessionRegistry,
     [FromServices] CallAutomationClient callAutomationClient,
-    [FromServices] CallEntryConfig entryConfig,
     [FromServices] IOptions<CommunicationOptions> options,
     [FromServices] ICallOwnershipDirectory ownership,
     [FromServices] IWebhookForwarder webhookForwarder,
@@ -34,7 +33,6 @@ public sealed class CallingServices(
     public ICallSessionFactory SessionFactory { get; } = sessionFactory;
     public ICallSessionRegistry SessionRegistry { get; } = sessionRegistry;
     public CallAutomationClient CallAutomationClient { get; } = callAutomationClient;
-    public CallEntryConfig EntryConfig { get; } = entryConfig;
     public IOptions<CommunicationOptions> Options { get; } = options;
     public ICallOwnershipDirectory Ownership { get; } = ownership;
     public IWebhookForwarder WebhookForwarder { get; } = webhookForwarder;

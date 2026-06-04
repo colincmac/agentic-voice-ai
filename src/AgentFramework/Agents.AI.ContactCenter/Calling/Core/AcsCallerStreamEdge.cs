@@ -4,7 +4,6 @@ using System.Text;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Media.Signaling;
 using Agents.AI.ContactCenter.Telemetry;
-using Azure.Communication;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
 

@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Agents.AI.ContactCenter.Authorization.Biometrics;
 using Agents.AI.ContactCenter.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

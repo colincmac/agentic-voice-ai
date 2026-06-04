@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Media.Analysis;
-using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;

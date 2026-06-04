@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Transcription;

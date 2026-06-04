@@ -136,12 +136,6 @@ builder.Services.AddNamedAIFunction(
 builder.Services.AddCallWorkflowsFromDirectory(
     Path.Combine(AppContext.BaseDirectory, ShowcaseWorkflowIds.SamplesDirectory));
 
-// Showcase tells the calling APIs which workflow id + tier to start new calls on.
-builder.Services.AddSingleton(new CallEntryConfig
-{
-    WorkflowId = ShowcaseWorkflowIds.AuthenticatedRealtimeBank,
-    PreferredTier = AgentTier.RealtimeVoice,
-});
 
 // ============================================================================
 //  Realtime AI agent
@@ -190,10 +184,9 @@ builder.AddCallSessionContainer()
     // Per-tier strategy factories. The default workflow id is used when a call doesn't
     // specify CallSessionRequest.WorkflowId; with a single registered workflow it's optional.
     .AddRealtimeCallWorkflowStrategy(
-        defaultWorkflowId: ShowcaseWorkflowIds.AuthenticatedRealtimeBank,
         realtimeAgentServiceKey: AgentConfig.TriageAgent)
-    .AddNluCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
-    .AddDtmfCallWorkflowStrategy(ShowcaseWorkflowIds.AuthenticatedRealtimeBank)
+    .AddNluCallWorkflowStrategy()
+    .AddDtmfCallWorkflowStrategy()
     .AddCompositeFallbackStrategy(
         topTier: AgentTier.RealtimeVoice,
         AgentTier.RealtimeVoice,

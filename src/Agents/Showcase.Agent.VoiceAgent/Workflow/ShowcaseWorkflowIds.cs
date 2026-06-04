@@ -16,17 +16,3 @@ public static class ShowcaseWorkflowIds
     /// <summary>Id of the canonical end-to-end workflow shipped with the showcase.</summary>
     public const string AuthenticatedRealtimeBank = "authenticated-realtime-bank";
 }
-
-/// <summary>
-/// Configuration the showcase APIs need to drive an incoming call: which workflow to bind
-/// to and which tier the call should initially attempt. Registered as a singleton at app
-/// startup; consumers pull it via DI instead of reaching for a <c>RealtimeIvrWorkflowDefinition</c>.
-/// </summary>
-public sealed record CallEntryConfig
-{
-    /// <summary>The catalog id of the workflow new-model strategies should resolve.</summary>
-    public required string WorkflowId { get; init; }
-
-    /// <summary>Tier to start each incoming call on. Composite fallback handles degradation.</summary>
-    public AgentTier PreferredTier { get; init; } = AgentTier.RealtimeVoice;
-}

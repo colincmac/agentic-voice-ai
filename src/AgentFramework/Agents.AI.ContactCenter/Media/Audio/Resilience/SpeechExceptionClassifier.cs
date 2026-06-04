@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using Microsoft.CognitiveServices.Speech;

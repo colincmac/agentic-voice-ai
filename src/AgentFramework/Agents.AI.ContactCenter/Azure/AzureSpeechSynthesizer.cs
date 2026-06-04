@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Audio.Resilience;
-using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
-using Agents.AI.ContactCenter.Authorization.Biometrics;
 using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;

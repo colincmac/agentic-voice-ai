@@ -3,7 +3,6 @@ using System.Threading.Channels;
 using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Realtime;
-using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;

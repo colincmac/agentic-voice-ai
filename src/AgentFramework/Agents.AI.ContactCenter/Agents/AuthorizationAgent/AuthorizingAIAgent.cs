@@ -1,18 +1,12 @@
-using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
-using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
-using Agents.AI.Extensions.SessionManagement;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
-using Extensions.AI.Realtime;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 

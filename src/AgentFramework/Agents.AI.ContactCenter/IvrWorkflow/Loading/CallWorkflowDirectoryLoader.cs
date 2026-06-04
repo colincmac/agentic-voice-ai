@@ -11,7 +11,7 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Loading;
 /// </summary>
 public static class CallWorkflowDirectoryLoader
 {
-    private static readonly EnumerationOptions s_enumerationOptions = new()
+    private static readonly EnumerationOptions _enumerationOptions = new()
     {
         RecurseSubdirectories = true,
         IgnoreInaccessible = true,
@@ -74,8 +74,8 @@ public static class CallWorkflowDirectoryLoader
         {
             yield break;
         }
-        foreach (var path in Directory.EnumerateFiles(rootDirectory, "*.yaml", s_enumerationOptions)
-            .Concat(Directory.EnumerateFiles(rootDirectory, "*.yml", s_enumerationOptions))
+        foreach (var path in Directory.EnumerateFiles(rootDirectory, "*.yaml", _enumerationOptions)
+            .Concat(Directory.EnumerateFiles(rootDirectory, "*.yml", _enumerationOptions))
             .OrderBy(p => p, StringComparer.Ordinal))
         {
             yield return path;

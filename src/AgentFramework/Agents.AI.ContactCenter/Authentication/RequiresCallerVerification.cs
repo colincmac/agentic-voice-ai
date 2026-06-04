@@ -1,10 +1,8 @@
-using Agents.AI.ContactCenter.Authorization.Biometrics;
 using Agents.AI.Extensions.ToolApproval;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Protocol;
 
 namespace Agents.AI.ContactCenter.Authentication;
 

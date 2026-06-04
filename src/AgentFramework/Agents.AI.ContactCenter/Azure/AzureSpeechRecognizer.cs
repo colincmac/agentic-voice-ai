@@ -1,11 +1,9 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.ContactCenter.Media.Audio.Resilience;
 using Agents.AI.ContactCenter.Media.Transcription;
-using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using Microsoft.Extensions.AI;

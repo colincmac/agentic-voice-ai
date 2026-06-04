@@ -1,5 +1,4 @@
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
 

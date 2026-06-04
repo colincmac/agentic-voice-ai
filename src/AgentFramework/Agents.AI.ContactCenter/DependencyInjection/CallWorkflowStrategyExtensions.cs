@@ -37,9 +37,9 @@ public static class CallWorkflowStrategyExtensions
     /// </summary>
     public static CallSessionContainerBuilder AddRealtimeCallWorkflowStrategy(
         this CallSessionContainerBuilder builder,
-        string? defaultWorkflowId = null,
         string? realtimeAgentServiceKey = null,
-        RealtimeAgentRunOptions? runOptions = null)
+        RealtimeAgentRunOptions? runOptions = null,
+        string? defaultWorkflowId = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
