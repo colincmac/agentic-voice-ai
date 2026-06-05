@@ -23,7 +23,7 @@ namespace Showcase.Agent.VoiceAgent.Tools;
 public sealed class WorkflowStateTools
 {
     /// <summary>Stable tool name used in YAML workflows.</summary>
-    public const string RecordCallerNameToolName = "record-caller-name";
+    public const string RecordCallerNameToolName = "record_caller_name";
 
     private readonly ICallSessionAccessor _callSessionAccessor;
     private readonly ILogger<WorkflowStateTools> _logger;

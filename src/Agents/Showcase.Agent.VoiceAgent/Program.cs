@@ -100,7 +100,7 @@ builder.Services.AddScoped<SmsOtpAttempt>();
 
 builder.Services.AddIvrTool(
     AgentConfig.TriageAgent,
-    "pin-validator",
+    "validate-pin",
     sp => (AIFunction)PinValidationTools.ValidatePinTool(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()),
