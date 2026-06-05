@@ -1,9 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using Agents.AI.ContactCenter.Authentication;
-using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Showcase.Agent.VoiceAgent.Authentication;
@@ -17,20 +15,33 @@ namespace Showcase.Agent.VoiceAgent.Tools;
 /// mock account from <see cref="InMemoryCallerDirectory"/> claims (<c>balance</c> +
 /// <c>balancePending</c>) so each seeded caller returns a deterministic figure.
 /// </summary>
-public class BalanceLookupTools(ILogger<BalanceLookupTools> logger) : IAIToolCollection
+public sealed class BalanceLookupTools
 {
-    ILogger<BalanceLookupTools> _logger = logger;
+    /// <summary>Stable tool name used in YAML workflows.</summary>
+    public const string LookupBalanceToolName = "lookup-balance";
+
+    private readonly InMemoryCallerDirectory _directory;
+    private readonly CallerAuthenticationState _callerAuthenticationState;
+    private readonly ILogger<BalanceLookupTools> _logger;
+
+    public BalanceLookupTools(
+        InMemoryCallerDirectory directory,
+        CallerAuthenticationState callerAuthenticationState,
+        ILogger<BalanceLookupTools>? logger = null)
+    {
+        _directory = directory;
+        _callerAuthenticationState = callerAuthenticationState;
+        _logger = logger ?? NullLogger<BalanceLookupTools>.Instance;
+    }
 
     [Description("Look up the verified caller's current account balance. Only callable after the caller has completed multi-factor verification. Returns available and pending amounts in USD.")]
     [RequiresCallerVerification(CallerVerificationLevel.MultiFactor, FailureMessage = "Balance access requires multi-factor verification.")]
-    BalanceLookupResult LookupBalance(
-        InMemoryCallerDirectory directory,
-        CallerAuthenticationState callerAuthenticationState)
+    public BalanceLookupResult LookupBalance()
     {
-        var state = callerAuthenticationState;
+        var state = _callerAuthenticationState;
         var identity = state.Identity;
 
-        var record = directory.FindByUserId(identity.UserId);
+        var record = _directory.FindByUserId(identity.UserId);
         if (record is null)
         {
             _logger.LogWarning("Balance lookup failed: no directory record for {UserId}", identity.UserId);
@@ -61,6 +72,10 @@ public class BalanceLookupTools(ILogger<BalanceLookupTools> logger) : IAIToolCol
             Message: "Balance retrieved.");
     }
 
+    /// <summary>Build the <see cref="AIFunction"/> for <see cref="LookupBalance"/> bound to <paramref name="instance"/>.</summary>
+    public static AIFunction BuildLookupBalanceTool(BalanceLookupTools instance) =>
+        AIFunctionFactory.Create(instance.LookupBalance, name: LookupBalanceToolName);
+
     private static decimal? TryReadDecimal(IReadOnlyDictionary<string, object?> claims, string key)
     {
         if (!claims.TryGetValue(key, out var raw) || raw is null)
@@ -77,11 +92,6 @@ public class BalanceLookupTools(ILogger<BalanceLookupTools> logger) : IAIToolCol
             string s when decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => null,
         };
-    }
-
-    public IEnumerable<AITool> AsAITools()
-    {
-        yield return AIFunctionFactory.Create(LookupBalance);
     }
 }
 

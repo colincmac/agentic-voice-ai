@@ -1,5 +1,6 @@
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
+using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 
 namespace Showcase.Agent.VoiceAgent.Workflow;
 
@@ -12,7 +13,9 @@ namespace Showcase.Agent.VoiceAgent.Workflow;
 /// </summary>
 /// <remarks>
 /// Replaces the prior service that warmed legacy keyed <c>RealtimeIvrWorkflowDefinition</c>
-/// registrations. Best-effort: never blocks startup on failure.
+/// registrations. <see cref="WorkflowCompilationException"/> is intentionally propagated
+/// (deterministic configuration error — missing tool names, broken transitions, etc.) so
+/// the host fails to start. Other transient exceptions are logged as warnings.
 /// </remarks>
 internal sealed class WorkflowPrewarmHostedService(
     IServiceProvider services,
@@ -40,6 +43,12 @@ internal sealed class WorkflowPrewarmHostedService(
                         workflow.Id, workflow.Version, workflow.Stages.Count);
                 }
             }
+        }
+        catch (WorkflowCompilationException)
+        {
+            // Fail fast: missing tool names, broken transitions, etc. are configuration
+            // errors the operator must fix before the host can serve traffic.
+            throw;
         }
         catch (Exception ex)
         {

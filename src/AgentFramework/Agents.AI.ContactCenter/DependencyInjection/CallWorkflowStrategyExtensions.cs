@@ -31,9 +31,10 @@ public static class CallWorkflowStrategyExtensions
     /// per call via <c>CallSessionRequest.WorkflowId</c>; <paramref name="defaultWorkflowId"/> is
     /// used when the request omits one, falling back to the single registered workflow when the
     /// catalog is unambiguous. The caller must also register the realtime backend
-    /// (<c>builder.AddRealtimeVoiceStrategy(...)</c> already does this), the
-    /// <see cref="Agents.AI.Extensions.AITools.INamedAIFunctionProvider"/>, and the workflow
-    /// blueprint(s) (via <c>services.AddCallWorkflow(...)</c>).
+    /// (<c>builder.AddRealtimeVoiceStrategy(...)</c> already does this), the workflow
+    /// blueprint(s) (via <c>services.AddCallWorkflowsFromDirectory(rootDirectory, agentKey)</c>
+    /// or <c>services.AddCallWorkflow(...)</c>), and any tools the blueprints reference
+    /// (via <c>services.AddIvrTool(agentKey, name, factory, lifetime)</c>).
     /// </summary>
     public static CallSessionContainerBuilder AddRealtimeCallWorkflowStrategy(
         this CallSessionContainerBuilder builder,
@@ -58,12 +59,12 @@ public static class CallWorkflowStrategyExtensions
                 serviceProvider: sp);
         });
 
-        builder.Services.AddTransient<IRealtimeVoiceBackend>(sp =>
-        {
-            var agent = sp.GetRequiredService<AuthorizingAIAgent>();
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-            return new AIAgentBackend(agent, runOptions: runOptions, loggerFactory);
-        });
+        //builder.Services.AddTransient<IRealtimeVoiceBackend>(sp =>
+        //{
+        //    var agent = sp.GetRequiredService<AuthorizingAIAgent>();
+        //    var loggerFactory = sp.GetService<ILoggerFactory>();
+        //    return new AIAgentBackend(agent, runOptions: runOptions, loggerFactory);
+        //});
 
         builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
         builder.Services.AddSingleton<IConversationStrategyFactory>(

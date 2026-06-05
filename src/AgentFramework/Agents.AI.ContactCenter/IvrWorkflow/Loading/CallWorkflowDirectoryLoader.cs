@@ -38,7 +38,7 @@ public static class CallWorkflowDirectoryLoader
 
     /// <summary>
     /// Register every blueprint in <paramref name="rootDirectory"/> with the workflow
-    /// framework (idempotently calling <see cref="CallWorkflowServiceCollectionExtensions.AddCallWorkflowFramework"/>).
+    /// framework (idempotently calling <see cref="CallWorkflowServiceCollectionExtensions.AddCallWorkflowFramework(IServiceCollection)"/>).
     /// </summary>
     public static IServiceCollection AddCallWorkflowsFromDirectory(
         this IServiceCollection services,
@@ -48,24 +48,39 @@ public static class CallWorkflowDirectoryLoader
         ArgumentException.ThrowIfNullOrEmpty(rootDirectory);
 
         services.AddCallWorkflowFramework();
+        RegisterDiscoveredBlueprints(services, rootDirectory);
+        return services;
+    }
 
-        // Defer YAML reads to first resolution: the directory may not exist at registration
-        // time (e.g. tests that build the SP before copying sample fixtures into place).
-        services.AddSingleton<WorkflowBlueprint>(_ => throw new InvalidOperationException(
-            "WorkflowBlueprint should be supplied via AddCallWorkflowsFromDirectory factories below."));
-        // Replace the placeholder above immediately with one factory per discovered file.
-        // We keep the inner-most descriptor list mutation here so the registration order
-        // matches the file enumeration order.
-        var descriptor = services.Last(s => s.ServiceType == typeof(WorkflowBlueprint));
-        services.Remove(descriptor);
+    /// <summary>
+    /// Register every blueprint in <paramref name="rootDirectory"/> with the workflow
+    /// framework wired to the <see cref="Tools.IIvrToolRegistry"/> keyed by
+    /// <paramref name="agentKey"/>, so tool-name references in the YAML are validated at
+    /// compile time. Calls
+    /// <see cref="CallWorkflowServiceCollectionExtensions.AddCallWorkflowFramework(IServiceCollection, string)"/>
+    /// idempotently.
+    /// </summary>
+    public static IServiceCollection AddCallWorkflowsFromDirectory(
+        this IServiceCollection services,
+        string rootDirectory,
+        string agentKey)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrEmpty(rootDirectory);
+        ArgumentException.ThrowIfNullOrEmpty(agentKey);
 
+        services.AddCallWorkflowFramework(agentKey);
+        RegisterDiscoveredBlueprints(services, rootDirectory);
+        return services;
+    }
+
+    private static void RegisterDiscoveredBlueprints(IServiceCollection services, string rootDirectory)
+    {
         foreach (var path in EnumerateFiles(rootDirectory))
         {
             services.AddSingleton<WorkflowBlueprint>(_ =>
                 CallWorkflowYamlReader.Read(File.ReadAllText(path), sourceName: path));
         }
-
-        return services;
     }
 
     private static IEnumerable<string> EnumerateFiles(string rootDirectory)

@@ -109,7 +109,6 @@ public sealed class AIAgentBackend : IRealtimeVoiceBackend
                 Tools = tools?.ToList(),
                 Instructions = instruction
             };
-            //CloneOptionsWithToolsAndPrompt(clientSession.Options, [.. tools ?? []], instruction);
             await _agent.SendAsync(
                 session,
                 new SessionUpdateRealtimeClientMessage(updated),

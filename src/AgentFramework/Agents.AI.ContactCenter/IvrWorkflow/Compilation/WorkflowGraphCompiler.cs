@@ -1,5 +1,6 @@
 using Agents.AI.ContactCenter.IvrWorkflow.Blueprint;
 using Agents.AI.ContactCenter.IvrWorkflow.Predicates;
+using Agents.AI.ContactCenter.IvrWorkflow.Tools;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 
@@ -28,24 +29,34 @@ public sealed class WorkflowCompilationException(string workflowId, IReadOnlyLis
 /// Translates a <see cref="WorkflowBlueprint"/> into a runtime <see cref="CompiledCallWorkflow"/>.
 /// Resolves every <see cref="PredicateRef"/> against the built-in factories (and, for
 /// <see cref="PredicateKind.Named"/>, the supplied <see cref="INamedEdgePredicateProvider"/>),
+/// resolves every blueprint tool name against the supplied <see cref="IIvrToolRegistry"/>,
 /// validates graph structure (no duplicate ids, every transition target exists, every
 /// <see cref="TransitionBlueprint.OnBlockedStageId"/> exists, an initial stage exists), and
-/// produces immutable <see cref="CompiledStage"/> nodes with pre-built edge predicates.
+/// produces immutable <see cref="CompiledStage"/> nodes with pre-built edge predicates and
+/// resolved tool bindings.
 /// </summary>
 /// <remarks>
-/// Tool-name validation is intentionally <em>not</em> performed here — tools resolve through
-/// keyed DI per call and the registered set may differ between the compile-time host scope
-/// and the per-call scope. Strategies should fail fast on missing tool names when they
-/// build the per-stage tool surface.
+/// Tool resolution fails fast: any reference in
+/// <see cref="WorkflowBlueprint.CommonToolNames"/>, <see cref="StageBlueprint.ToolNames"/>,
+/// or <see cref="StageRealtimePrompt.ToolNames"/> that is not present in the registry is
+/// aggregated into the same <see cref="WorkflowCompilationException"/> as structural and
+/// predicate errors, so authors see every problem in a single failure. When the compiler
+/// is constructed without an <see cref="IIvrToolRegistry"/> the per-stage tool list is left
+/// empty and validation is skipped — this mode is intended for tests and greenfield
+/// scenarios that do not surface tools.
 /// </remarks>
 public sealed class WorkflowGraphCompiler
 {
     private readonly INamedEdgePredicateProvider? _namedPredicates;
+    private readonly IIvrToolRegistry? _toolRegistry;
 
-    /// <summary>Construct a compiler. Pass a provider to enable <see cref="PredicateKind.Named"/> references.</summary>
-    public WorkflowGraphCompiler(INamedEdgePredicateProvider? namedPredicates = null)
+    /// <summary>Construct a compiler. Pass <paramref name="namedPredicates"/> to enable <see cref="PredicateKind.Named"/> references and <paramref name="toolRegistry"/> to enable tool-name validation.</summary>
+    public WorkflowGraphCompiler(
+        INamedEdgePredicateProvider? namedPredicates = null,
+        IIvrToolRegistry? toolRegistry = null)
     {
         _namedPredicates = namedPredicates;
+        _toolRegistry = toolRegistry;
     }
 
     /// <summary>Compile <paramref name="blueprint"/>. Throws <see cref="WorkflowCompilationException"/> on any validation error.</summary>
@@ -97,7 +108,9 @@ public sealed class WorkflowGraphCompiler
                 edges.Add(new CompiledStageEdge(transition, predicate, transition.OnBlockedStageId));
             }
 
-            compiledStages[stage.Id] = new CompiledStage(stage, edges);
+            var toolBindings = ResolveStageToolBindings(blueprint, stage, errors);
+
+            compiledStages[stage.Id] = new CompiledStage(stage, edges, toolBindings);
         }
 
         if (errors.Count > 0)
@@ -108,6 +121,66 @@ public sealed class WorkflowGraphCompiler
         // Preserve blueprint ordering.
         var orderedStages = blueprint.Stages.Select(s => compiledStages[s.Id]).ToList();
         return new CompiledCallWorkflow(blueprint, orderedStages);
+    }
+
+    /// <summary>
+    /// Resolve every tool name referenced by <paramref name="blueprint"/>.<see cref="WorkflowBlueprint.CommonToolNames"/>,
+    /// <paramref name="stage"/>.<see cref="StageBlueprint.ToolNames"/>, and the stage's
+    /// <see cref="StageRealtimePrompt.ToolNames"/>, deduped in author order (last-wins on
+    /// collision via dictionary insertion semantics). Missing names append to
+    /// <paramref name="errors"/> so a single compilation surfaces every issue.
+    /// </summary>
+    private IReadOnlyList<ToolBinding> ResolveStageToolBindings(
+        WorkflowBlueprint blueprint,
+        StageBlueprint stage,
+        List<string> errors)
+    {
+        if (_toolRegistry is null)
+        {
+            return [];
+        }
+
+        var ordered = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        Collect(blueprint.CommonToolNames, ordered, seen);
+        Collect(stage.ToolNames, ordered, seen);
+        if (stage.Channels.Realtime is { ToolNames.Count: > 0 } realtime)
+        {
+            Collect(realtime.ToolNames, ordered, seen);
+        }
+
+        if (ordered.Count == 0)
+        {
+            return [];
+        }
+
+        var resolved = new List<ToolBinding>(ordered.Count);
+        foreach (var name in ordered)
+        {
+            if (_toolRegistry.TryGetBinding(name, out var binding))
+            {
+                resolved.Add(binding);
+            }
+            else
+            {
+                errors.Add(
+                    $"Stage '{stage.Id}' references unknown tool '{name}'. " +
+                    $"Register it via services.AddIvrTool(\"{_toolRegistry.AgentKey}\", \"{name}\", ...).");
+            }
+        }
+        return resolved;
+    }
+
+    private static void Collect(IReadOnlyList<string> names, List<string> ordered, HashSet<string> seen)
+    {
+        for (var i = 0; i < names.Count; i++)
+        {
+            var name = names[i];
+            if (!string.IsNullOrEmpty(name) && seen.Add(name))
+            {
+                ordered.Add(name);
+            }
+        }
     }
 
     private static void ValidateStructure(WorkflowBlueprint blueprint, List<string> errors)

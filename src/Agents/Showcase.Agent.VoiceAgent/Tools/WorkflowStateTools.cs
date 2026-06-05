@@ -1,9 +1,7 @@
 using System.ComponentModel;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -22,47 +20,55 @@ namespace Showcase.Agent.VoiceAgent.Tools;
 /// When the call is degraded to a non-realtime tier the same state object is preserved
 /// by the composite fallback strategy, so values written here survive tier swaps.
 /// </remarks>
-public class WorkflowStateTools(ICallSessionAccessor callSessionAccessor, ILogger<WorkflowStateTools> logger) : IAIToolCollection
+public sealed class WorkflowStateTools
 {
-    private readonly ICallSessionAccessor _callSessionAccessor = callSessionAccessor;
-    private readonly ILogger<WorkflowStateTools> _logger = logger;
+    /// <summary>Stable tool name used in YAML workflows.</summary>
+    public const string RecordCallerNameToolName = "record-caller-name";
 
-        [Description("Record the caller's spoken first and last name into the workflow state so later stages can greet them and personalize responses. Call this exactly once after the caller has clearly stated both names.")]
-        RecordCallerNameResult RecordCallerName(
-            [Description("The caller's spoken first name (e.g. \"Jordan\").")] string firstName,
-            [Description("The caller's spoken last name (e.g. \"Reyes\").")] string lastName,
-            IServiceProvider services)
+    private readonly ICallSessionAccessor _callSessionAccessor;
+    private readonly ILogger<WorkflowStateTools> _logger;
+
+    public WorkflowStateTools(
+        ICallSessionAccessor callSessionAccessor,
+        ILogger<WorkflowStateTools>? logger = null)
+    {
+        _callSessionAccessor = callSessionAccessor;
+        _logger = logger ?? NullLogger<WorkflowStateTools>.Instance;
+    }
+
+    [Description("Record the caller's spoken first and last name into the workflow state so later stages can greet them and personalize responses. Call this exactly once after the caller has clearly stated both names.")]
+    public RecordCallerNameResult RecordCallerName(
+        [Description("The caller's spoken first name (e.g. \"Jordan\").")] string firstName,
+        [Description("The caller's spoken last name (e.g. \"Reyes\").")] string lastName)
+    {
+        var first = (firstName ?? string.Empty).Trim();
+        var last = (lastName ?? string.Empty).Trim();
+        if (first.Length == 0 || last.Length == 0)
         {
-            var first = (firstName ?? string.Empty).Trim();
-            var last = (lastName ?? string.Empty).Trim();
-            if (first.Length == 0 || last.Length == 0)
-            {
-                return new RecordCallerNameResult(false, null, null, null, "Both first and last name are required.");
-            }
-
-            var state = _callSessionAccessor.Current?.Strategy.WorkflowState;
-            if (state is null)
-            {
-                _logger.LogWarning("RecordCallerName invoked but no active call session is bound to this scope.");
-                return new RecordCallerNameResult(false, first, last, null, "No active call session.");
-            }
-
-            var fullName = $"{first} {last}";
-            state.Set("CallerFirstName", first);
-            state.Set("CallerLastName", last);
-            state.Set("CallerFullName", fullName);
-
-            _logger.LogInformation("Recorded caller name '{FullName}' into workflow state for call {CallId}",
-                fullName, _callSessionAccessor.Current?.CallId ?? "(unknown)");
-
-            return new RecordCallerNameResult(true, first, last, fullName, "Recorded.");
+            return new RecordCallerNameResult(false, null, null, null, "Both first and last name are required.");
         }
 
+        var state = _callSessionAccessor.Current?.Strategy.WorkflowState;
+        if (state is null)
+        {
+            _logger.LogWarning("RecordCallerName invoked but no active call session is bound to this scope.");
+            return new RecordCallerNameResult(false, first, last, null, "No active call session.");
+        }
 
-    public IEnumerable<AITool> AsAITools()
-    {
-        yield return AIFunctionFactory.Create(RecordCallerName);
+        var fullName = $"{first} {last}";
+        state.Set("CallerFirstName", first);
+        state.Set("CallerLastName", last);
+        state.Set("CallerFullName", fullName);
+
+        _logger.LogInformation("Recorded caller name '{FullName}' into workflow state for call {CallId}",
+            fullName, _callSessionAccessor.Current?.CallId ?? "(unknown)");
+
+        return new RecordCallerNameResult(true, first, last, fullName, "Recorded.");
     }
+
+    /// <summary>Build the <see cref="AIFunction"/> for <see cref="RecordCallerName"/> bound to <paramref name="instance"/>.</summary>
+    public static AIFunction BuildRecordCallerNameTool(WorkflowStateTools instance) =>
+        AIFunctionFactory.Create(instance.RecordCallerName, name: RecordCallerNameToolName);
 }
 
 /// <summary>Envelope returned by <c>record-caller-name</c>.</summary>

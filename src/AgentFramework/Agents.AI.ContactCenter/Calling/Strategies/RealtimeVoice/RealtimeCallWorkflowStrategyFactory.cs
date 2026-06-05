@@ -1,9 +1,9 @@
+using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Execution;
 using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -42,8 +42,7 @@ public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyF
         var selection = services.GetRequiredService<CallWorkflowSelection>();
         var compiled = selection.Resolve(catalog, _defaultWorkflowId);
 
-        var backend = services.GetRequiredService<IRealtimeVoiceBackend>();
-        var toolProvider = services.GetRequiredService<INamedAIFunctionProvider>();
+        var agent = services.GetRequiredService<AuthorizingAIAgent>();
         var telemetry = services.GetRequiredService<CallingTelemetry>();
         var loggerFactory = services.GetService<ILoggerFactory>();
         var sessionFactory = services.GetService<ICallWorkflowSessionFactory>()
@@ -52,9 +51,8 @@ public sealed class RealtimeCallWorkflowStrategyFactory : IConversationStrategyF
         var session = sessionFactory.Create(compiled, services, restoreFrom);
 
         IConversationStrategy strategy = new RealtimeCallWorkflowStrategy(
-            backend,
+            agent,
             session,
-            toolProvider,
             telemetry,
             loggerFactory);
 

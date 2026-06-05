@@ -7,9 +7,7 @@ using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.Extensions.AITools;
 using Azure.Communication.CallAutomation;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -109,8 +107,6 @@ public static class CallSessionContainerExtensions
 
         // Per-call workflow selection, bound by CallSessionFactory before the strategy is built.
         services.TryAddScoped<CallWorkflowSelection>();
-
-        services.AddScoped<IAIToolCollection, CallControlTools>();
 
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
@@ -219,6 +215,33 @@ public sealed class CallSessionContainerBuilder
             HostApplicationBuilder.AddInMemoryPodHeartbeat();
             HostApplicationBuilder.AddInMemoryWebhookForwarder();
         }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Register the call-control verbs (<c>hang_up_call</c> and <c>transfer_call</c>)
+    /// from <see cref="CallControlTools"/> on the <see cref="IvrWorkflow.Tools.IIvrToolRegistry"/>
+    /// keyed by <paramref name="agentKey"/>. Both tools require a per-call DI scope (they
+    /// reach the live <c>ICallSession</c> via <see cref="ICallSessionAccessor"/>), so they
+    /// are registered with <see cref="ServiceLifetime.Scoped"/>.
+    /// </summary>
+    /// <param name="agentKey">DI service key shared with the realtime agent registration.</param>
+    public CallSessionContainerBuilder AddCallControlTools(string agentKey)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(agentKey);
+
+        Services.TryAddScoped<CallControlTools>();
+        Services.AddIvrTool(
+            agentKey,
+            CallControlTools.HangUpToolName,
+            sp => CallControlTools.BuildHangUpTool(sp.GetRequiredService<CallControlTools>()),
+            ServiceLifetime.Scoped);
+        Services.AddIvrTool(
+            agentKey,
+            CallControlTools.TransferToolName,
+            sp => CallControlTools.BuildTransferTool(sp.GetRequiredService<CallControlTools>()),
+            ServiceLifetime.Scoped);
 
         return this;
     }

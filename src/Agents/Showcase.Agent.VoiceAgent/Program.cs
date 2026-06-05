@@ -10,7 +10,6 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Authorization;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
 using Agents.AI.ContactCenter.Media.Audio;
-using Agents.AI.Extensions.AITools;
 using Agents.AI.Extensions.RealtimeAgentHelpers;
 using Agents.AI.Hosting;
 using Agents.AI.Realtime;
@@ -83,12 +82,11 @@ builder.Services.AddSingleton<InMemoryCallerDirectory>();
 builder.Services.AddSingleton<ICallerDirectory>(sp => sp.GetRequiredService<InMemoryCallerDirectory>());
 builder.Services.AddSingleton<CallerAuthStateRegistry>();
 
-// Per-call scoped IAIToolCollection implementations the new INamedAIFunctionProvider
-// auto-discovers. These tools reach scoped state (CallerAuthenticationState,
-// ICallSessionAccessor) so they must be scoped, not singleton.
-builder.Services.AddScoped<IAIToolCollection, WorkflowStateTools>();
-builder.Services.AddScoped<IAIToolCollection, BalanceLookupTools>();
-builder.Services.AddScoped<IAIToolCollection, CallControlTools>();
+// Per-call scoped tools that reach scoped state (CallerAuthenticationState,
+// ICallSessionAccessor). Registered as scoped POCOs; each tool surface is bound to the
+// keyed IIvrToolRegistry below.
+builder.Services.AddScoped<WorkflowStateTools>();
+builder.Services.AddScoped<BalanceLookupTools>();
 
 // Mock SMS-OTP MFA infrastructure.
 builder.Services.AddSingleton<LastIssuedOtpRegistry>();
@@ -96,45 +94,65 @@ builder.Services.AddSingleton<ISmsOtpSender, LoggingSmsOtpSender>();
 builder.Services.AddScoped<SmsOtpAttempt>();
 
 // ============================================================================
-//  Tool registrations — keyed AIFunction DI (Phase-1 primitives).
-//  Each tool referenced from YAML by name must resolve through INamedAIFunctionProvider.
+//  Tool registrations — IIvrToolRegistry keyed by AgentConfig.TriageAgent.
+//  Each tool referenced from YAML by name must resolve through the registry.
 // ============================================================================
 
-builder.Services.AddNamedAIFunction(
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
     "pin-validator",
     sp => (AIFunction)PinValidationTools.ValidatePinTool(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()),
     ServiceLifetime.Singleton);
 
-builder.Services.AddNamedAIFunction(
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
     "confirm-identity",
     sp => (AIFunction)PinValidationTools.ConfirmIdentityTool(
         sp.GetRequiredService<InMemoryCallerDirectory>(),
         sp.GetRequiredService<ILoggerFactory>()),
     ServiceLifetime.Singleton);
 
-builder.Services.AddNamedAIFunction(
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
     "request-otp",
     sp => (AIFunction)SmsOtpTools.RequestOtpTool(sp.GetRequiredService<ILoggerFactory>()),
     ServiceLifetime.Singleton);
 
-builder.Services.AddNamedAIFunction(
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
     "submit-otp",
     sp => (AIFunction)SmsOtpTools.SubmitOtpTool(sp.GetRequiredService<ILoggerFactory>()),
     ServiceLifetime.Singleton);
 
-builder.Services.AddNamedAIFunction(
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
     "transfer_to_agent",
     _ => (AIFunction)TransferTools.BuildTransferToAgentTool(ShowcaseWorkflowIds.DefaultEscalationNumber),
     ServiceLifetime.Singleton);
 
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
+    WorkflowStateTools.RecordCallerNameToolName,
+    sp => WorkflowStateTools.BuildRecordCallerNameTool(sp.GetRequiredService<WorkflowStateTools>()),
+    ServiceLifetime.Scoped);
+
+builder.Services.AddIvrTool(
+    AgentConfig.TriageAgent,
+    BalanceLookupTools.LookupBalanceToolName,
+    sp => BalanceLookupTools.BuildLookupBalanceTool(sp.GetRequiredService<BalanceLookupTools>()),
+    ServiceLifetime.Scoped);
+
 // ============================================================================
-//  YAML call workflows loaded into ICallWorkflowCatalog
+//  YAML call workflows loaded into ICallWorkflowCatalog. Passing the agent key
+//  wires the compiler to the IIvrToolRegistry above so YAML tool references are
+//  validated at host startup.
 // ============================================================================
 
 builder.Services.AddCallWorkflowsFromDirectory(
-    Path.Combine(AppContext.BaseDirectory, ShowcaseWorkflowIds.SamplesDirectory));
+    Path.Combine(AppContext.BaseDirectory, ShowcaseWorkflowIds.SamplesDirectory),
+    AgentConfig.TriageAgent);
 
 
 // ============================================================================
@@ -181,6 +199,7 @@ builder.AddCallSessionContainer()
     .AddPinAuthenticator<InMemoryPinValidator>()
     .AddCallerAuthenticator<SmsOtpAuthenticator>()
     .AddTransferEscalationTarget(ShowcaseWorkflowIds.DefaultEscalationNumber)
+    .AddCallControlTools(AgentConfig.TriageAgent)
     // Per-tier strategy factories. The default workflow id is used when a call doesn't
     // specify CallSessionRequest.WorkflowId; with a single registered workflow it's optional.
     .AddRealtimeCallWorkflowStrategy(
@@ -196,8 +215,10 @@ builder.AddCallSessionContainer()
 // Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
-// Startup-time prewarm of factories + catalog (boot-time validation of all YAML blueprints).
-//builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
+// Startup-time prewarm of factories + catalog. Forces every YAML workflow through the
+// compiler so missing tool names or broken transitions fail the host on boot rather
+// than on the first call. Non-deterministic prewarm errors are still best-effort logged.
+builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
 
 // ============================================================================
 //  Teams

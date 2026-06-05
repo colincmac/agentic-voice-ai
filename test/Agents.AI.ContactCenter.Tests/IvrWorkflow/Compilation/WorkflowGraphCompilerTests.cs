@@ -3,6 +3,8 @@ using global::Agents.AI.ContactCenter.IvrWorkflow;
 using global::Agents.AI.ContactCenter.IvrWorkflow.Blueprint;
 using global::Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using global::Agents.AI.ContactCenter.IvrWorkflow.Predicates;
+using global::Agents.AI.ContactCenter.IvrWorkflow.Tools;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.ContactCenter.Tests.IvrWorkflow.Compilation;
@@ -290,5 +292,112 @@ public sealed class WorkflowGraphCompilerTests
         Assert.Null(welcome.FindEdgeTo("nope"));
         Assert.NotNull(welcome.FindEdgeByLabel("agent"));
         Assert.Null(welcome.FindEdgeByLabel("missing"));
+    }
+
+    // ------------------------------------------------------------------
+    // Tool-binding resolution
+    // ------------------------------------------------------------------
+
+    private static AIFunction StubFunction(string name) =>
+        AIFunctionFactory.Create(() => $"hi from {name}", name);
+
+    private static IIvrToolRegistry BuildRegistry(string agentKey, params string[] toolNames)
+    {
+        var builder = new IvrToolRegistryBuilder(agentKey);
+        foreach (var name in toolNames)
+        {
+            builder.Add(new ToolBinding(name, ServiceLifetime.Singleton, _ => StubFunction(name)));
+        }
+        return builder.Build();
+    }
+
+    private static WorkflowBlueprint BlueprintWithToolReferences(
+        IReadOnlyList<string> commonTools,
+        IReadOnlyList<string> stageTools,
+        IReadOnlyList<string>? realtimeTools = null)
+        => new()
+        {
+            Id = "with-tools",
+            InitialStageId = "only",
+            CommonToolNames = commonTools,
+            Stages =
+            [
+                new StageBlueprint
+                {
+                    Id = "only",
+                    Goal = "Demo stage with tools.",
+                    ToolNames = stageTools,
+                    Channels = new StageChannelConfig
+                    {
+                        Realtime = realtimeTools is null
+                            ? null
+                            : new StageRealtimePrompt { ToolNames = realtimeTools },
+                    },
+                },
+            ],
+        };
+
+    [Fact]
+    public void Compile_WithRegistry_PopulatesStageToolBindings()
+    {
+        var registry = BuildRegistry("triage", "alpha", "beta", "gamma");
+        var blueprint = BlueprintWithToolReferences(
+            commonTools: new[] { "alpha" },
+            stageTools: new[] { "beta" },
+            realtimeTools: new[] { "gamma" });
+
+        var compiled = new WorkflowGraphCompiler(toolRegistry: registry).Compile(blueprint);
+        var stage = compiled.GetStage("only");
+
+        Assert.Equal(3, stage.ToolBindings.Count);
+        Assert.Equal(new[] { "alpha", "beta", "gamma" }, stage.ToolBindings.Select(b => b.Name));
+    }
+
+    [Fact]
+    public void Compile_WithRegistry_MissingToolName_ThrowsAggregateException()
+    {
+        var registry = BuildRegistry("triage", "alpha");
+        var blueprint = BlueprintWithToolReferences(
+            commonTools: new[] { "alpha", "missing-common" },
+            stageTools: new[] { "missing-stage" });
+
+        var ex = Assert.Throws<WorkflowCompilationException>(() =>
+            new WorkflowGraphCompiler(toolRegistry: registry).Compile(blueprint));
+
+        var joined = string.Join(';', ex.Errors);
+        Assert.Contains("missing-common", joined);
+        Assert.Contains("missing-stage", joined);
+        Assert.DoesNotContain("alpha", joined);
+    }
+
+    [Fact]
+    public void Compile_DedupesAcrossCommonAndStageAndRealtime_PreservingOrder()
+    {
+        var registry = BuildRegistry("triage", "alpha", "beta", "gamma");
+        var blueprint = BlueprintWithToolReferences(
+            commonTools: new[] { "alpha", "beta" },
+            stageTools: new[] { "beta", "gamma" }, // 'beta' duplicate from common — dedupes.
+            realtimeTools: new[] { "alpha", "gamma" }); // both already seen — dedupes.
+
+        var compiled = new WorkflowGraphCompiler(toolRegistry: registry).Compile(blueprint);
+        var stage = compiled.GetStage("only");
+
+        // Author order preserved: common ('alpha', 'beta'), then stage's new tools ('gamma'),
+        // then realtime's new tools (none — both already seen).
+        Assert.Equal(new[] { "alpha", "beta", "gamma" }, stage.ToolBindings.Select(b => b.Name));
+    }
+
+    [Fact]
+    public void Compile_WithNullRegistry_LeavesToolBindingsEmpty()
+    {
+        var blueprint = BlueprintWithToolReferences(
+            commonTools: new[] { "would-not-resolve" },
+            stageTools: new[] { "also-ignored" });
+
+        // toolRegistry = null is the legacy / test path: no validation, no resolution.
+        var compiled = new WorkflowGraphCompiler().Compile(blueprint);
+        var stage = compiled.GetStage("only");
+
+        Assert.Empty(stage.ToolBindings);
     }
 }

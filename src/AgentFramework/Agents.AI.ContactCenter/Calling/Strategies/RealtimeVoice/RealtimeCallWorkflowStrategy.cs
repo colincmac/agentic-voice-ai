@@ -1,37 +1,25 @@
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using Agents.AI.ContactCenter.IvrWorkflow.Execution;
 using Agents.AI.ContactCenter.IvrWorkflow.Navigation;
 using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.Extensions.AITools;
+using Agents.AI.Realtime;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 
-/// <summary>
-/// Phase-5 successor to <see cref="RealtimeVoiceStrategy"/> built on the new
-/// <see cref="CompiledCallWorkflow"/> + <see cref="WorkflowExecutor"/> + single-advance
-/// model. Wraps an <see cref="IRealtimeVoiceBackend"/> and:
-/// <list type="bullet">
-///   <item>Resolves stage-scoped tools through <see cref="INamedAIFunctionProvider"/>.</item>
-///   <item>Renders stage prompts through <see cref="StagePromptRenderer"/>.</item>
-///   <item>Synthesizes a single <see cref="AdvanceFunctionBuilder.FunctionName"/> per stage instead of N <c>advance_to_*</c> tools.</item>
-///   <item>Handles inbound DTMF by checking the current stage's scripted menu, falling back to a user-text turn into the model.</item>
-/// </list>
-/// </summary>
-/// <remarks>
-/// Lives alongside the legacy <see cref="RealtimeVoiceStrategy"/> while strategies and tests
-/// migrate. The legacy strategy is unchanged by Phase 5; it goes away in a later phase.
-/// </remarks>
+
 public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
 {
-    private readonly IRealtimeVoiceBackend _backend;
-    private readonly CallWorkflowSession _session;
-    private readonly INamedAIFunctionProvider _toolProvider;
+    private readonly AuthorizingAIAgent _agent;
+    private RealtimeAIAgentSession? _session;
+
+    private readonly CallWorkflowSession _callWorkflowSession;
     private readonly WorkflowExecutor _executor;
     private readonly CallingTelemetry _telemetry;
     private readonly ILogger _logger;
@@ -56,32 +44,28 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     private bool _prewarmed;
 
     public RealtimeCallWorkflowStrategy(
-        IRealtimeVoiceBackend backend,
-        CallWorkflowSession session,
-        INamedAIFunctionProvider toolProvider,
+        AuthorizingAIAgent agent,
+        CallWorkflowSession callWorkflowSession,
         CallingTelemetry telemetry,
         ILoggerFactory? loggerFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(backend);
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(toolProvider);
+        ArgumentNullException.ThrowIfNull(callWorkflowSession);
         ArgumentNullException.ThrowIfNull(telemetry);
 
-        _backend = backend;
-        _session = session;
-        _toolProvider = toolProvider;
+        _agent = agent;
+        _callWorkflowSession = callWorkflowSession;
         _telemetry = telemetry;
         _logger = loggerFactory?.CreateLogger<RealtimeCallWorkflowStrategy>()
             ?? NullLogger<RealtimeCallWorkflowStrategy>.Instance;
 
-        _executor = new WorkflowExecutor(_session, RenderStageAsync);
+        _executor = new WorkflowExecutor(_callWorkflowSession, RenderStageAsync);
     }
 
     public StrategyKind Kind => StrategyKind.RealtimeVoice;
 
     public AgentTier Tier => AgentTier.RealtimeVoice;
 
-    public IvrWorkflowState WorkflowState => _session.State;
+    public IvrWorkflowState WorkflowState => _callWorkflowSession.State;
 
     public EdgeCapabilities EmittedDirectives => EdgeCapabilities.Audio | EdgeCapabilities.StopPlayback;
 
@@ -157,7 +141,8 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
-        await _backend.DisposeAsync().ConfigureAwait(false);
+        if (_session?.ClientSession is not null) { await _session.ClientSession.DisposeAsync().ConfigureAwait(false); }
+
         _cts.Dispose();
     }
 
@@ -166,7 +151,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         using var connectSpan = _telemetry.StartChildActivity("contact_center.strategy.backend.connect", _callId);
         try
         {
-            await _backend.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            _session = await _agent.CreateSessionAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -182,71 +167,63 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     /// </summary>
     private async ValueTask RenderStageAsync(CompiledStage stage, CancellationToken cancellationToken)
     {
-        var prompt = StagePromptRenderer.RenderRealtimePrompt(_session.Workflow, stage, _session.State);
+        var prompt = StagePromptRenderer.RenderRealtimePrompt(_callWorkflowSession.Workflow, stage, _callWorkflowSession.State);
         var tools = ResolveStageTools(stage);
 
-        await _backend.StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
+        await StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
 
         await _events.Writer.WriteAsync(
             new StrategyEvent.WorkflowStepEntered(stage.Id, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
         await _events.Writer.WriteAsync(
-            new StrategyEvent.AgentSpeakingChanged(_backend.AgentId, _backend.AgentDisplayName, DateTimeOffset.UtcNow),
+            new StrategyEvent.AgentSpeakingChanged(_agent.Id, _agent.Name, DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
 
-        if (_session.State.IsComplete)
+        if (_callWorkflowSession.State.IsComplete)
         {
             await EndSessionAsync($"terminal stage '{stage.Id}' reached", cancellationToken).ConfigureAwait(false);
         }
     }
 
+
+
     /// <summary>
-    /// Resolve the tool surface for <paramref name="stage"/>: workflow common tools +
-    /// stage-scoped tools + stage-scoped realtime tool overrides + the synthesized
-    /// <c>advance</c> function.
+    /// Resolve the tool surface for <paramref name="stage"/>: the per-stage tool bindings
+    /// pre-resolved by the compiler and materialized once per call by
+    /// <see cref="CallWorkflowSession.GetToolsFor(CompiledStage)"/>, plus the synthesized
+    /// per-stage <c>advance</c> function (which closes over the executor and so cannot be
+    /// pre-bound).
     /// </summary>
     private List<AITool> ResolveStageTools(CompiledStage stage)
     {
-        var names = new List<string>();
-        names.AddRange(_session.Workflow.Blueprint.CommonToolNames);
-        names.AddRange(stage.Blueprint.ToolNames);
-        if (stage.Blueprint.Channels.Realtime is { ToolNames.Count: > 0 } realtime)
-        {
-            names.AddRange(realtime.ToolNames);
-        }
-
-        // De-dupe by name preserving order — last-wins behavior is up to the provider.
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var ordered = new List<string>(names.Count);
-        foreach (var name in names)
-        {
-            if (!string.IsNullOrEmpty(name) && seen.Add(name))
-            {
-                ordered.Add(name);
-            }
-        }
-
-        var resolved = _toolProvider.ResolveAll(ordered).Cast<AITool>().ToList();
+        var bound = _callWorkflowSession.GetToolsFor(stage);
+        var tools = new List<AITool>(bound.Count + 1);
+        tools.AddRange(bound);
 
         if (AdvanceFunctionBuilder.BuildForStage(stage, _executor) is { } advanceFn)
         {
-            resolved.Add(advanceFn);
+            tools.Add(advanceFn);
         }
 
-        return resolved;
+        return tools;
     }
 
     private async Task PumpInboundAudioAsync(StrategyStartContext context, CancellationToken ct)
     {
         try
         {
+            var session = EnsureSession();
+
             await foreach (var frame in context.InboundAudio.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 if (_suspended)
                 {
                     continue;
                 }
-                await _backend.SendAudioAsync(frame.Pcm, ct).ConfigureAwait(false);
+
+                var dataContent = new DataContent(frame.Pcm, "audio/pcm");
+
+                await _agent.SendAudioAsync(session, dataContent, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
@@ -317,6 +294,18 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         }
     }
 
+    private async ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        var session = EnsureSession();
+        var userMessage = new ChatMessage(ChatRole.User, text);
+        await _agent.SendAsync(session, userMessage, cancellationToken).ConfigureAwait(false);
+    }
+
     private Task ForwardDtmfAsTextAsync(DtmfTone tone, CancellationToken ct) =>
         SendBackendNoteAsync($"[Caller pressed {tone.Digit}]", ct);
 
@@ -324,7 +313,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     {
         try
         {
-            await _backend.SendUserTextAsync(note, ct).ConfigureAwait(false);
+            await SendUserTextAsync(note, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -332,51 +321,79 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         }
     }
 
+    private async ValueTask StartResponseAsync(IEnumerable<AITool>? tools = null, string? instruction = null, CancellationToken cancellationToken = default)
+    {
+        var session = EnsureSession();
+
+        if (tools is not null || !string.IsNullOrEmpty(instruction))
+        {
+            var clientSession = session.ClientSession
+                ?? throw new InvalidOperationException(
+                    $"{nameof(AIAgentBackend)} session has no active realtime client session.");
+
+            var updated = new RealtimeSessionOptions()
+            {
+                Tools = tools?.ToList(),
+                Instructions = instruction
+            };
+            await _agent.SendAsync(
+                session,
+                new SessionUpdateRealtimeClientMessage(updated),
+                cancellationToken).ConfigureAwait(false);
+        }
+        await _agent.SendAsync(session, new CreateResponseRealtimeClientMessage(), cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task RunAgentLoopAsync(CancellationToken ct)
     {
         try
         {
-            await foreach (var update in _backend.RunAsync(ct).ConfigureAwait(false))
+            var session = EnsureSession();
+
+            await foreach (var update in _agent.RunStreamingAsync(session, null, ct).ConfigureAwait(false))
             {
-                switch (update)
+                foreach (var converted in RealtimeBackendUpdateTranslator.Translate(update))
                 {
-                    case RealtimeBackendUpdate.Audio audio when !_suspended:
-                        await _outbound.Writer.WriteAsync(
-                            new OutboundDirective.Audio(
-                                new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _backend.AgentId)),
-                            ct).ConfigureAwait(false);
-                        break;
+                    switch (converted)
+                    {
+                        case RealtimeBackendUpdate.Audio audio when !_suspended:
+                            await _outbound.Writer.WriteAsync(
+                                new OutboundDirective.Audio(
+                                    new AudioFrame(audio.Pcm, audio.At, SourceEdgeId: _agent.Id)),
+                                ct).ConfigureAwait(false);
+                            break;
 
-                    case RealtimeBackendUpdate.Transcript transcript:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.Transcript(transcript.Speaker, transcript.Text, transcript.IsFinal, transcript.At),
-                            ct).ConfigureAwait(false);
-                        break;
+                        case RealtimeBackendUpdate.Transcript transcript:
+                            await _events.Writer.WriteAsync(
+                                new StrategyEvent.Transcript(transcript.Speaker, transcript.Text, transcript.IsFinal, transcript.At),
+                                ct).ConfigureAwait(false);
+                            break;
 
-                    case RealtimeBackendUpdate.AgentText text:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.AgentUtterance(_backend.AgentId, text.Text, text.At),
-                            ct).ConfigureAwait(false);
-                        break;
+                        case RealtimeBackendUpdate.AgentText text:
+                            await _events.Writer.WriteAsync(
+                                new StrategyEvent.AgentUtterance(_agent.Id, text.Text, text.At),
+                                ct).ConfigureAwait(false);
+                            break;
 
-                    case RealtimeBackendUpdate.FunctionCalled call:
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At),
-                            ct).ConfigureAwait(false);
-                        break;
+                        case RealtimeBackendUpdate.FunctionCalled call:
+                            await _events.Writer.WriteAsync(
+                                new StrategyEvent.FunctionCalled(call.Name, call.Arguments, call.At),
+                                ct).ConfigureAwait(false);
+                            break;
 
-                    case RealtimeBackendUpdate.UserSpeechStarted speech when !_suspended:
-                        await _outbound.Writer.WriteAsync(
-                            new OutboundDirective.StopPlayback(speech.At),
-                            ct).ConfigureAwait(false);
-                        break;
+                        case RealtimeBackendUpdate.UserSpeechStarted speech when !_suspended:
+                            await _outbound.Writer.WriteAsync(
+                                new OutboundDirective.StopPlayback(speech.At),
+                                ct).ConfigureAwait(false);
+                            break;
 
-                    case RealtimeBackendUpdate.Faulted fault:
-                        _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
-                        await _events.Writer.WriteAsync(
-                            new StrategyEvent.Faulted(fault.Message, fault.Exception, fault.At),
-                            CancellationToken.None).ConfigureAwait(false);
-                        return;
+                        case RealtimeBackendUpdate.Faulted fault:
+                            _logger.LogWarning(fault.Exception, "Realtime backend faulted: {Message}", fault.Message);
+                            await _events.Writer.WriteAsync(
+                                new StrategyEvent.Faulted(fault.Message, fault.Exception, fault.At),
+                                CancellationToken.None).ConfigureAwait(false);
+                            return;
+                    }
                 }
             }
         }
@@ -393,11 +410,14 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
                 CancellationToken.None).ConfigureAwait(false);
         }
     }
+    private RealtimeAIAgentSession EnsureSession() => _session ?? throw new InvalidOperationException(
+        $"{nameof(AIAgentBackend)} is not connected. Call {nameof(ConnectBackendAsync)} first.");
+
 
     private async Task EndSessionAsync(string reason, CancellationToken ct)
     {
         await _events.Writer.WriteAsync(
-            new StrategyEvent.AgentUtterance(_backend.AgentId, $"[session ending: {reason}]", DateTimeOffset.UtcNow),
+            new StrategyEvent.AgentUtterance(_agent.Id, $"[session ending: {reason}]", DateTimeOffset.UtcNow),
             CancellationToken.None).ConfigureAwait(false);
         await _cts.CancelAsync().ConfigureAwait(false);
     }

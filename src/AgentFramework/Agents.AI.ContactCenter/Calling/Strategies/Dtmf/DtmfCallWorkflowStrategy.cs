@@ -132,6 +132,10 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
         var scripted = stage.Blueprint.Channels.Scripted;
         if (scripted is null || _synthesizer is null)
         {
+            _logger.LogDebug(
+                "Stage '{Stage}' has no scripted prompt or synthesizer unavailable; skipping TTS rendering.",
+                stage.Id);
+            // No scripted prompt configured or no synthesizer available; nothing to render. Let an external strategy handle it or just wait for DTMF input. Note that the workflow may still emit a prompt directive if the stage has a non-scripted prompt configured; this check is specifically for whether the DTMF strategy should attempt to synthesize an SSML prompt from the scripted configuration.
             return;
         }
 

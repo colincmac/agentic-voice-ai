@@ -4,6 +4,7 @@ using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
 using Extensions.AI.RealtimeVoice;
 using Microsoft.Agents.AI;
+using Microsoft.Azure.Cosmos.Linq;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,16 @@ public class AuthorizingAIAgent : DelegatingRealtimeAIAgent
         _delegateFunc = delegateFunc ?? DefaultFunctionMiddleware;
     }
 
+    public override async Task SendAsync(RealtimeAIAgentSession session, RealtimeClientMessage message, CancellationToken cancellationToken = default)
+    {
+        if (message is SessionUpdateRealtimeClientMessage updateSession)
+        {
+            updateSession.Options = RealtimeSessionOptionsWithFunctionMiddleware(updateSession.Options) ?? updateSession.Options;
+            await base.SendAsync(session, updateSession, cancellationToken).ConfigureAwait(false);
+        }
+
+        await base.SendAsync(session, message, cancellationToken).ConfigureAwait(false);
+    }
 
     protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
@@ -98,7 +109,7 @@ public class AuthorizingAIAgent : DelegatingRealtimeAIAgent
     {
         private readonly ILogger<AuthorizingAgentFunction>? _logger;
         private readonly AIAgent _agent;
-        private readonly AgentFunctionInvocationMiddleware? _next;
+        private readonly AgentFunctionInvocationMiddleware _next;
         private readonly IServiceProvider? _scopedServices;
 
 
@@ -156,14 +167,7 @@ public class AuthorizingAIAgent : DelegatingRealtimeAIAgent
                 }
             }
 
-            if (_next is not null)
-            {
-                return await _next.Invoke(_agent, arguments, InnerFunction, base.InvokeCoreAsync, cancellationToken);
-            }
-            else
-            {
-                return await base.InvokeCoreAsync(arguments, cancellationToken);
-            }
+            return await _next.Invoke(_agent, arguments, InnerFunction, base.InvokeCoreAsync, cancellationToken);
         }
 
         public override object? GetService(Type serviceType, object? serviceKey = null) =>
