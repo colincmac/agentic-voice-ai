@@ -22,29 +22,29 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Navigation;
 /// </remarks>
 public sealed class CallWorkflowNavigator : ICallWorkflowNavigator
 {
-    private readonly IServiceProvider _services;
     private readonly ILogger<CallWorkflowNavigator> _logger;
     private CompiledStage? _currentStage;
 
     public CallWorkflowNavigator(
         CompiledCallWorkflow workflow,
         IvrWorkflowState state,
-        IServiceProvider services,
+        CallerAuthenticationState callerAuthenticationState,
         ILogger<CallWorkflowNavigator>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
         ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(services);
-
+        ArgumentNullException.ThrowIfNull(callerAuthenticationState);
         Workflow = workflow;
         State = state;
-        _services = services;
+        CallerAuthenticationState = callerAuthenticationState;
         _logger = logger ?? NullLogger<CallWorkflowNavigator>.Instance;
     }
 
     public CompiledCallWorkflow Workflow { get; }
 
     public IvrWorkflowState State { get; }
+
+    public CallerAuthenticationState CallerAuthenticationState { get; }
 
     public CompiledStage? CurrentStage => _currentStage;
 
@@ -170,7 +170,6 @@ public sealed class CallWorkflowNavigator : ICallWorkflowNavigator
 
     private WorkflowEdgeContext BuildEdgeContext()
     {
-        var auth = _services.GetService(typeof(CallerAuthenticationState)) as CallerAuthenticationState;
-        return new WorkflowEdgeContext(State, auth, _services);
+        return new WorkflowEdgeContext(State, CallerAuthenticationState);
     }
 }

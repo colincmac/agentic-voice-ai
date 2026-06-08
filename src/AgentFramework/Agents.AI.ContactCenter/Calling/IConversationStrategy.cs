@@ -86,9 +86,6 @@ public sealed record StrategyStartContext
 
     public required ChannelReader<DtmfTone> InboundDtmf { get; init; }
 
-    /// <summary>Call-scoped DI for resolving agents, recognizers, synthesizers.</summary>
-    public required IServiceProvider Services { get; init; }
-
     /// <summary>
     /// Snapshot of the caller-edge metadata (phone number, display name, server call id).
     /// Strategies pass this into authenticators and may include it in observability events.

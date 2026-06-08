@@ -16,15 +16,12 @@ public sealed class WorkflowEdgeContext
 {
     public WorkflowEdgeContext(
         IvrWorkflowState workflowState,
-        CallerAuthenticationState? callerAuthentication,
-        IServiceProvider services)
+        CallerAuthenticationState? callerAuthentication)
     {
         ArgumentNullException.ThrowIfNull(workflowState);
-        ArgumentNullException.ThrowIfNull(services);
-
+        ArgumentNullException.ThrowIfNull(callerAuthentication);    
         WorkflowState = workflowState;
         CallerAuthentication = callerAuthentication;
-        Services = services;
     }
 
     /// <summary>Per-call IVR state (collected data, transcript, current stage id).</summary>
@@ -33,6 +30,4 @@ public sealed class WorkflowEdgeContext
     /// <summary>The per-call caller-authentication state, or <see langword="null"/> when the host has no authenticator chain wired up.</summary>
     public CallerAuthenticationState? CallerAuthentication { get; }
 
-    /// <summary>The DI scope tied to the current call; used by predicates that need to resolve additional services.</summary>
-    public IServiceProvider Services { get; }
 }

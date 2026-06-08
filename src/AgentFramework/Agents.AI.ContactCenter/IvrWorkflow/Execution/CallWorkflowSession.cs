@@ -1,7 +1,9 @@
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using Agents.AI.ContactCenter.IvrWorkflow.Navigation;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow.Execution;
 
@@ -21,32 +23,36 @@ public sealed class CallWorkflowSession
 
     public CallWorkflowSession(
         CompiledCallWorkflow workflow,
-        IvrWorkflowState state,
-        IServiceProvider services,
+        IServiceProvider serviceProvider,
+        IvrWorkflowState workflowState,
+        CallerAuthenticationState authenticationState,
         ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(serviceProvider);
 
         Workflow = workflow;
-        State = state;
-        Services = services;
+        State = workflowState;
+        CallerAuthenticationState = authenticationState;
+        Services = serviceProvider;
+
         Navigator = new CallWorkflowNavigator(
             workflow,
-            state,
-            services,
+            workflowState,
+            authenticationState,
             loggerFactory?.CreateLogger<CallWorkflowNavigator>());
     }
+
+    public IServiceProvider Services { get; }
+
+    public CallerAuthenticationState CallerAuthenticationState { get; }
+
 
     /// <summary>Workflow being walked for this call.</summary>
     public CompiledCallWorkflow Workflow { get; }
 
     /// <summary>Per-call state shared with tools and observers. Survives tier swaps.</summary>
     public IvrWorkflowState State { get; }
-
-    /// <summary>Call-scoped DI provider (per <c>ICallSession</c> scope).</summary>
-    public IServiceProvider Services { get; }
 
     /// <summary>Navigator that owns the "where are we in the graph" question.</summary>
     public ICallWorkflowNavigator Navigator { get; }
@@ -95,8 +101,7 @@ public interface ICallWorkflowSessionFactory
     /// <summary>Create a session for <paramref name="workflow"/>. <paramref name="restoreFrom"/> reuses prior state across tier swaps.</summary>
     CallWorkflowSession Create(
         CompiledCallWorkflow workflow,
-        IServiceProvider services,
-        IvrWorkflowState? restoreFrom = null);
+        IServiceProvider services);
 }
 
 /// <summary>Default <see cref="ICallWorkflowSessionFactory"/>. Singleton; sessions are per-call.</summary>
@@ -111,10 +116,10 @@ public sealed class CallWorkflowSessionFactory : ICallWorkflowSessionFactory
 
     public CallWorkflowSession Create(
         CompiledCallWorkflow workflow,
-        IServiceProvider services,
-        IvrWorkflowState? restoreFrom = null)
+        IServiceProvider services)
     {
-        var state = restoreFrom ?? new IvrWorkflowState();
-        return new CallWorkflowSession(workflow, state, services, _loggerFactory);
+        var workflowState = services.GetService<IvrWorkflowState>() ?? new IvrWorkflowState();
+        var authState = services.GetService<CallerAuthenticationState>() ?? new CallerAuthenticationState();
+        return new CallWorkflowSession(workflow, services, workflowState, authState, _loggerFactory);
     }
 }

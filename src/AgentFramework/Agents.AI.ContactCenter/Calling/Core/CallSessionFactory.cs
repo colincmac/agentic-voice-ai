@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Exceptions;
+using System.Diagnostics;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
 
@@ -240,7 +241,7 @@ public sealed class CallSessionFactory : ICallSessionFactory
         IConversationStrategyFactory factory,
         CallSessionRequest request,
         IServiceScope scope,
-        System.Diagnostics.Activity? createSpan,
+        Activity? createSpan,
         CancellationToken cancellationToken)
     {
         try

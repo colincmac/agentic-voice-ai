@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Claims;
+
 namespace Agents.AI.ContactCenter.Authentication;
 
 /// <summary>
@@ -42,4 +45,29 @@ public sealed record CallerIdentity(
     /// </summary>
     public CallerIdentity WithAtLeast(CallerVerificationLevel level)
         => level > VerificationLevel ? this with { VerificationLevel = level } : this;
+
+    public ClaimsPrincipal ToClaimsPrincipal()
+    {
+        var claims = new List<Claim>
+    {
+        new(ClaimTypes.NameIdentifier, UserId),
+        new(ClaimTypes.Name, DisplayName),
+        // acr/amr are the standard OIDC vocabulary for "level of assurance" and "methods used"
+        new("acr", ((int)VerificationLevel).ToString(CultureInfo.InvariantCulture)),
+        new("amr", AuthenticatedBy),
+        new("auth_time", AuthenticatedAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
+    };
+
+        if (PhoneNumber is not null) { claims.Add(new Claim("phone_number", PhoneNumber)); }
+        if (Email is not null) { claims.Add(new Claim(ClaimTypes.Email, Email)); }
+        if (EntraObjectId is not null) { claims.Add(new Claim("oid", EntraObjectId)); }
+
+        foreach (var (key, value) in Claims)
+        {
+            if (value is not null) { claims.Add(new Claim(key, value.ToString() ?? string.Empty)); }
+        }
+
+        var identity = new ClaimsIdentity(claims, authenticationType: AuthenticatedBy);
+        return new ClaimsPrincipal(identity);
+    }
 }
