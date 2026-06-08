@@ -16,7 +16,7 @@ steps on the resulting verification level.
 | Outcome | [`AuthenticationOutcome`](./AuthenticationOutcome.cs) | `Authenticated` \| `NotApplicable` \| `Failed` \| `NeedsChallenge`. |
 | Chain runner | [`IAuthenticationOrchestrator`](./IAuthenticationOrchestrator.cs) → [`AuthenticationOrchestrator`](./AuthenticationOrchestrator.cs) | Runs authenticators in DI order, short-circuits on `Failed` / `NeedsChallenge`, records every attempt. |
 | Mid-call dispatch | [`ICallerElevationDispatcher`](./ICallerElevationDispatcher.cs) → [`CallerElevationDispatcher`](./CallerElevationDispatcher.cs) | Tools call this to run a single named authenticator and emit the same `StrategyEvent`s the call-start runner produces. |
-| Call-start helper | [`CallerAuthenticationRunner`](./CallerAuthenticationRunner.cs) | Strategies (`RealtimeVoiceStrategy`, `DtmfStreamingStrategy`, …) call this once on attach. |
+| Call-start helper | [`CallerAuthenticationRunner`](./CallerAuthenticationRunner.cs) | Strategies (`RealtimeCallWorkflowStrategy`, `DtmfCallWorkflowStrategy`, `NluCallWorkflowStrategy`) `await` this once from `StartAsync` (before `_executor.EnterAsync`). Resolves the orchestrator + state from the per-call DI scope, runs the chain against `StrategyStartContext.CallerMetadata`, and mirrors `CallerIdentified` / `CallerAuthenticationFailed` / `CallerAuthenticationChallenge` / `CallerVerificationLevelChanged` onto the strategy event channel — same event shape as `CallerElevationDispatcher`. No-ops when `AddCallerAuthentication()` was not called. |
 
 ## Built-in authenticators
 
@@ -268,58 +268,58 @@ transition attempt, which unblocks the gated step. No strategy needs custom auth
 
 | Strategy | Source | Call-start auth | Step-transition guards | Tool gating |
 |---|---|---|---|---|
-| **Realtime voice** | [`RealtimeVoiceStrategy`](../Calling/Strategies/RealtimeVoice/RealtimeVoiceStrategy.cs) | `CallerAuthenticationRunner.RunAsync` on attach (line ~157). ANI fires once, `CallerIdentified` event surfaces. | `RealtimeIvrWorkflowController.TransitionToStepAsync` evaluates the target step's guards. `MinimumVerificationGuard` rejection keeps the model on the current step. | **Two layers stack**: `IvrWorkflowNavigator.WrapToolsWithCurrentGuards` wraps every per-step tool in a `GuardedAIFunction` (line ~180), AND `AuthorizingAgentFunction` evaluates `[RequiresCallerVerification]` through the ToolApproval pipeline. Either layer can block. |
-| **NLU + DTMF fallback** | [`NluConversationStrategy`](../Calling/Strategies/Nlu/NluConversationStrategy.cs) | `CallerAuthenticationRunner.RunAsync` on attach (line ~207). | Same `RealtimeIvrWorkflowController` path. Step transitions driven by intent classifier results route through the same `EvaluateGuardsAsync`. | DTMF action tools go through `IvrWorkflowNavigator.InvokeActionAsync` (line ~624) which runs `CurrentStep.Guards` BEFORE invoking. SLM-invoked function calls go through the `AuthorizingAgentFunction` pipeline. |
-| **DTMF streaming** | [`DtmfStreamingStrategy`](../Calling/Strategies/Dtmf/DtmfStreamingStrategy.cs) | `CallerAuthenticationRunner.RunAsync` on attach (line ~174). | Same controller path. | DTMF menu options resolve to tools invoked via `IvrWorkflowNavigator.InvokeActionAsync` (line ~355) — guards run inline, rejection plays the step's failure prompt and stays on the menu. |
-| **DTMF verb** | [`DtmfVerbStrategy`](../Calling/Strategies/Dtmf/DtmfVerbStrategy.cs) | `CallerAuthenticationRunner.RunAsync` on attach (line ~160). | Same controller path. | Same `InvokeActionAsync` path as streaming DTMF; difference is platform-side TTS vs. local PCM. |
-| **Composite fallback** | [`CompositeFallbackStrategy`](../Calling/Strategies/Composite/CompositeFallbackStrategy.cs) | The composite owns the call's DI scope. When the active inner strategy degrades, the new inner strategy reuses the SAME `CallerAuthenticationState` and `IvrWorkflowState` — the caller never re-authenticates. | Inherited from the active inner strategy. | Inherited from the active inner strategy. |
+| **Realtime voice** | [`RealtimeCallWorkflowStrategy`](../Calling/Strategies/RealtimeVoice/RealtimeCallWorkflowStrategy.cs) | `await CallerAuthenticationRunner.RunAsync(context, _events.Writer, _logger, ct)` in `StartAsync`, before `_executor.EnterAsync`. ANI fires once, `CallerIdentified` is emitted, `CallerAuthenticationState` is promoted. The matched `CallerIdentity` is then surfaced into every realtime stage prompt as a `## Caller hint (unverified)` section by [`StagePromptRenderer`](../IvrWorkflow/Navigation/StagePromptRenderer.cs) — the model is told the match may be wrong (spoofed/shared phone) and must confirm the name with the caller. | `CallWorkflowNavigator.TryAdvance` evaluates `requires:` predicates per edge (`BuiltInPredicates.AuthVerificationLevel`). Denied edges route via `onBlocked`. | **Two layers stack**: function-invocation middleware [`CallerVerificationFilter`](../IvrWorkflow/Authorization/CallerVerificationFilter.cs) evaluates `[RequiresCallerVerification]` on every tool invocation, AND the tool-approval pipeline runs [`RequiresCallerVerificationHandler`](./RequiresCallerVerification.cs) for tools surfaced through `AuthorizingAgentFunction`. Either layer can block. |
+| **NLU + DTMF fallback** | [`NluCallWorkflowStrategy`](../Calling/Strategies/Nlu/NluCallWorkflowStrategy.cs) | Same `CallerAuthenticationRunner.RunAsync` call from `StartAsync` before the audio/DTMF/classify pumps start. | Same navigator/edge-predicate path. Step transitions driven by intent classifier results route through the same `BuiltInPredicates.AuthVerificationLevel`. | NLU surface plays scripted SSML (no per-step tools); elevation tools dispatched through `ICallerElevationDispatcher` from the realtime tier survive a tier swap because state is scoped to the call. |
+| **DTMF** | [`DtmfCallWorkflowStrategy`](../Calling/Strategies/Dtmf/DtmfCallWorkflowStrategy.cs) | Same `CallerAuthenticationRunner.RunAsync` call from `StartAsync` before the `_dtmfPump` task is scheduled. | Same navigator/edge-predicate path. | DTMF stages are SSML-only; transitions driven by digit-to-label mapping in `scripted.menu`. Privileged transitions are gated by `requires: { type: auth, level: … }` on the edge, not by per-tool attributes. |
+| **Composite fallback** | [`CompositeFallbackStrategy`](../Calling/Strategies/Composite/CompositeFallbackStrategy.cs) | The composite owns the call's DI scope. When the active inner strategy degrades, the new inner strategy's `StartAsync` runs the runner again against the SAME `CallerAuthenticationState` and `IvrWorkflowState` — the orchestrator returns `NotApplicable` quickly when ANI is already matched and no incremental events fire. Caller never re-authenticates. | Inherited from the active inner strategy. | Inherited from the active inner strategy. |
 
 ### End-to-end auth flow against an IVR Realtime Workflow
 
-Take [`authenticated-realtime.yaml`](../../../../src/Agents/Showcase.Agent.VoiceAgent/Workflow/Samples/authenticated-realtime.yaml)
-running under `RealtimeVoiceStrategy`:
+Take [`authenticated-realtime-bank.callworkflow.yaml`](../../../../src/Agents/Showcase.Agent.VoiceAgent/Workflow/Samples/authenticated-realtime-bank.callworkflow.yaml)
+running under `RealtimeCallWorkflowStrategy`:
 
-1. **Inbound call attached.** `RealtimeVoiceStrategy.StartAsync` calls
+1. **Inbound call attached.** `RealtimeCallWorkflowStrategy.StartAsync` awaits
    `CallerAuthenticationRunner.RunAsync`. `AniIdentityLookupAuthenticator` resolves the
    caller from `ICallerDirectory`; `CallerAuthenticationState.Identity` is promoted to
    `AniMatch`. `StrategyEvent.CallerIdentified` is emitted.
-2. **Initial step (`greeting`).** No `requires:` block → no guard. Model addresses the
-   caller by name (filled into `ConversationContext.CallerName` by the runner).
-3. **Transition to `verify-identity`.** The step exposes `confirm-identity` as a tool.
-   The model asks the caller to read back their PIN. Each tool surfaced for the step is
-   wrapped by `WrapToolsWithCurrentGuards` (no guard here yet) AND by
-   `AuthorizingAgentFunction` (which reads `[RequiresCallerVerification(AniMatch)]`).
-   Because the caller is already `AniMatch`, the requirement passes.
-4. **Caller speaks PIN → model calls `confirm-identity` (or the SDK-supplied
-   `validate-pin` from `CallerAuthenticationTools`).** The tool stashes digits on
+2. **Initial step (`welcome`).** No edge requirement → no predicate. `StagePromptRenderer`
+   surfaces the matched identity into the system prompt as a `## Caller hint (unverified)`
+   section — name / phone / verification level / source authenticator — together with
+   explicit guidance that caller IDs may be spoofed or shared. The model confirms the
+   name with the caller (or asks for it when no hint is present) and writes the spoken
+   name into `IvrWorkflowState` via `record_caller_name`. **The hint is never treated as
+   a fact.**
+3. **Transition to `verify`** (triggered when the caller picks an intent that needs
+   knowledge-based verification). The step exposes `validate-pin` as a tool. The model
+   asks the caller for their PIN. `validate-pin` is decorated with
+   `[RequiresCallerVerification(AniMatch)]`; `CallerVerificationFilter` (function-invocation
+   middleware) reads `CallerAuthenticationState.Identity.VerificationLevel`, sees
+   `AniMatch`, and lets the call through.
+4. **Caller speaks PIN → model calls `validate-pin`.** The tool stashes digits on
    `PinAttempt`, calls `ICallerElevationDispatcher.DispatchAsync("Pin", callId)`. The
    dispatcher runs `PinAuthenticator` → `IPinValidator.ValidateAsync` → promotes the
    identity to `KnowledgeBased`. `StrategyEvent.CallerVerificationLevelChanged(AniMatch,
    KnowledgeBased)` is emitted. Tool returns `{ Success = true, … }`.
 5. **(Optional) MFA step.** If the workflow requires it, the model calls
-   `request-sms-otp` → `SmsOtpAuthenticator` returns `NeedsChallenge`, OTP is sent,
+   `request-otp` → `SmsOtpAuthenticator` returns `NeedsChallenge`, OTP is sent,
    `StrategyEvent.CallerAuthenticationChallenge` is emitted. Model reads the prompt to
-   the caller, collects the code, calls `submit-sms-otp(challengeId, code)` → promotes
+   the caller, collects the code, calls `submit-otp(challengeId, code)` → promotes
    to `MultiFactor`.
-6. **Transition to a guarded step** (e.g. `funds-transfer` with
-   `requires: { type: auth, level: multiFactor }`).
-   `RealtimeIvrWorkflowController.TransitionToStepAsync` runs `EvaluateGuardsAsync`.
-   `MinimumVerificationGuard(MultiFactor)` reads
-   `IvrWorkflowState.VerificationLevel` — promoted to `MultiFactor` in step 5 — and
-   passes. Transition completes.
-7. **Caller invokes a privileged tool** (e.g. `transfer-funds`
-   `[RequiresCallerVerification(MultiFactor)]`). `AuthorizingAgentFunction` runs the
-   ToolApproval pipeline; `CallerVerificationApprovalHandler.HandleRequirementAsync`
-   reads `CallerAuthenticationState.Identity.VerificationLevel`, sees `MultiFactor`,
-   calls `Succeed`. Tool executes. If the caller had skipped step 5,
-   `CallerVerificationApprovalHandler` would call `Fail` and the tool would return
-   `OnFailureResponse` instead of running.
+6. **Transition to a guarded edge** (e.g. `welcome → balance` with
+   `requires: { type: auth, level: multiFactor }`). `CallWorkflowNavigator.TryAdvance`
+   runs `BuiltInPredicates.AuthVerificationLevel(MultiFactor)`, which reads
+   `CallerAuthenticationState.Identity.VerificationLevel` — promoted to `MultiFactor`
+   in step 5 — and passes. Transition completes.
+7. **Caller invokes a privileged tool.** `CallerVerificationFilter` (or, for
+   approval-wrapped tools, `RequiresCallerVerificationHandler`) re-reads the live
+   `CallerVerificationLevel`. Below-threshold callers get the requirement's
+   `OnFailureResponse` text back as the tool result and the underlying method never runs.
 
-The DTMF-streaming and NLU paths follow the identical sequence — only step 4 changes:
-DTMF collects digits with `CollectDtmf`/in-band detection and invokes the validator tool
-through `IvrWorkflowNavigator.InvokeActionAsync` (which runs the step's `Guards` inline
-before invoking), and NLU collects digits the same way for the PIN sub-step but falls
-back to chat-based intent classification for free-form choices.
+The DTMF and NLU paths follow the identical sequence — only step 4 changes:
+DTMF collects digits with `CollectDtmf`/in-band detection and routes them through the
+stage's `scripted.menu` map; NLU classifies free-form intent via `IvrIntentAgent`. Both
+share the same `CallerAuthenticationState`, the same edge predicates, and the same
+elevation dispatcher — only the input modality differs.
 
 ### Two-layer gating recap
 

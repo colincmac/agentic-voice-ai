@@ -25,7 +25,9 @@ stages:
     realtime:
       instructions:
         - Greet the caller warmly.
-        - Ask for their first and last name; once given, call `record_caller_name` once.
+        - If no hint is present, or the caller says it isn't them, ask for their first and last name.
+        - If a `Caller hint (unverified)` section is present in your context, still confirm their name before proceeding. Caller-ID may be wrong.
+        - Once the caller has confirmed or stated their name, call `record_caller_name` once with the name they actually gave you.
         - Listen for the caller's intent. Don't ask for PINs or codes yourself — picking an intent triggers verification automatically.
       examples:
         - "Welcome to ACME Bank. Before we get started, could I get your first and last name?"

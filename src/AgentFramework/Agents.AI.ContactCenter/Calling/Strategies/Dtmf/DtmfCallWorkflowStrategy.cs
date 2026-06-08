@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
@@ -69,11 +70,21 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
 
     public ChannelReader<StrategyEvent> Events => _events.Reader;
 
-    public Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default)
+    public async Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default)
     {
-        if (_dtmfPump is not null) { return Task.CompletedTask; }
+        if (_dtmfPump is not null) { return; }
 
         _callId = context.CallId;
+
+        // Run the call-start authenticator chain (ANI lookup, etc.) BEFORE entering
+        // the workflow so per-step verification guards can read a populated
+        // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
+        await CallerAuthenticationRunner.RunAsync(
+            context,
+            _events.Writer,
+            _logger,
+            cancellationToken).ConfigureAwait(false);
+
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
         _dtmfPump = Task.Run(async () =>
@@ -102,8 +113,6 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
                 _events.Writer.TryComplete();
             }
         }, CancellationToken.None);
-
-        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)

@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Agents.AuthorizationAgent;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
@@ -87,6 +88,15 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
             await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // Run the call-start authenticator chain (ANI lookup, etc.) BEFORE entering
+        // the workflow so per-step / per-tool verification gates can read a populated
+        // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
+        await CallerAuthenticationRunner.RunAsync(
+            context,
+            _events.Writer,
+            _logger,
+            cancellationToken).ConfigureAwait(false);
+
         await _executor.EnterAsync(cancellationToken).ConfigureAwait(false);
 
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
@@ -167,7 +177,17 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     /// </summary>
     private async ValueTask RenderStageAsync(CompiledStage stage, CancellationToken cancellationToken)
     {
-        var prompt = StagePromptRenderer.RenderRealtimePrompt(_callWorkflowSession.Workflow, stage, _callWorkflowSession.State);
+        // Surface the ANI-matched caller identity into the realtime prompt as an
+        // *unverified hint* — the model is instructed to confirm the name with the
+        // caller because caller IDs can be spoofed or shared.
+        var identity = _callWorkflowSession.Services
+            .GetService(typeof(CallerAuthenticationState)) as CallerAuthenticationState;
+
+        var prompt = StagePromptRenderer.RenderRealtimePrompt(
+            _callWorkflowSession.Workflow,
+            stage,
+            _callWorkflowSession.State,
+            identity?.Identity);
         var tools = ResolveStageTools(stage);
 
         await StartResponseAsync(tools, prompt, cancellationToken).ConfigureAwait(false);
@@ -329,7 +349,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         {
             var clientSession = session.ClientSession
                 ?? throw new InvalidOperationException(
-                    $"{nameof(AIAgentBackend)} session has no active realtime client session.");
+                    $"{nameof(AuthorizingAIAgent)} has no active realtime client session.");
 
             var updated = new RealtimeSessionOptions()
             {
@@ -411,7 +431,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         }
     }
     private RealtimeAIAgentSession EnsureSession() => _session ?? throw new InvalidOperationException(
-        $"{nameof(AIAgentBackend)} is not connected. Call {nameof(ConnectBackendAsync)} first.");
+        $"{nameof(AuthorizingAIAgent)} is not connected. Call {nameof(ConnectBackendAsync)} first.");
 
 
     private async Task EndSessionAsync(string reason, CancellationToken ct)

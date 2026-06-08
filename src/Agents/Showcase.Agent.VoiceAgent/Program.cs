@@ -7,7 +7,6 @@ using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.DependencyInjection;
 using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.ContactCenter.IvrWorkflow.Authorization;
 using Agents.AI.ContactCenter.IvrWorkflow.Loading;
 using Agents.AI.ContactCenter.Media.Audio;
 using Agents.AI.Extensions.RealtimeAgentHelpers;

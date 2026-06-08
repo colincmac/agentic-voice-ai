@@ -12,7 +12,7 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 /// </summary>
 /// <remarks>
 /// Public + static so tests can pin down translation behavior without standing up
-/// a realtime client. The adapter (<see cref="AIAgentBackend"/>)
+/// a realtime client. The adapter (<see cref="AuthorizingAIAgent"/>)
 /// uses this exclusively.
 /// </remarks>
 public static class RealtimeBackendUpdateTranslator

@@ -1,4 +1,5 @@
 using System.Text;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.IvrWorkflow.Blueprint;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 
@@ -19,10 +20,23 @@ namespace Agents.AI.ContactCenter.IvrWorkflow.Navigation;
 public static class StagePromptRenderer
 {
     /// <summary>Render the realtime-tier prompt for <paramref name="stage"/>.</summary>
+    /// <param name="workflow">Compiled workflow that owns <paramref name="stage"/>.</param>
+    /// <param name="stage">Active stage whose prompt to render.</param>
+    /// <param name="state">Optional collected workflow state; included under "Collected information".</param>
+    /// <param name="identity">
+    /// Optional caller identity resolved by the call-start authenticator chain. When supplied
+    /// and the identity has reached <see cref="CallerVerificationLevel.AniMatch"/> or higher,
+    /// a "Caller hint (unverified)" section is appended that surfaces the matched name / phone
+    /// to the model alongside explicit guidance to confirm the identity with the caller before
+    /// relying on it (caller IDs can be spoofed or shared between users). When <see langword="null"/>,
+    /// anonymous, or below AniMatch, no hint section is emitted and the output is identical to
+    /// the prior overload.
+    /// </param>
     public static string RenderRealtimePrompt(
         CompiledCallWorkflow workflow,
         CompiledStage stage,
-        IvrWorkflowState? state = null)
+        IvrWorkflowState? state = null,
+        CallerIdentity? identity = null)
     {
         ArgumentNullException.ThrowIfNull(workflow);
         ArgumentNullException.ThrowIfNull(stage);
@@ -98,6 +112,47 @@ public static class StagePromptRenderer
             sb.AppendLine();
         }
 
+        AppendCallerHint(sb, identity);
+
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Append the "Caller hint (unverified)" section when <paramref name="identity"/> is a real,
+    /// at-least-ANI-matched identity. The block lists the matched name, phone, verification level,
+    /// and source authenticator, then states explicitly that the match comes from a passive signal
+    /// (caller ID) that may be wrong, and that the model must confirm the name with the caller
+    /// before relying on the hint.
+    /// </summary>
+    private static void AppendCallerHint(StringBuilder sb, CallerIdentity? identity)
+    {
+        if (identity is null
+            || identity.VerificationLevel < CallerVerificationLevel.AniMatch
+            || string.Equals(identity.UserId, "anonymous", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        sb.AppendLine("## Caller hint (unverified)");
+        if (!string.IsNullOrWhiteSpace(identity.DisplayName))
+        {
+            sb.AppendLine($"- Name: {identity.DisplayName}");
+        }
+        if (!string.IsNullOrWhiteSpace(identity.PhoneNumber))
+        {
+            sb.AppendLine($"- Phone: {identity.PhoneNumber}");
+        }
+        sb.AppendLine($"- Verification level: {identity.VerificationLevel}");
+        if (!string.IsNullOrWhiteSpace(identity.AuthenticatedBy))
+        {
+            sb.AppendLine($"- Source: {identity.AuthenticatedBy}");
+        }
+        sb.AppendLine();
+        sb.AppendLine(
+            "This match is from a passive signal (caller ID) and may be wrong — caller IDs can be spoofed or shared. " +
+            "Do not assume the caller is this person. Use the hint to confirm their name (e.g. \"I'm showing this call from " +
+            $"{identity.DisplayName} — is that you?\"). If they disagree or you're unsure, fall back to asking for their " +
+            "first and last name as usual. Always call `record_caller_name` once the caller has stated their name.");
+        sb.AppendLine();
     }
 }

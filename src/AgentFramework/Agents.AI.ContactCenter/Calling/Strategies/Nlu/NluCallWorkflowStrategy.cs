@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Agents.IntentAgent;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.IvrWorkflow.Blueprint;
@@ -98,19 +99,28 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
 
     public TransferEscalationTarget? EscalationTarget { get; }
 
-    public Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default)
+    public async Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default)
     {
         if (_classifyLoop is not null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         _callId = context.CallId;
+
+        // Run the call-start authenticator chain (ANI lookup, etc.) BEFORE entering
+        // the workflow so per-step verification guards can read a populated
+        // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
+        await CallerAuthenticationRunner.RunAsync(
+            context,
+            _events.Writer,
+            _logger,
+            cancellationToken).ConfigureAwait(false);
+
         var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         _audioPump = Task.Run(() => PumpInboundAudioAsync(context, linked.Token), CancellationToken.None);
         _dtmfPump = Task.Run(() => PumpInboundDtmfAsync(context, linked.Token), CancellationToken.None);
         _classifyLoop = Task.Run(() => RunAsync(linked.Token), CancellationToken.None);
-        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
