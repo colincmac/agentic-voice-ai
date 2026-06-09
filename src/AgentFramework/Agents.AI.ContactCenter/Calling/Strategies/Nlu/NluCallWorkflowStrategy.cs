@@ -62,6 +62,7 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
     private Task? _classifyLoop;
     private bool _suspended;
     private string _callId = string.Empty;
+    private int _disposed;
 
     public NluCallWorkflowStrategy(
         CallWorkflowSession session,
@@ -113,6 +114,7 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
         // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
         await CallerAuthenticationRunner.RunAsync(
             context,
+            context.Services,
             _events.Writer,
             _logger,
             cancellationToken).ConfigureAwait(false);
@@ -141,6 +143,11 @@ public sealed class NluCallWorkflowStrategy : IConversationStrategy
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await StopAsync().ConfigureAwait(false);
         _cts.Dispose();
     }

@@ -42,7 +42,7 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
     private Task? _audioPump;
     private Task? _dtmfPump;
     private bool _suspended;
-    private bool _prewarmed;
+    private int _disposed;
 
     public RealtimeCallWorkflowStrategy(
         AuthorizingAIAgent agent,
@@ -82,17 +82,14 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         }
 
         _callId = context.CallId;
-
-        if (!_prewarmed)
-        {
-            await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
-        }
+        await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
 
         // Run the call-start authenticator chain (ANI lookup, etc.) BEFORE entering
         // the workflow so per-step / per-tool verification gates can read a populated
         // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
         await CallerAuthenticationRunner.RunAsync(
             context,
+            _callWorkflowSession.Services,
             _events.Writer,
             _logger,
             cancellationToken).ConfigureAwait(false);
@@ -103,16 +100,6 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
         _audioPump = Task.Run(() => PumpInboundAudioAsync(context, linked.Token), CancellationToken.None);
         _dtmfPump = Task.Run(() => PumpInboundDtmfAsync(context, linked.Token), CancellationToken.None);
         _agentLoop = Task.Run(() => RunAgentLoopAsync(linked.Token), CancellationToken.None);
-    }
-
-    public async ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
-    {
-        if (_prewarmed)
-        {
-            return;
-        }
-        await ConnectBackendAsync(cancellationToken).ConfigureAwait(false);
-        _prewarmed = true;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -150,6 +137,11 @@ public sealed class RealtimeCallWorkflowStrategy : IConversationStrategy
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await StopAsync().ConfigureAwait(false);
         if (_session?.ClientSession is not null) { await _session.ClientSession.DisposeAsync().ConfigureAwait(false); }
 

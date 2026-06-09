@@ -1,21 +1,24 @@
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.ContactCenter.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Strategies.Composite;
 
 /// <summary>
-/// Wraps an ordered list of strategy factories. Starts the first one; on
-/// <see cref="StrategyEvent.Faulted"/> from the active inner, transparently
-/// swaps to the next factory with the inner's <see cref="IvrWorkflowState"/>
-/// preserved via <c>restoreFrom</c>. The caller's edge is never touched —
-/// only the brain swaps.
+/// Wraps an ordered list of <see cref="AgentTier"/> values. Starts the first one by
+/// resolving an <see cref="IConversationStrategy"/> keyed by that tier from the per-call
+/// service scope (<see cref="StrategyStartContext.Services"/>); on a
+/// <see cref="StrategyEvent.Faulted"/> from the active inner, transparently resolves the
+/// next tier from the same scope. Per-call <see cref="IvrWorkflowState"/> is preserved
+/// across tier swaps because every inner strategy in the chain reads it from the scoped
+/// registration in the call scope. The caller's edge is never touched — only the brain swaps.
 /// </summary>
 public sealed class CompositeFallbackStrategy : IConversationStrategy
 {
-    private readonly IReadOnlyList<IConversationStrategyFactory> _orderedFactories;
+    private readonly IReadOnlyList<AgentTier> _orderedTiers;
     private readonly ILogger _logger;
 
     private readonly Channel<OutboundDirective> _outbound = Channel.CreateBounded<OutboundDirective>(
@@ -36,23 +39,25 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
     private IConversationStrategy? _active;
     private CancellationTokenSource? _activePumpCts;
     private Task? _activePumps;
-    private int _factoryIndex = -1;
+    private int _tierIndex = -1;
+    private int _disposed;
 
     public CompositeFallbackStrategy(
-        IEnumerable<IConversationStrategyFactory> orderedFactories,
+        IEnumerable<AgentTier> orderedTiers,
         ILoggerFactory? loggerFactory = null)
     {
-        _orderedFactories = orderedFactories.ToArray();
-        if (_orderedFactories.Count == 0)
+        ArgumentNullException.ThrowIfNull(orderedTiers);
+        _orderedTiers = orderedTiers.ToArray();
+        if (_orderedTiers.Count == 0)
         {
-            throw new ArgumentException("At least one factory is required", nameof(orderedFactories));
+            throw new ArgumentException("At least one tier is required", nameof(orderedTiers));
         }
         _logger = loggerFactory?.CreateLogger<CompositeFallbackStrategy>() ?? NullLogger<CompositeFallbackStrategy>.Instance;
     }
 
     public StrategyKind Kind => StrategyKind.Composite;
 
-    public AgentTier Tier => _active?.Tier ?? _orderedFactories[Math.Max(0, _factoryIndex)].Tier;
+    public AgentTier Tier => _active?.Tier ?? _orderedTiers[Math.Max(0, _tierIndex)];
 
     public IvrWorkflowState WorkflowState => _active?.WorkflowState ?? _placeholderState;
     private readonly IvrWorkflowState _placeholderState = new();
@@ -65,8 +70,9 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
 
     public Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
         _startContext = context;
-        return ActivateAsync(targetIndex: 0, restoreFrom: null, reason: "initial", cancellationToken);
+        return ActivateAsync(targetIndex: 0, reason: "initial", cancellationToken);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -105,6 +111,11 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await StopAsync().ConfigureAwait(false);
 
         if (_active is not null)
@@ -115,9 +126,9 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
         _cts.Dispose();
     }
 
-    private async Task ActivateAsync(int targetIndex, IvrWorkflowState? restoreFrom, string reason, CancellationToken ct)
+    private async Task ActivateAsync(int targetIndex, string reason, CancellationToken ct)
     {
-        if (targetIndex >= _orderedFactories.Count)
+        if (targetIndex >= _orderedTiers.Count)
         {
             _logger.LogError("No fallback available; composite exhausted");
             await _events.Writer.WriteAsync(
@@ -128,20 +139,19 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
             return;
         }
 
-        var factory = _orderedFactories[targetIndex];
+        var tier = _orderedTiers[targetIndex];
         IConversationStrategy next;
         try
         {
-            next = await factory.CreateAsync(
-                _startContext!.CallId,
-                _startContext.Services,
-                restoreFrom,
-                ct).ConfigureAwait(false);
+            // Resolve the inner strategy from the per-call scope via keyed DI. Each resolve
+            // produces a fresh instance (registered as keyed transient) because composite
+            // swaps must build a new strategy with a fresh backend session each time.
+            next = _startContext!.Services.GetRequiredKeyedService<IConversationStrategy>(tier);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Strategy factory for tier {Tier} failed; trying next", factory.Tier);
-            await ActivateAsync(targetIndex + 1, restoreFrom, $"factory-failed:{factory.Tier}", ct).ConfigureAwait(false);
+            _logger.LogWarning(ex, "No IConversationStrategy registered for tier {Tier}; trying next", tier);
+            await ActivateAsync(targetIndex + 1, $"resolve-failed:{tier}", ct).ConfigureAwait(false);
             return;
         }
 
@@ -155,7 +165,7 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
             previousPumps = _activePumps;
             previousTier = previous?.Tier;
             _active = next;
-            _factoryIndex = targetIndex;
+            _tierIndex = targetIndex;
             _activePumpCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             _activePumps = Task.WhenAll(
                 PumpAudioAsync(next, _activePumpCts.Token),
@@ -228,16 +238,16 @@ public sealed class CompositeFallbackStrategy : IConversationStrategy
     {
         try
         {
-            IConversationStrategy? current;
             int currentIndex;
             lock (_swapLock)
             {
-                current = _active;
-                currentIndex = _factoryIndex;
+                currentIndex = _tierIndex;
             }
 
-            var stateToRestore = current?.WorkflowState;
-            await ActivateAsync(currentIndex + 1, stateToRestore, fault.Message, ct).ConfigureAwait(false);
+            // No restoreFrom plumbing needed: IvrWorkflowState is registered as a scoped
+            // service in the call scope, so the next inner reads the same instance the
+            // previous inner mutated.
+            await ActivateAsync(currentIndex + 1, fault.Message, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)

@@ -51,13 +51,34 @@ public sealed class CallerAuthenticationState
         CallerIdentity? promoted = null;
         lock (_gate)
         {
+            var sameCaller = _identity.UserId == identity.UserId
+                && _identity.VerificationLevel != CallerVerificationLevel.None;
+
+            // Carry method history forward when the incoming identity is for the same caller.
+            var incoming = sameCaller
+                ? identity.WithMethod(_identity.AuthenticatedBy) // fold prior contributor in
+                : identity;
+
+            foreach (var m in _identity.AuthenticationMethods)
+            {
+                incoming = incoming.WithMethod(m);
+            }
+
+            incoming = incoming.WithMethod(identity.AuthenticatedBy);
+
             if (_identity.VerificationLevel == CallerVerificationLevel.None
-                || identity.VerificationLevel > _identity.VerificationLevel
-                || (identity.VerificationLevel == _identity.VerificationLevel
+                || incoming.VerificationLevel > _identity.VerificationLevel
+                || (incoming.VerificationLevel == _identity.VerificationLevel
                     && _identity.UserId == "anonymous"))
             {
-                _identity = identity;
-                promoted = identity;
+                _identity = incoming;
+                promoted = incoming;
+            }
+            else if (sameCaller && incoming.AuthenticationMethods.Count != _identity.AuthenticationMethods.Count)
+            {
+                // Level didn't move but a new method joined — keep the audit on the identity.
+                _identity = _identity with { Methods = incoming.AuthenticationMethods };
+                promoted = _identity;
             }
         }
 

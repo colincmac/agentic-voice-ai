@@ -90,11 +90,10 @@ public class CallSessionOwnershipTests
     public async Task CreateAsync_without_ownership_directory_works_unchanged()
     {
         // No ownership / no heartbeat — back-compat path.
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
             new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
             TestTelemetry.LoggerFactory,
@@ -138,11 +137,10 @@ public class CallSessionOwnershipTests
     {
         var throwingOwnership = new ThrowingReleaseOwnershipDirectory();
         var heartbeat = new RecordingPodHeartbeat();
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
             new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
             TestTelemetry.LoggerFactory,
@@ -168,11 +166,10 @@ public class CallSessionOwnershipTests
     [Fact]
     public async Task EndAsync_without_ownership_directory_completes_cleanly()
     {
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
             new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
             TestTelemetry.LoggerFactory,
@@ -192,7 +189,7 @@ public class CallSessionOwnershipTests
     private static (CallSessionFactory Factory, CallSessionRegistry Registry, InMemoryCallOwnershipDirectory Ownership, RecordingPodHeartbeat Heartbeat, MutableClusterIdentity Identity, ServiceProvider Services)
         CreateRig()
     {
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var identity = new MutableClusterIdentity
         {
             ClusterId = "cluster-1",
@@ -208,7 +205,6 @@ public class CallSessionOwnershipTests
 
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
             new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
             TestTelemetry.LoggerFactory,
@@ -217,6 +213,22 @@ public class CallSessionOwnershipTests
             heartbeat: heartbeat);
 
         return (factory, registry, ownership, heartbeat, identity, services);
+    }
+
+    /// <summary>
+    /// Builds a service provider with <see cref="FakeOwnershipStrategy"/> registered as a
+    /// keyed transient <see cref="IConversationStrategy"/> at <see cref="AgentTier.RealtimeVoice"/>,
+    /// which is what every test in this file resolves via <c>PreferredTier</c>. Each call to
+    /// <c>CallSessionFactory.CreateAsync</c> resolves a fresh instance so dispose at session end
+    /// is one-to-one.
+    /// </summary>
+    private static ServiceProvider BuildServicesWithFakeStrategy()
+    {
+        var collection = new ServiceCollection();
+        collection.AddKeyedTransient<IConversationStrategy>(
+            AgentTier.RealtimeVoice,
+            (_, _) => new FakeOwnershipStrategy());
+        return collection.BuildServiceProvider();
     }
 
     private sealed class MutableClusterIdentity : IClusterIdentity
@@ -265,18 +277,6 @@ public class CallSessionOwnershipTests
 
         public Task<int> ReapOrphansAsync(IPodLeaseStore podLeases, CancellationToken cancellationToken = default)
             => Task.FromResult(0);
-    }
-
-    private sealed class FakeOwnershipStrategyFactory : IConversationStrategyFactory
-    {
-        public AgentTier Tier => AgentTier.RealtimeVoice;
-
-        public ValueTask<IConversationStrategy> CreateAsync(
-            string callId,
-            IServiceProvider services,
-            IvrWorkflowState? restoreFrom,
-            CancellationToken cancellationToken = default)
-            => ValueTask.FromResult<IConversationStrategy>(new FakeOwnershipStrategy());
     }
 
     private sealed class FakeOwnershipStrategy : IConversationStrategy

@@ -49,6 +49,7 @@ public static class CallerAuthenticationRunner
     /// <returns>The aggregate <see cref="AuthenticationRunResult"/> from the orchestrator, or an empty result when auth is not wired.</returns>
     public static async Task<AuthenticationRunResult> RunAsync(
         StrategyStartContext context,
+        IServiceProvider services,
         ChannelWriter<StrategyEvent>? events = null,
         ILogger? logger = null,
         CancellationToken cancellationToken = default)
@@ -57,8 +58,8 @@ public static class CallerAuthenticationRunner
 
         var log = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
-        var orchestrator = context.Services.GetService<IAuthenticationOrchestrator>();
-        var state = context.Services.GetService<CallerAuthenticationState>();
+        var orchestrator = services.GetService<IAuthenticationOrchestrator>();
+        var state = services.GetService<CallerAuthenticationState>();
         if (orchestrator is null || state is null)
         {
             log.LogDebug(
@@ -72,7 +73,7 @@ public static class CallerAuthenticationRunner
             CallId: context.CallId,
             CallerMetadata: context.CallerMetadata,
             CurrentIdentity: state.Identity,
-            Services: context.Services);
+            Services: services);
 
         AuthenticationRunResult result;
         try

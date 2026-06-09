@@ -4,24 +4,19 @@ using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Exceptions;
 using System.Diagnostics;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
 
 /// <summary>
-/// Default <see cref="ICallSessionFactory"/>. Resolves the strategy synchronously
-/// (no fire-and-forget background attach), then constructs the session.
+/// Default <see cref="ICallSessionFactory"/>. Creates the per-call DI scope, binds the
+/// chosen workflow, resolves the top-tier <see cref="IConversationStrategy"/> from that
+/// scope via keyed DI, then constructs the session.
 /// </summary>
 public sealed class CallSessionFactory : ICallSessionFactory
 {
-    /// <summary>How long a prewarmed entry survives before being evicted if no
-    /// <see cref="CreateAsync"/> claims it (e.g. caller hung up before WSS).</summary>
-    private static readonly TimeSpan prewarmTtl = TimeSpan.FromSeconds(60);
-
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IReadOnlyDictionary<AgentTier, IConversationStrategyFactory> _strategyFactories;
     private readonly CallSessionRegistry _registry;
     private readonly ICallQualityReporter _quality;
     private readonly CallingTelemetry _telemetry;
@@ -30,11 +25,9 @@ public sealed class CallSessionFactory : ICallSessionFactory
     private readonly ILogger _logger;
     private readonly ICallOwnershipDirectory? _ownership;
     private readonly IPodHeartbeat? _heartbeat;
-    private readonly ConcurrentDictionary<string, PrewarmedEntry> _prewarmed = new();
 
     public CallSessionFactory(
         IServiceScopeFactory scopeFactory,
-        IEnumerable<IConversationStrategyFactory> strategyFactories,
         ICallSessionRegistry registry,
         ICallQualityReporter quality,
         ILoggerFactory loggerFactory,
@@ -47,9 +40,6 @@ public sealed class CallSessionFactory : ICallSessionFactory
         ArgumentNullException.ThrowIfNull(telemetry);
 
         _scopeFactory = scopeFactory;
-        _strategyFactories = strategyFactories
-            .GroupBy(f => f.Tier)
-            .ToDictionary(g => g.Key, g => g.Last());
         _registry = (CallSessionRegistry)registry;
         _quality = quality;
         _telemetry = telemetry;
@@ -60,131 +50,17 @@ public sealed class CallSessionFactory : ICallSessionFactory
         _heartbeat = heartbeat;
     }
 
-    public Task PrewarmAsync(CallSessionPrewarmRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var tier = request.PreferredTier ?? AgentTier.DtmfOnly;
-        if (!_strategyFactories.TryGetValue(tier, out var factory))
-        {
-            throw new InvalidOperationException(
-                $"No IConversationStrategyFactory registered for tier {tier}");
-        }
-
-        // If a prewarm is already in flight (or completed) for this call, no-op.
-        if (_prewarmed.ContainsKey(request.CallId))
-        {
-            return Task.CompletedTask;
-        }
-
-        var scope = _scopeFactory.CreateScope();
-        // Bind the chosen workflow on the prewarm scope so the strategy factory resolves it.
-        scope.ServiceProvider.GetService<CallWorkflowSelection>()?.Set(request.WorkflowId);
-        var prewarmCts = new CancellationTokenSource();
-        var linked = CancellationTokenSource.CreateLinkedTokenSource(prewarmCts.Token, cancellationToken);
-
-        // Run on a background task so the IncomingCall webhook isn't blocked.
-        var strategyTask = Task.Run(async () =>
-        {
-            using var span = _telemetry.StartChildActivity(
-                "contact_center.call.prewarm",
-                request.CallId);
-            span?.SetTag(CallingActivitySource.CallTierTag, tier.ToString());
-
-            var strategy = await factory.CreateAsync(
-                request.CallId,
-                scope.ServiceProvider,
-                restoreFrom: null,
-                linked.Token).ConfigureAwait(false);
-
-            try
-            {
-                await strategy.PrewarmAsync(scope.ServiceProvider, linked.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                CallingActivitySource.SetError(span, ex);
-                await strategy.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-
-            span?.SetTag(CallingActivitySource.CallStrategyKindTag, strategy.Kind.ToString());
-            return strategy;
-        }, linked.Token);
-
-        var entry = new PrewarmedEntry(scope, strategyTask, tier, prewarmCts);
-        if (!_prewarmed.TryAdd(request.CallId, entry))
-        {
-            // Lost a race — dispose what we just built.
-            _ = entry.DisposeAsync().AsTask();
-            return Task.CompletedTask;
-        }
-
-        // Schedule eviction so we don't leak open realtime connections if the call never lands.
-        _ = ScheduleEvictionAsync(request.CallId, prewarmTtl);
-
-        // Surface prewarm failures in the log; CreateAsync will fall back to a fresh build.
-        _ = strategyTask.ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                _logger.LogWarning(t.Exception?.GetBaseException(),
-                    "Prewarm failed for call {CallId}; CreateAsync will build a fresh strategy",
-                    request.CallId);
-            }
-        }, TaskScheduler.Default);
-
-        return Task.CompletedTask;
-    }
-
     public async Task<ICallSession> CreateAsync(CallSessionRequest request, CancellationToken cancellationToken = default)
     {
         var tier = request.PreferredTier ?? AgentTier.DtmfOnly;
-        if (!_strategyFactories.TryGetValue(tier, out var factory))
-        {
-            throw new InvalidOperationException(
-                $"No IConversationStrategyFactory registered for tier {tier}");
-        }
 
         using var createSpan = _telemetry.StartChildActivity(
             CallingActivitySource.CreateSessionActivityName,
             request.CallId);
         createSpan?.SetTag(CallingActivitySource.CallTierTag, tier.ToString());
 
-        IServiceScope scope;
-        IConversationStrategy strategy;
-
-        if (_prewarmed.TryRemove(request.CallId, out var prewarmed) && prewarmed.Tier == tier)
-        {
-            createSpan?.SetTag("call.prewarm.hit", true);
-            scope = prewarmed.Scope;
-            try
-            {
-                strategy = await prewarmed.StrategyTask.WaitAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Prewarm faulted — fall back to a fresh build using a new scope.
-                await prewarmed.DisposeAsync().ConfigureAwait(false);
-                scope = _scopeFactory.CreateScope();
-                strategy = await BuildStrategyAsync(factory, request, scope, createSpan, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        else
-        {
-            if (prewarmed is not null)
-            {
-                // Tier mismatch — caller asked for something else than what we prewarmed.
-                _logger.LogInformation(
-                    "Discarding prewarmed strategy for call {CallId}: prewarmed tier {PrewarmTier} != requested tier {RequestedTier}",
-                    request.CallId, prewarmed.Tier, tier);
-                await prewarmed.DisposeAsync().ConfigureAwait(false);
-            }
-
-            createSpan?.SetTag("call.prewarm.hit", false);
-            scope = _scopeFactory.CreateScope();
-            strategy = await BuildStrategyAsync(factory, request, scope, createSpan, cancellationToken).ConfigureAwait(false);
-        }
+        var scope = _scopeFactory.CreateScope();
+        var strategy = BuildStrategy(tier, request, scope, createSpan);
 
         _telemetry.CallCreated(request.CallId, tier, strategy.Kind);
         createSpan?.SetTag(CallingActivitySource.CallStrategyKindTag, strategy.Kind.ToString());
@@ -237,83 +113,31 @@ public sealed class CallSessionFactory : ICallSessionFactory
         return session;
     }
 
-    private static async Task<IConversationStrategy> BuildStrategyAsync(
-        IConversationStrategyFactory factory,
+    private static IConversationStrategy BuildStrategy(
+        AgentTier tier,
         CallSessionRequest request,
         IServiceScope scope,
-        Activity? createSpan,
-        CancellationToken cancellationToken)
+        Activity? createSpan)
     {
         try
         {
-            // Bind the chosen workflow on this scope so the strategy factory resolves it.
+            // Bind the chosen workflow on this scope so the keyed strategy registration resolves it.
             scope.ServiceProvider.GetService<CallWorkflowSelection>()?.Set(request.WorkflowId);
-            return await factory.CreateAsync(
-                request.CallId,
-                scope.ServiceProvider,
-                restoreFrom: null,
-                cancellationToken).ConfigureAwait(false);
+
+            // Resolve the top-tier strategy from the scope via keyed DI. The composite (when
+            // registered) shadows any single-tier registration at the same key, so this single
+            // resolve returns either the leaf strategy or the composite wrapper.
+            return scope.ServiceProvider.GetRequiredKeyedService<IConversationStrategy>(tier);
         }
         catch (Exception ex)
         {
             CallingActivitySource.SetError(createSpan, ex);
             scope.Dispose();
-            throw;
-        }
-    }
-
-    private async Task ScheduleEvictionAsync(string callId, TimeSpan ttl)
-    {
-        try
-        {
-            await Task.Delay(ttl).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { return; }
-
-        if (_prewarmed.TryRemove(callId, out var entry))
-        {
-            _logger.LogInformation(
-                "Evicting unclaimed prewarmed strategy for call {CallId} after {Ttl}",
-                callId, ttl);
-            await entry.DisposeAsync().ConfigureAwait(false);
-        }
-    }
-
-    private sealed class PrewarmedEntry : IAsyncDisposable
-    {
-        public PrewarmedEntry(
-            IServiceScope scope,
-            Task<IConversationStrategy> strategyTask,
-            AgentTier tier,
-            CancellationTokenSource cts)
-        {
-            Scope = scope;
-            StrategyTask = strategyTask;
-            Tier = tier;
-            Cts = cts;
-        }
-
-        public IServiceScope Scope { get; }
-
-        public Task<IConversationStrategy> StrategyTask { get; }
-
-        public AgentTier Tier { get; }
-
-        public CancellationTokenSource Cts { get; }
-
-        public async ValueTask DisposeAsync()
-        {
-            try { await Cts.CancelAsync().ConfigureAwait(false); } catch { /* tolerated */ }
-
-            try
-            {
-                var strategy = await StrategyTask.ConfigureAwait(false);
-                await strategy.DisposeAsync().ConfigureAwait(false);
-            }
-            catch { /* prewarm faulted or cancelled */ }
-
-            try { Scope.Dispose(); } catch { /* tolerated */ }
-            try { Cts.Dispose(); } catch { /* tolerated */ }
+            throw new InvalidOperationException(
+                $"No IConversationStrategy registered for tier {tier}. " +
+                $"Register one via AddRealtimeCallWorkflowStrategy / AddNluCallWorkflowStrategy / " +
+                $"AddDtmfCallWorkflowStrategy / AddCompositeFallbackStrategy.",
+                ex);
         }
     }
 }

@@ -440,9 +440,9 @@ public static class CallingApi
     /// <summary>
     /// Shared session-start path for both verb and streaming modes. Builds a
     /// <see cref="CallSessionRequest"/> whose <see cref="CallSessionRequest.PreferredTier"/>
-    /// is taken from the showcase <see cref="CallEntryConfig"/>; the DI-resolved
-    /// <c>IConversationStrategyFactory</c> for that tier (typically the composite chain
-    /// registered last) is selected automatically.
+    /// is taken from the showcase <see cref="CallEntryConfig"/>; the keyed
+    /// <see cref="IConversationStrategy"/> registered for that tier (typically the composite
+    /// chain registered last) is resolved automatically from the per-call DI scope.
     /// </summary>
     private static async Task<ICallSession> StartCallSessionAsync(
         CallingServices services,

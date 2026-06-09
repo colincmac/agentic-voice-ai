@@ -214,11 +214,6 @@ builder.AddCallSessionContainer()
 // Observer that mirrors caller-auth StrategyEvents into the diagnostics registry.
 builder.Services.AddSingleton<ICallObserver, CallerAuthStateObserver>();
 
-// Startup-time prewarm of factories + catalog. Forces every YAML workflow through the
-// compiler so missing tool names or broken transitions fail the host on boot rather
-// than on the first call. Non-deterministic prewarm errors are still best-effort logged.
-builder.Services.AddHostedService<WorkflowPrewarmHostedService>();
-
 // ============================================================================
 //  Teams
 // ============================================================================

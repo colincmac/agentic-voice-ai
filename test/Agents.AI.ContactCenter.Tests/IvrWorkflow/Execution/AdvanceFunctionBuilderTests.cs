@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Agents.AI.ContactCenter.Authentication;
 using global::Agents.AI.ContactCenter.IvrWorkflow;
 using global::Agents.AI.ContactCenter.IvrWorkflow.Blueprint;
 using global::Agents.AI.ContactCenter.IvrWorkflow.Compilation;
@@ -10,16 +11,20 @@ namespace Agents.AI.ContactCenter.Tests.IvrWorkflow.Execution;
 
 public sealed class AdvanceFunctionBuilderTests
 {
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
+    private static readonly JsonSerializerOptions jsonOpts = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
+    };
+    private static CallerAuthenticationState DefaultAuthState => new CallerAuthenticationState
+    {
+
     };
 
     private static AdvanceFunctionResult Deserialize(object? raw)
     {
         Assert.NotNull(raw);
         var json = raw is JsonElement el ? el.GetRawText() : raw!.ToString();
-        return JsonSerializer.Deserialize<AdvanceFunctionResult>(json!, JsonOpts)!;
+        return JsonSerializer.Deserialize<AdvanceFunctionResult>(json!, jsonOpts)!;
     }
     private static CompiledCallWorkflow TwoTransitionWorkflow() => new WorkflowGraphCompiler().Compile(new WorkflowBlueprint
     {
@@ -45,7 +50,7 @@ public sealed class AdvanceFunctionBuilderTests
         CompiledCallWorkflow workflow)
     {
         var sp = new ServiceCollection().BuildServiceProvider();
-        var session = new CallWorkflowSession(workflow, new IvrWorkflowState(), sp);
+        var session = new CallWorkflowSession(workflow,sp, new IvrWorkflowState(), DefaultAuthState);
         var rendered = new List<string>();
         var executor = new WorkflowExecutor(session, (stage, _) =>
         {

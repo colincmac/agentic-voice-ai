@@ -1,9 +1,6 @@
 using System.Threading.Channels;
 using global::Agents.AI.ContactCenter.Authentication;
 using global::Agents.AI.ContactCenter.Calling;
-using global::Agents.AI.ContactCenter.IvrWorkflow;
-using global::Agents.AI.ContactCenter.Media.Audio;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Agents.AI.ContactCenter.Tests.Authentication;
 
@@ -19,6 +16,7 @@ public sealed class CallerAuthenticationRunnerTests
 
         var result = await CallerAuthenticationRunner.RunAsync(
             BuildContext(services),
+            services,
             events.Writer);
 
         Assert.Empty(result.Steps);
@@ -36,6 +34,7 @@ public sealed class CallerAuthenticationRunnerTests
 
         var result = await CallerAuthenticationRunner.RunAsync(
             BuildContext(services),
+            services,
             events.Writer);
 
         Assert.Empty(result.Steps);
@@ -55,6 +54,7 @@ public sealed class CallerAuthenticationRunnerTests
 
         var result = await CallerAuthenticationRunner.RunAsync(
             BuildContext(services),
+            services,
             events.Writer);
 
         Assert.Equal(CallerVerificationLevel.AniMatch, state.Identity.VerificationLevel);
@@ -88,7 +88,7 @@ public sealed class CallerAuthenticationRunnerTests
         var events = Channel.CreateUnbounded<StrategyEvent>();
 
         await CallerAuthenticationRunner.RunAsync(
-            BuildContext(services),
+            BuildContext(services), services,
             events.Writer);
 
         events.Writer.Complete();
@@ -115,7 +115,7 @@ public sealed class CallerAuthenticationRunnerTests
         var events = Channel.CreateUnbounded<StrategyEvent>();
 
         await CallerAuthenticationRunner.RunAsync(
-            BuildContext(services),
+            BuildContext(services), services,
             events.Writer);
 
         events.Writer.Complete();
@@ -136,7 +136,7 @@ public sealed class CallerAuthenticationRunnerTests
                 "AniLookup", new AuthenticationOutcome.Authenticated(identity)));
 
         var result = await CallerAuthenticationRunner.RunAsync(
-            BuildContext(services),
+            BuildContext(services), services,
             events: null);
 
         Assert.Equal(CallerVerificationLevel.AniMatch, state.Identity.VerificationLevel);
@@ -154,7 +154,7 @@ public sealed class CallerAuthenticationRunnerTests
         var events = Channel.CreateUnbounded<StrategyEvent>();
 
         var result = await CallerAuthenticationRunner.RunAsync(
-            BuildContext(services),
+            BuildContext(services), services,
             events.Writer);
 
         Assert.Empty(result.Steps);
@@ -177,7 +177,7 @@ public sealed class CallerAuthenticationRunnerTests
         };
 
         await CallerAuthenticationRunner.RunAsync(
-            BuildContext(services, metadata));
+            BuildContext(services, metadata), services);
 
         Assert.NotNull(capturing.SeenContext);
         Assert.Same(metadata, capturing.SeenContext!.CallerMetadata);
@@ -188,7 +188,7 @@ public sealed class CallerAuthenticationRunnerTests
     public async Task NullContext_Throws()
     {
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => CallerAuthenticationRunner.RunAsync(context: null!));
+            () => CallerAuthenticationRunner.RunAsync(context: null!, services: null!));
     }
 
     private static IServiceProvider BuildServices(

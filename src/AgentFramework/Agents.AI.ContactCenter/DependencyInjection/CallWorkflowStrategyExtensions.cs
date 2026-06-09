@@ -5,41 +5,45 @@ using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
 using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
 using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
+using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.IvrWorkflow.Execution;
+using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Telemetry;
 using Agents.AI.Extensions.ToolApproval;
 using Agents.AI.Realtime;
+using Microsoft.Agents.AI.Hosting;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Agents.AI.Hosting;
-using Microsoft.Extensions.AI;
-using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.Options;
 
 namespace Agents.AI.ContactCenter.DependencyInjection;
 
 /// <summary>
-/// DI extensions for wiring Phase-5 strategies that operate on the new
+/// DI extensions for wiring strategies that operate on the
 /// <see cref="IvrWorkflow.Blueprint.WorkflowBlueprint"/> / <see cref="IvrWorkflow.Compilation.CompiledCallWorkflow"/>
-/// model. Live alongside the legacy <c>AddRealtimeVoiceStrategy</c> et al. until the
-/// migration is complete.
+/// model. Each <c>Add*CallWorkflowStrategy</c> registers an <see cref="IConversationStrategy"/>
+/// as keyed transient at the strategy's <see cref="AgentTier"/>, with a delegate that resolves
+/// per-call services from the scope and constructs a fresh strategy instance.
 /// </summary>
 public static class CallWorkflowStrategyExtensions
 {
     /// <summary>
-    /// Register a <see cref="RealtimeCallWorkflowStrategy"/> factory. The workflow is selected
-    /// per call via <c>CallSessionRequest.WorkflowId</c>; <paramref name="defaultWorkflowId"/> is
-    /// used when the request omits one, falling back to the single registered workflow when the
-    /// catalog is unambiguous. The caller must also register the realtime backend
-    /// (<c>builder.AddRealtimeVoiceStrategy(...)</c> already does this), the workflow
-    /// blueprint(s) (via <c>services.AddCallWorkflowsFromDirectory(rootDirectory, agentKey)</c>
+    /// Register a <see cref="RealtimeCallWorkflowStrategy"/> at <see cref="AgentTier.RealtimeVoice"/>.
+    /// The workflow is selected per call via <c>CallSessionRequest.WorkflowId</c>;
+    /// <paramref name="defaultWorkflowId"/> is used when the request omits one, falling back to
+    /// the single registered workflow when the catalog is unambiguous. The caller must also
+    /// register the realtime backend (typically via <c>builder.AddRealtimeVoiceStrategy(...)</c>),
+    /// the workflow blueprint(s) (via <c>services.AddCallWorkflowsFromDirectory(...)</c>
     /// or <c>services.AddCallWorkflow(...)</c>), and any tools the blueprints reference
     /// (via <c>services.AddIvrTool(agentKey, name, factory, lifetime)</c>).
     /// </summary>
     public static CallSessionContainerBuilder AddRealtimeCallWorkflowStrategy(
         this CallSessionContainerBuilder builder,
         string? realtimeAgentServiceKey = null,
-        RealtimeAgentRunOptions? runOptions = null,
         string? defaultWorkflowId = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -59,27 +63,20 @@ public static class CallWorkflowStrategyExtensions
                 serviceProvider: sp);
         });
 
-        //builder.Services.AddTransient<IRealtimeVoiceBackend>(sp =>
-        //{
-        //    var agent = sp.GetRequiredService<AuthorizingAIAgent>();
-        //    var loggerFactory = sp.GetService<ILoggerFactory>();
-        //    return new AIAgentBackend(agent, runOptions: runOptions, loggerFactory);
-        //});
-
         builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
-        builder.Services.AddSingleton<IConversationStrategyFactory>(
-            _ => new RealtimeCallWorkflowStrategyFactory(defaultWorkflowId));
+
+        builder.Services.AddKeyedTransient<IConversationStrategy, RealtimeCallWorkflowStrategy>(AgentTier.RealtimeVoice);
 
         return builder;
     }
 
     /// <summary>
-    /// Register an <see cref="NluCallWorkflowStrategy"/> factory. The workflow is selected per
-    /// call via <c>CallSessionRequest.WorkflowId</c>; <paramref name="defaultWorkflowId"/> is used
-    /// when the request omits one, falling back to the single registered workflow when unambiguous.
-    /// Requires an <see cref="Agents.IntentAgent.IvrIntentAgent"/> and
-    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI (the legacy
-    /// <c>AddNluStrategy(...)</c> already wires the intent agent).
+    /// Register an <see cref="NluCallWorkflowStrategy"/> at <see cref="AgentTier.IntentNlu"/>.
+    /// The workflow is selected per call via <c>CallSessionRequest.WorkflowId</c>;
+    /// <paramref name="defaultWorkflowId"/> is used when the request omits one, falling back to
+    /// the single registered workflow when unambiguous. Requires an
+    /// <see cref="Agents.IntentAgent.IvrIntentAgent"/> and
+    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI.
     /// </summary>
     public static CallSessionContainerBuilder AddNluCallWorkflowStrategy(
         this CallSessionContainerBuilder builder,
@@ -113,19 +110,40 @@ public static class CallWorkflowStrategyExtensions
 
         builder.Services.TryAddSingleton<IvrIntentAgent>(sp => sp.GetRequiredKeyedService<IvrIntentAgent>(options.Name));
 
-
         builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
-        builder.Services.AddSingleton<Calling.IConversationStrategyFactory>(
-            _ => new NluCallWorkflowStrategyFactory(defaultWorkflowId));
+
+        builder.Services.AddKeyedTransient<IConversationStrategy>(AgentTier.IntentNlu, (sp, _) =>
+        {
+            var catalog = sp.GetRequiredService<ICallWorkflowCatalog>();
+            var selection = sp.GetRequiredService<CallWorkflowSelection>();
+            var compiled = selection.Resolve(catalog, defaultWorkflowId);
+
+            var intentAgent = sp.GetRequiredService<IvrIntentAgent>();
+            var synthesizer = sp.GetRequiredService<ISpeechSynthesizer>();
+            var escalation = sp.GetService<TransferEscalationTarget>();
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+            var sessionFactory = sp.GetService<ICallWorkflowSessionFactory>()
+                ?? new CallWorkflowSessionFactory(loggerFactory);
+
+            var session = sessionFactory.Create(compiled, sp);
+
+            return new NluCallWorkflowStrategy(
+                session,
+                intentAgent,
+                synthesizer,
+                escalation,
+                loggerFactory);
+        });
 
         return builder;
     }
 
     /// <summary>
-    /// Register a <see cref="DtmfCallWorkflowStrategy"/> factory. The workflow is selected per
-    /// call via <c>CallSessionRequest.WorkflowId</c>; <paramref name="defaultWorkflowId"/> is used
-    /// when the request omits one, falling back to the single registered workflow when unambiguous.
-    /// Requires an <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI for SSML/text playback.
+    /// Register a <see cref="DtmfCallWorkflowStrategy"/> at <see cref="AgentTier.DtmfOnly"/>.
+    /// The workflow is selected per call via <c>CallSessionRequest.WorkflowId</c>;
+    /// <paramref name="defaultWorkflowId"/> is used when the request omits one, falling back to
+    /// the single registered workflow when unambiguous. Requires an
+    /// <see cref="Agents.AI.ContactCenter.Media.Audio.ISpeechSynthesizer"/> in DI for SSML/text playback.
     /// </summary>
     public static CallSessionContainerBuilder AddDtmfCallWorkflowStrategy(
         this CallSessionContainerBuilder builder,
@@ -134,8 +152,25 @@ public static class CallWorkflowStrategyExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.TryAddSingleton<ICallWorkflowSessionFactory, CallWorkflowSessionFactory>();
-        builder.Services.AddSingleton<Calling.IConversationStrategyFactory>(
-            _ => new DtmfCallWorkflowStrategyFactory(defaultWorkflowId));
+
+        builder.Services.AddKeyedTransient<IConversationStrategy>(AgentTier.DtmfOnly, (sp, _) =>
+        {
+            var catalog = sp.GetRequiredService<ICallWorkflowCatalog>();
+            var selection = sp.GetRequiredService<CallWorkflowSelection>();
+            var compiled = selection.Resolve(catalog, defaultWorkflowId);
+
+            var synthesizer = sp.GetService<ISpeechSynthesizer>();
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+            var sessionFactory = sp.GetService<ICallWorkflowSessionFactory>()
+                ?? new CallWorkflowSessionFactory(loggerFactory);
+
+            var session = sessionFactory.Create(compiled, sp);
+
+            return new DtmfCallWorkflowStrategy(
+                session,
+                synthesizer,
+                loggerFactory);
+        });
 
         return builder;
     }

@@ -183,7 +183,7 @@ public sealed class WorkflowGraphCompilerTests
         var edge = compiled.GetStage("a").OutgoingEdges[0];
 
         var sp = new ServiceCollection().BuildServiceProvider();
-        var deny = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), null, sp), default);
+        var deny = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), null), default);
         Assert.False(deny.Passed);
 
         var auth = new CallerAuthenticationState();
@@ -192,7 +192,7 @@ public sealed class WorkflowGraphCompilerTests
             UserId = "u",
             VerificationLevel = CallerVerificationLevel.MultiFactor,
         });
-        var allow = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), auth, sp), default);
+        var allow = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), auth), default);
         Assert.True(allow.Passed);
     }
 
@@ -230,7 +230,7 @@ public sealed class WorkflowGraphCompilerTests
         var compiled = new WorkflowGraphCompiler(provider).Compile(blueprint);
         var edge = compiled.GetStage("a").OutgoingEdges[0];
 
-        var result = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), null, sp), default);
+        var result = await edge.Predicate(new WorkflowEdgeContext(new IvrWorkflowState(), null), default);
         Assert.True(result.Passed);
     }
 

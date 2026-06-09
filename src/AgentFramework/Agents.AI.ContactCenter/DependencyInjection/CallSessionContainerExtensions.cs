@@ -1,4 +1,5 @@
 using Agents.AI.ContactCenter.AITools;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
@@ -12,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -108,6 +110,14 @@ public static class CallSessionContainerExtensions
         // Per-call workflow selection, bound by CallSessionFactory before the strategy is built.
         services.TryAddScoped<CallWorkflowSelection>();
 
+        // Per-call workflow state and caller-auth state, shared across composite tier swaps
+        // because every inner strategy in the same call scope resolves the same instance.
+        // The previous design threaded state via a `restoreFrom` ctor parameter on the (now
+        // deleted) IConversationStrategyFactory; scoped registration is the equivalent that
+        // works naturally with keyed DI.
+        services.TryAddScoped<IvrWorkflowState>();
+        services.TryAddScoped<CallerAuthenticationState>();
+
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
         builder.AddCallSessionContainerTelemetry();
@@ -142,25 +152,28 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers a <see cref="CompositeFallbackStrategy"/> at <paramref name="topTier"/>. The composite
-    /// shadows any individual factory at the top tier (last-registered wins) and walks the
-    /// <paramref name="orderedTiers"/> chain on each inner strategy fault, preserving
-    /// <see cref="IvrWorkflowState"/> via <c>restoreFrom</c>. Per-call scoped services
-    /// (e.g. <c>CallerAuthenticationState</c>) are shared across every tier in the chain.
+    /// Registers a <see cref="CompositeFallbackStrategy"/> as the keyed <see cref="IConversationStrategy"/>
+    /// for <paramref name="topTier"/>. The composite shadows any single-tier registration at the
+    /// same key (last-registered wins in MEDI) and walks the <paramref name="orderedTiers"/> chain
+    /// on each inner strategy fault, resolving each inner strategy from the per-call scope via
+    /// <c>GetRequiredKeyedService&lt;IConversationStrategy&gt;(tier)</c>. Per-call
+    /// <see cref="IvrWorkflowState"/> survives swaps because it's registered as scoped in the
+    /// call scope and every inner strategy reads the same instance.
     /// </summary>
     /// <param name="topTier">
-    /// The tier the call session factory will look up. Must be the first entry of
+    /// The tier <see cref="CallSessionFactory"/> will resolve. Must be the first entry of
     /// <paramref name="orderedTiers"/>.
     /// </param>
     /// <param name="orderedTiers">
     /// Ordered fallback chain — first tier is the primary; subsequent tiers are tried in order
-    /// when the active inner faults.
+    /// when the active inner faults. Tiers without a matching keyed registration are skipped
+    /// (with a warning) so the chain remains usable as the host adds tiers incrementally.
     /// </param>
     /// <remarks>
-    /// Register the inner factories (e.g. <see cref="AddRealtimeVoiceStrategy"/>,
-    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStreamingStrategy"/>,
-    /// <see cref="AddDtmfVerbStrategy"/>) BEFORE calling this
-    /// method so the composite can resolve them at call-create time.
+    /// Register the inner strategies (e.g. <see cref="CallWorkflowStrategyExtensions.AddRealtimeCallWorkflowStrategy"/>,
+    /// <see cref="CallWorkflowStrategyExtensions.AddNluCallWorkflowStrategy"/>,
+    /// <see cref="CallWorkflowStrategyExtensions.AddDtmfCallWorkflowStrategy"/>) BEFORE calling
+    /// this method so the composite can resolve them at call-create time.
     /// </remarks>
     public CallSessionContainerBuilder AddCompositeFallbackStrategy(AgentTier topTier, params AgentTier[] orderedTiers)
     {
@@ -168,8 +181,18 @@ public sealed class CallSessionContainerBuilder
         {
             throw new ArgumentException("Provide at least one tier in the fallback chain.", nameof(orderedTiers));
         }
-        Services.AddSingleton<IConversationStrategyFactory>(_ =>
-            new CompositeFallbackStrategyFactory(topTier, orderedTiers));
+        if (orderedTiers[0] != topTier)
+        {
+            throw new ArgumentException(
+                $"The first ordered tier ({orderedTiers[0]}) must match topTier ({topTier}).",
+                nameof(orderedTiers));
+        }
+
+        // Snapshot to defend against caller mutation of the params array after registration.
+        var snapshot = orderedTiers.ToArray();
+
+        Services.AddKeyedTransient<IConversationStrategy>(topTier, (sp, _) =>
+            new CompositeFallbackStrategy(snapshot, sp.GetService<ILoggerFactory>()));
         return this;
     }
 

@@ -43,6 +43,7 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
     private Task? _dtmfPump;
     private bool _suspended;
     private string _callId = string.Empty;
+    private int _disposed;
 
     public DtmfCallWorkflowStrategy(
         CallWorkflowSession session,
@@ -81,6 +82,7 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
         // CallerAuthenticationState. See Authentication/README.md "Call-start helper".
         await CallerAuthenticationRunner.RunAsync(
             context,
+            context.Services,
             _events.Writer,
             _logger,
             cancellationToken).ConfigureAwait(false);
@@ -128,6 +130,11 @@ public sealed class DtmfCallWorkflowStrategy : IConversationStrategy
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await StopAsync().ConfigureAwait(false);
         _cts.Dispose();
     }

@@ -1,9 +1,10 @@
 using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.IvrWorkflow.Compilation;
 using Agents.AI.ContactCenter.IvrWorkflow.Navigation;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow.Execution;
 
@@ -120,6 +121,7 @@ public sealed class CallWorkflowSessionFactory : ICallWorkflowSessionFactory
     {
         var workflowState = services.GetService<IvrWorkflowState>() ?? new IvrWorkflowState();
         var authState = services.GetService<CallerAuthenticationState>() ?? new CallerAuthenticationState();
+
         return new CallWorkflowSession(workflow, services, workflowState, authState, _loggerFactory);
     }
 }

@@ -197,7 +197,12 @@ internal sealed class CallFixture : IAsyncDisposable
     {
         var strategy = new ControllableStrategy();
 
-        var services = new ServiceCollection().BuildServiceProvider();
+        // Register the test-double strategy as the keyed IConversationStrategy that the
+        // CallSessionFactory will resolve for AgentTier.RealtimeVoice.
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddKeyedSingleton<IConversationStrategy>(AgentTier.RealtimeVoice, strategy);
+        var services = serviceCollection.BuildServiceProvider();
+
         var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
 
@@ -206,7 +211,6 @@ internal sealed class CallFixture : IAsyncDisposable
 
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new ControllableStrategyFactory(strategy)],
             registry,
             quality,
             TestTelemetry.LoggerFactory,
@@ -267,21 +271,6 @@ internal sealed class CallFixture : IAsyncDisposable
     {
         await Session.DisposeAsync();
     }
-}
-
-internal sealed class ControllableStrategyFactory : IConversationStrategyFactory
-{
-    private readonly ControllableStrategy _strategy;
-    public ControllableStrategyFactory(ControllableStrategy strategy) { _strategy = strategy; }
-
-    public AgentTier Tier => AgentTier.RealtimeVoice;
-
-    public ValueTask<IConversationStrategy> CreateAsync(
-        string callId,
-        IServiceProvider services,
-        IvrWorkflowState? restoreFrom,
-        CancellationToken cancellationToken = default)
-        => ValueTask.FromResult<IConversationStrategy>(_strategy);
 }
 
 /// <summary>

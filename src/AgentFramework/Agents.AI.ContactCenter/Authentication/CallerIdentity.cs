@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
+using Microsoft.Identity.Web;
+using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace Agents.AI.ContactCenter.Authentication;
 
@@ -26,8 +28,12 @@ public sealed record CallerIdentity(
     CallerVerificationLevel VerificationLevel,
     DateTimeOffset AuthenticatedAt,
     string AuthenticatedBy,
-    IReadOnlyDictionary<string, object?> Claims)
+    IReadOnlyDictionary<string, object?> Claims,
+    IReadOnlySet<string>? Methods = null)
 {
+    private static readonly IReadOnlySet<string> emptyMethods =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     public static CallerIdentity Anonymous { get; } = new(
         UserId: "anonymous",
         DisplayName: "Anonymous Caller",
@@ -37,7 +43,11 @@ public sealed record CallerIdentity(
         VerificationLevel: CallerVerificationLevel.None,
         AuthenticatedAt: DateTimeOffset.MinValue,
         AuthenticatedBy: "(none)",
-        Claims: new Dictionary<string, object?>());
+        Claims: new Dictionary<string, object?>(),
+        Methods: emptyMethods);
+
+    public IReadOnlySet<string> AuthenticationMethods => Methods ?? emptyMethods;
+
 
     /// <summary>
     /// Returns a copy of this identity with the provided <paramref name="level"/> if it is stronger
@@ -46,21 +56,35 @@ public sealed record CallerIdentity(
     public CallerIdentity WithAtLeast(CallerVerificationLevel level)
         => level > VerificationLevel ? this with { VerificationLevel = level } : this;
 
+    /// <summary>Returns a copy with <paramref name="method"/> added to the method set.</summary>
+    public CallerIdentity WithMethod(string method)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(method);
+        var next = new HashSet<string>(AuthenticationMethods, StringComparer.OrdinalIgnoreCase) { method };
+        return this with { Methods = next };
+    }
+
     public ClaimsPrincipal ToClaimsPrincipal()
     {
         var claims = new List<Claim>
-    {
-        new(ClaimTypes.NameIdentifier, UserId),
-        new(ClaimTypes.Name, DisplayName),
-        // acr/amr are the standard OIDC vocabulary for "level of assurance" and "methods used"
-        new("acr", ((int)VerificationLevel).ToString(CultureInfo.InvariantCulture)),
-        new("amr", AuthenticatedBy),
-        new("auth_time", AuthenticatedAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
-    };
+        {
+            new(ClaimTypes.NameIdentifier, UserId),
+            new(ClaimTypes.Name, DisplayName),
+            // acr/amr are the standard OIDC vocabulary for "level of assurance" and "methods used"
+            new(JwtRegisteredClaimNames.Acr, ((int)VerificationLevel).ToString(CultureInfo.InvariantCulture)),
+            new(JwtRegisteredClaimNames.AuthTime, AuthenticatedAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
+        };
 
-        if (PhoneNumber is not null) { claims.Add(new Claim("phone_number", PhoneNumber)); }
+        foreach (var method in AuthenticationMethods.Count == 0
+            ? new[] { AuthenticatedBy }
+            : (IEnumerable<string>)AuthenticationMethods)
+        {
+            claims.Add(new Claim(JwtRegisteredClaimNames.Amr, method));
+        }
+
+        if (PhoneNumber is not null) { claims.Add(new Claim(JwtRegisteredClaimNames.PhoneNumber, PhoneNumber)); }
         if (Email is not null) { claims.Add(new Claim(ClaimTypes.Email, Email)); }
-        if (EntraObjectId is not null) { claims.Add(new Claim("oid", EntraObjectId)); }
+        if (EntraObjectId is not null) { claims.Add(new Claim(ClaimConstants.Oid, EntraObjectId)); }
 
         foreach (var (key, value) in Claims)
         {
