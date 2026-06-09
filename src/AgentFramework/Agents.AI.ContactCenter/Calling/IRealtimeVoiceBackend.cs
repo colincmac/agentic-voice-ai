@@ -30,6 +30,23 @@ public interface IRealtimeVoiceBackend : IAsyncDisposable
     ValueTask SendAudioAsync(ReadOnlyMemory<byte> pcm, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Inject a synthetic user text turn into the realtime session. Used by
+    /// <c>RealtimeVoiceStrategy</c> as the LLM-aware fallback for inbound DTMF digits
+    /// when the current stage has no <c>scripted.dtmf</c> configuration: the digit is
+    /// surfaced as a user message (e.g. <c>"[Caller pressed 1]"</c>) so the model can
+    /// react conversationally instead of silently dropping the input.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation is a no-op so backends that don't support live user-message
+    /// injection compile without changes; on such backends the LLM-aware DTMF path is
+    /// effectively a black hole and the strategy will log a warning at the call site.
+    /// Production backends that drive a realtime model session must override and forward
+    /// to the underlying realtime client.
+    /// </remarks>
+    ValueTask SendUserTextAsync(string text, CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
+
+    /// <summary>
     /// Update the system prompt mid-call (used when entering a new workflow step).
     /// Implementations may no-op if their backend doesn't support live prompt updates.
     /// </summary>
@@ -55,6 +72,8 @@ public interface IRealtimeVoiceBackend : IAsyncDisposable
     /// rather than throwing inside the enumeration so the strategy can degrade gracefully.
     /// </summary>
     IAsyncEnumerable<RealtimeBackendUpdate> RunAsync(CancellationToken cancellationToken = default);
+
+    ValueTask StartResponseAsync(IEnumerable<AITool>? tools = null, string? instruction = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -66,5 +85,32 @@ public abstract record RealtimeBackendUpdate(DateTimeOffset At)
     public sealed record Audio(ReadOnlyMemory<byte> Pcm, DateTimeOffset At) : RealtimeBackendUpdate(At);
     public sealed record Transcript(string Speaker, string Text, bool IsFinal, DateTimeOffset At) : RealtimeBackendUpdate(At);
     public sealed record AgentText(string Text, DateTimeOffset At) : RealtimeBackendUpdate(At);
+
+    /// <summary>
+    /// Emitted when the realtime model invokes a tool. Strategies use this to react to
+    /// orchestration-level functions (for example the synthesized IVR <c>advance</c> tool
+    /// that drives stage transitions) without having to subscribe to the underlying
+    /// <c>FunctionCallContent</c> stream. <paramref name="Arguments"/> is the parsed
+    /// argument dictionary; <paramref name="CallId"/> is the realtime provider's call id
+    /// when available.
+    /// </summary>
+    public sealed record FunctionCalled(
+        string Name,
+        IReadOnlyDictionary<string, object?> Arguments,
+        string? CallId,
+        DateTimeOffset At) : RealtimeBackendUpdate(At);
+
+    public sealed record FunctionResult(
+        string CallId,
+        object? Result,
+        DateTimeOffset At) : RealtimeBackendUpdate(At);
+
+    /// <summary>
+    /// Emitted when the realtime model's server-side VAD detects the caller has started
+    /// speaking. Used by streaming strategies to interrupt (barge-in) any in-flight agent
+    /// audio so the caller isn't talked over.
+    /// </summary>
+    public sealed record UserSpeechStarted(DateTimeOffset At) : RealtimeBackendUpdate(At);
+
     public sealed record Faulted(Exception Exception, string Message, DateTimeOffset At) : RealtimeBackendUpdate(At);
 }

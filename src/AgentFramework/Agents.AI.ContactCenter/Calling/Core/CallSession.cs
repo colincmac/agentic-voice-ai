@@ -4,7 +4,6 @@ using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
 
@@ -71,11 +70,14 @@ public sealed class CallSession : ICallSession
         ICallQualityReporter qualityReporter,
         IServiceScope scope,
         ICallSessionRegistry registry,
-        ILogger<CallSession>? logger = null,
-        CallingTelemetry? telemetry = null,
+        ILogger<CallSession> logger,
+        CallingTelemetry telemetry,
         ICallOwnershipDirectory? ownership = null,
         IPodHeartbeat? heartbeat = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(telemetry);
+
         CallId = callId;
         CallerEdge = callerEdge;
         _strategy = strategy;
@@ -83,8 +85,8 @@ public sealed class CallSession : ICallSession
         _quality = qualityReporter;
         _scope = scope;
         _registry = registry;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
-        _logger = logger ?? NullLogger<CallSession>.Instance;
+        _telemetry = telemetry;
+        _logger = logger;
         _ownership = ownership;
         _heartbeat = heartbeat;
         StartedAt = DateTimeOffset.UtcNow;
@@ -502,9 +504,8 @@ public sealed class CallSession : ICallSession
         CallId = CallId,
         InboundAudio = _strategyInbound.Reader,
         InboundDtmf = CallerEdge.InboundDtmf,
-        Services = _scope.ServiceProvider,
         CallerMetadata = CallerEdge.Metadata,
-        RestoreFrom = null
+        Services = _scope.ServiceProvider
     };
 
     /// <summary>

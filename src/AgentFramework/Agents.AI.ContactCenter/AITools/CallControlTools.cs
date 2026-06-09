@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using Agents.AI.Extensions.AITools;
 using Agents.AI.ContactCenter.Calling;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -10,11 +9,12 @@ namespace Agents.AI.ContactCenter.AITools;
 /// <summary>
 /// AI-callable call-control verbs (hang up, transfer) bound to the live
 /// <see cref="ICallSession"/>. The agent reaches the active session through
-/// the scoped <see cref="ICallSessionAccessor"/>, so this collection only
-/// works when registered inside the per-call DI scope created by
-/// <c>CallSessionFactory</c>.
+/// the scoped <see cref="ICallSessionAccessor"/>, so this class must be
+/// resolved from the per-call DI scope created by <c>CallSessionFactory</c>.
+/// Register the tool surface with
+/// <see cref="DependencyInjection.CallSessionContainerExtensions.AddCallControlTools(DependencyInjection.CallSessionContainerBuilder, string)"/>.
 /// </summary>
-public sealed class CallControlTools : IAIToolCollection
+public sealed class CallControlTools
 {
     private readonly ICallSessionAccessor _sessionAccessor;
     private readonly ILogger<CallControlTools> _logger;
@@ -26,6 +26,12 @@ public sealed class CallControlTools : IAIToolCollection
         _sessionAccessor = sessionAccessor;
         _logger = logger ?? NullLogger<CallControlTools>.Instance;
     }
+
+    /// <summary>Stable tool name used in YAML workflows for the hang-up verb.</summary>
+    public const string HangUpToolName = "hang_up_call";
+
+    /// <summary>Stable tool name used in YAML workflows for the transfer verb.</summary>
+    public const string TransferToolName = "transfer_call";
 
     [Description(
         "End the current phone call. Use this only when the conversation is complete, " +
@@ -105,11 +111,13 @@ public sealed class CallControlTools : IAIToolCollection
         }
     }
 
-    public IEnumerable<AITool> AsAITools()
-    {
-        yield return AIFunctionFactory.Create(HangUpCallAsync, name: "hang_up_call");
-        yield return AIFunctionFactory.Create(TransferCallAsync, name: "transfer_call");
-    }
+    /// <summary>Build the <see cref="AIFunction"/> for <see cref="HangUpCallAsync"/> bound to <paramref name="instance"/>.</summary>
+    public static AIFunction BuildHangUpTool(CallControlTools instance) =>
+        AIFunctionFactory.Create(instance.HangUpCallAsync, name: HangUpToolName);
+
+    /// <summary>Build the <see cref="AIFunction"/> for <see cref="TransferCallAsync"/> bound to <paramref name="instance"/>.</summary>
+    public static AIFunction BuildTransferTool(CallControlTools instance) =>
+        AIFunctionFactory.Create(instance.TransferCallAsync, name: TransferToolName);
 
     private static bool TryParseTransferKind(string raw, out TransferKind kind)
     {

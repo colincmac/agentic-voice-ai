@@ -12,7 +12,7 @@ namespace Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 /// </summary>
 /// <remarks>
 /// Public + static so tests can pin down translation behavior without standing up
-/// a realtime client. The adapter (<see cref="AuthorizingAgentRealtimeBackend"/>)
+/// a realtime client. The adapter (<see cref="AuthorizingAIAgent"/>)
 /// uses this exclusively.
 /// </remarks>
 public static class RealtimeBackendUpdateTranslator
@@ -61,9 +61,31 @@ public static class RealtimeBackendUpdateTranslator
                     }
                     break;
 
-                case RealtimeVadContent:
-                    // TODO: Update to emit VAD events. They drive scenarios like presence detection.
-                    // No current strategy consumes them through the backend update stream.
+                case FunctionCallContent fcc:
+                    yield return new RealtimeBackendUpdate.FunctionCalled(
+                        Name: fcc.Name,
+                        Arguments: fcc.Arguments is { } args
+                            ? new Dictionary<string, object?>(args)
+                            : new Dictionary<string, object?>(),
+                        CallId: fcc.CallId,
+                        At: at);
+                    break;
+
+                case FunctionResultContent frc:
+                    yield return new RealtimeBackendUpdate.FunctionResult(
+                        CallId: frc.CallId,
+                        Result: frc.Result,
+                        At: at);
+                    break;
+
+                case RealtimeVadContent vad:
+                    // Surface caller speech-start so the strategy can barge-in
+                    // (cancel any in-flight agent audio). Speech-ended is currently
+                    // not actionable at the backend layer.
+                    if (vad.VadEvent == VadEventType.InputSpeechStarted)
+                    {
+                        yield return new RealtimeBackendUpdate.UserSpeechStarted(at);
+                    }
                     break;
             }
         }

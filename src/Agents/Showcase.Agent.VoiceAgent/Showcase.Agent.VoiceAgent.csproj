@@ -41,9 +41,9 @@
 
   </ItemGroup>
 
-  <ItemGroup>
+  <!--<ItemGroup>
     <Protobuf Include="..\..\protos\agents.intent.v1.proto" GrpcServices="Client" />
-  </ItemGroup>
+  </ItemGroup>-->
   <!-- A2A dependency -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
@@ -58,5 +58,10 @@
     <ProjectReference Include="..\..\AgentFramework\Agents.AI.ContactCenter\Agents.AI.ContactCenter.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Workflow\Samples\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
 </Project>

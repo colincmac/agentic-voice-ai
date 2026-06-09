@@ -15,9 +15,10 @@ public sealed class DashboardProjectionObserver : ICallObserver
     private readonly CallingTelemetry _telemetry;
     private Task? _loop;
 
-    public DashboardProjectionObserver(CallingTelemetry? telemetry = null)
+    public DashboardProjectionObserver(CallingTelemetry telemetry)
     {
-        _telemetry = telemetry ?? CallingTelemetry.Default;
+        ArgumentNullException.ThrowIfNull(telemetry);
+        _telemetry = telemetry;
     }
 
     public string ObserverId { get; } = $"dashboard-projection";

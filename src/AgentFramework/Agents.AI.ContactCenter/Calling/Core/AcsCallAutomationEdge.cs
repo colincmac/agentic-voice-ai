@@ -4,7 +4,6 @@ using Agents.AI.ContactCenter.Media.Signaling;
 using Agents.AI.ContactCenter.Telemetry;
 using Azure.Communication.CallAutomation;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using AcsDtmfTone = Azure.Communication.CallAutomation.DtmfTone;
 
 namespace Agents.AI.ContactCenter.Calling.Core;
@@ -45,16 +44,19 @@ public sealed class AcsCallAutomationEdge : ICallEdge, ICallControl
         string callConnectionId,
         ICallMediaClient media,
         CallEdgeMetadata metadata,
-        ICallControlClient? control = null,
-        ILogger<AcsCallAutomationEdge>? logger = null,
-        CallingTelemetry? telemetry = null)
+        ILogger<AcsCallAutomationEdge> logger,
+        CallingTelemetry telemetry,
+        ICallControlClient? control = null)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(telemetry);
+
         EdgeId = callConnectionId;
         _media = media;
         _control = control;
         Metadata = metadata;
-        _logger = logger ?? NullLogger<AcsCallAutomationEdge>.Instance;
-        _telemetry = telemetry ?? CallingTelemetry.Default;
+        _logger = logger;
+        _telemetry = telemetry;
     }
 
     public string EdgeId { get; }

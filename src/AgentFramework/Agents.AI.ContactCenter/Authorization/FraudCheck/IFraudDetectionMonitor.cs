@@ -1,7 +1,4 @@
 
-
-using Agents.AI.ContactCenter.Authentication.UserIdentity;
-
 using Agents.AI.ContactCenter.IvrWorkflow;
 
 namespace Agents.AI.ContactCenter.Authorization.FraudCheck;

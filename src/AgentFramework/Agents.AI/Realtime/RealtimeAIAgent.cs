@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Extensions.AI.Contents;
+using Extensions.AI.Realtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -39,6 +41,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     private readonly AIAgentMetadata _agentMetadata;
     private readonly ILogger _logger;
     private readonly HashSet<string> _aiContextProviderStateKeys;
+
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RealtimeAIAgent"/> class.
@@ -99,34 +102,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     /// </summary>
     public RealtimeSessionOptions? SessionOptions => _agentOptions?.SessionOptions;
 
-    /// <summary>
-    /// Creates a new realtime session via the underlying <see cref="IRealtimeClient"/> and returns
-    /// an <see cref="RealtimeAIAgentSession"/> that wraps it.
-    /// </summary>
-    /// <param name="sessionOptions">Optional session options that override the agent's defaults.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>A <see cref="RealtimeAIAgentSession"/> containing the active realtime session.</returns>
-    public virtual async ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
-        RealtimeSessionOptions? sessionOptions = null,
-        CancellationToken cancellationToken = default)
-    {
-        var effectiveOptions = sessionOptions ?? _agentOptions?.SessionOptions;
 
-        var loggingAgentName = GetLoggingAgentName();
-
-        _logger.LogDebug("Creating realtime session for agent '{AgentName}' (Id: {AgentId})", loggingAgentName, Id);
-
-        var clientSession = await RealtimeClient.CreateSessionAsync(effectiveOptions, cancellationToken).ConfigureAwait(false);
-
-        var session = new RealtimeAIAgentSession
-        {
-            ClientSession = clientSession,
-        };
-
-        _logger.LogDebug("Realtime session created for agent '{AgentName}' (Id: {AgentId})", loggingAgentName, Id);
-
-        return session;
-    }
 
     /// <summary>
     /// Sends a client message to the realtime session.
@@ -152,41 +128,12 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         await clientSession.SendAsync(message, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Streams server messages from the realtime session as <see cref="AgentResponseUpdate"/> instances.
-    /// </summary>
-    /// <param name="session">The agent session containing the active realtime client session.</param>
-    /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>An async enumerable of <see cref="AgentResponseUpdate"/> instances from the realtime session.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">The session does not have an active realtime client session.</exception>
-    public async IAsyncEnumerable<AgentResponseUpdate> GetStreamingResponseAsync(
-        RealtimeAIAgentSession session,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        _ = Throw.IfNull(session);
-
-        var clientSession = session.ClientSession
-            ?? throw new InvalidOperationException("The session does not have an active realtime client session. Call CreateRealtimeSessionAsync first.");
-
-        _logger.LogDebug("Starting streaming response from realtime session for agent '{AgentName}' (Id: {AgentId})", GetLoggingAgentName(), Id);
-
-        await foreach (var serverMessage in clientSession.GetStreamingResponseAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return new AgentResponseUpdate
-            {
-                AuthorName = Name,
-                AgentId = Id,
-                RawRepresentation = serverMessage,
-            };
-        }
-    }
 
     /// <inheritdoc/>
     /// <remarks>
     /// The <see cref="RealtimeAIAgent"/> does not support the standard request/response <see cref="AIAgent.RunAsync"/>
-    /// pattern. Use <see cref="CreateRealtimeSessionAsync"/>, <see cref="SendAsync"/>, and
-    /// <see cref="GetStreamingResponseAsync"/> instead.
+    /// pattern. Use <see cref="CreateSessionAsync"/>, <see cref="SendAsync"/>, and
+    /// <see cref="RunCoreStreamingAsync"/> instead.
     /// </remarks>
     /// <exception cref="NotSupportedException">Always thrown. Use the realtime session APIs instead.</exception>
     protected override Task<AgentResponse> RunCoreAsync(
@@ -197,16 +144,10 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     {
         throw new NotSupportedException(
             $"{nameof(RealtimeAIAgent)} does not support the standard RunAsync pattern. " +
-            $"Use {nameof(CreateRealtimeSessionAsync)}, {nameof(SendAsync)}, and {nameof(GetStreamingResponseAsync)} for realtime interactions.");
+            $"Use {nameof(CreateSessionAsync)}, {nameof(SendAsync)}, and {nameof(RunCoreStreamingAsync)} for realtime interactions.");
     }
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// The <see cref="RealtimeAIAgent"/> does not support the standard streaming <see cref="AIAgent.RunStreamingAsync"/>
-    /// pattern. Use <see cref="CreateRealtimeSessionAsync"/>, <see cref="SendAsync"/>, and
-    /// <see cref="GetStreamingResponseAsync"/> instead.
-    /// </remarks>
-    /// <exception cref="NotSupportedException">Always thrown. Use the realtime session APIs instead.</exception>
     protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
@@ -252,12 +193,13 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         }
 
         List<RealtimeServerMessage> responseUpdates = [];
+        List<AgentResponseUpdate> turnUpdates = [];
 
         while (hasUpdates)
         {
 
             var update = responseUpdatesEnumerator.Current;
-
+            var turnFinished = false;
             if (update is not null)
             {
                 responseUpdates.Add(update);
@@ -267,21 +209,113 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
                     AuthorName = Name,
                     RawRepresentation = update,
                     MessageId = update.MessageId,
+                    CreatedAt = DateTime.UtcNow,
                 };
 
-                if(update is OutputTextAudioRealtimeServerMessage outputMessage)
+                switch (update)
                 {
-                    wrapped.ResponseId = outputMessage.ResponseId;
-                    wrapped.Contents.Add(new TextContent(outputMessage.Text));
-                    byte[]? audioBytes = outputMessage.Audio is not null
-                        ? Convert.FromBase64String(outputMessage.Audio)
-                        : null;
-                    wrapped.Contents.Add(new DataContent(audioBytes, "audio/pcm"));
+                    case OutputTextAudioRealtimeServerMessage outputMessage:
+                        wrapped.ResponseId = outputMessage.ResponseId;
+                        if (outputMessage.Text is not null)
+                        {
+                            wrapped.Contents.Add(new TextContent(outputMessage.Text));
+                        }
+                        if (outputMessage.Audio is not null)
+                        {
+                            wrapped.Contents.Add(new DataContent(Convert.FromBase64String(outputMessage.Audio), "audio/pcm"));
+                        }
+                        break;
+
+                    case ResponseCreatedRealtimeServerMessage responseMessage:
+                        wrapped.ResponseId = responseMessage.ResponseId;
+                        if (responseMessage.Type == RealtimeServerMessageType.ResponseCreated)
+                        {
+                            wrapped.Contents.Add(new RealtimeResponseStartContent(responseMessage.ResponseId));
+                        }
+                        else if (responseMessage.Type == RealtimeServerMessageType.ResponseDone)
+                        {
+                            wrapped.Contents.Add(new RealtimeResponseFinishedContent(responseMessage.ResponseId));
+                            turnFinished = true;
+                        }
+                        if (responseMessage.Usage is not null)
+                        {
+                            wrapped.Contents.Add(new UsageContent(responseMessage.Usage));
+                        }
+                        if (responseMessage.Error is not null)
+                        {
+                            wrapped.Contents.Add(responseMessage.Error);
+                        }
+                        break;
+
+                    case ResponseOutputItemRealtimeServerMessage outputItemMessage:
+                        wrapped.ResponseId = outputItemMessage.ResponseId;
+                        if (wrapped.MessageId is null && outputItemMessage.Item?.Id is { } itemId)
+                        {
+                            wrapped.MessageId = itemId;
+                        }
+                        if (outputItemMessage.Item?.Contents is { Count: > 0 } itemContents)
+                        {
+                            foreach (var content in itemContents)
+                            {
+                                wrapped.Contents.Add(content);
+                            }
+                        }
+
+                        break;
+
+                    case InputAudioTranscriptionRealtimeServerMessage transcriptionMessage:
+                        if (!string.IsNullOrEmpty(transcriptionMessage.Transcription))
+                        {
+                            wrapped.Contents.Add(new TextContent(transcriptionMessage.Transcription));
+                        }
+                        if (transcriptionMessage.Error is not null)
+                        {
+                            wrapped.Contents.Add(transcriptionMessage.Error);
+                        }
+                        if (transcriptionMessage.Type == RealtimeServerMessageType.InputAudioTranscriptionCompleted
+                            && transcriptionMessage.Usage is not null)
+                        {
+                            wrapped.Contents.Add(new UsageContent(transcriptionMessage.Usage));
+                        }
+                        break;
+
+                    case InputAudioBufferSpeechRealtimeServerMessage speechMessage:
+                        if (wrapped.MessageId is null && speechMessage.ItemId is { } speechItemId)
+                        {
+                            wrapped.MessageId = speechItemId;
+                        }
+                        if (speechMessage.Type == InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStarted)
+                        {
+                            wrapped.Contents.Add(new RealtimeVadContent(VadEventType.InputSpeechStarted)
+                            {
+                                StartTime = speechMessage.AudioStart,
+                            });
+                        }
+                        else if (speechMessage.Type == InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStopped)
+                        {
+                            wrapped.Contents.Add(new RealtimeVadContent(VadEventType.InputSpeechEnded)
+                            {
+                                EndTime = speechMessage.AudioEnd,
+                            });
+                        }
+                        break;
+
+                    default:
+                        // Fallback (including RawContentOnly and error-mapped messages):
+                        // yield with RawRepresentation only.
+                        break;
                 }
+                turnUpdates.Add(wrapped);
                 yield return wrapped;
 
                 hasUpdates = await responseUpdatesEnumerator.MoveNextAsync().ConfigureAwait(false);
 
+                if (turnFinished)
+                {
+                    // TODO use AI Context Provider to store finished turns, and yield them on new calls with a continuation token, instead of relying on the client to keep track of turn updates with the continuation token.
+                    //await NotifyAIContextProviderOfSuccessAsync();
+                    turnFinished = false;
+                }
             }
         }
     }
@@ -303,10 +337,32 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
             ?? RealtimeClient.GetService(serviceType, serviceKey));
     }
 
+    /// <summary>
+    /// Creates a new realtime session via the underlying <see cref="IRealtimeClient"/> and returns
+    /// an <see cref="RealtimeAIAgentSession"/> that wraps it.
+    /// </summary>
+    /// <param name="sessionOptions">Optional session options that override the agent's defaults.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="RealtimeAIAgentSession"/> containing the active realtime session.</returns>
+    public virtual async ValueTask<RealtimeAIAgentSession> CreateSessionAsync(
+        RealtimeSessionOptions? sessionOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveOptions = sessionOptions ?? _agentOptions?.SessionOptions;
+
+        var clientSession = await RealtimeClient.CreateSessionAsync(effectiveOptions, cancellationToken).ConfigureAwait(false);
+
+        var session = new RealtimeAIAgentSession
+        {
+            ClientSession = clientSession,
+        };
+        return session;
+    }
+
     /// <inheritdoc/>
     protected override async ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default)
     {
-        var clientSession = await RealtimeClient.CreateSessionAsync(_agentOptions?.SessionOptions, cancellationToken);
+        var clientSession = await RealtimeClient.CreateSessionAsync(_agentOptions?.SessionOptions, cancellationToken).ConfigureAwait(false);
         return new RealtimeAIAgentSession()
         {
             ClientSession = clientSession,
@@ -370,13 +426,20 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
     {
         if (this.AIContextProviders is { Count: > 0 } contextProviders)
         {
-#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-            AIContextProvider.InvokedContext invokedContext = new AIContextProvider.InvokedContext(this, session, inputMessages, responseMessages);
-#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-
-            foreach (var contextProvider in contextProviders)
+            try
             {
-                await contextProvider.InvokedAsync(invokedContext, cancellationToken).ConfigureAwait(false);
+#pragma warning disable MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+                AIContextProvider.InvokedContext invokedContext = new AIContextProvider.InvokedContext(this, session, inputMessages, responseMessages);
+#pragma warning restore MAAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+                foreach (var contextProvider in contextProviders)
+                {
+                    await contextProvider.InvokedAsync(invokedContext, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception)
+            {
+                // Log and swallow exceptions from the context provider to avoid impacting the agent's execution.
+                // The context provider should handle its own exceptions and not let them propagate up to the agent.
             }
         }
     }
@@ -419,7 +482,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         return token?.ResponseUpdates?.ToList() ?? [];
     }
 
-    private string GetLoggingAgentName() => Name ?? "UnnamedAgent";
+    private string GetLoggingAgentName() => Name ?? "AnonymousAgent";
 
     /// <summary>
     /// Validates that all configured providers have unique <see cref="AIContextProvider.StateKeys"/> values
@@ -475,7 +538,7 @@ public class RealtimeAIAgent : AIAgent, IRealtimeAgent
         var (sessionOptions, continuationToken) = GetSessionConfiguration(runOptions);
 
         //var client = ApplyRunOptionsTransformationsToClient(runOptions, RealtimeClient);
-        agentSession ??= await this.CreateRealtimeSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
+        agentSession ??= await this.CreateSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
 
         if (agentSession is not RealtimeAIAgentSession typedSession)
         {

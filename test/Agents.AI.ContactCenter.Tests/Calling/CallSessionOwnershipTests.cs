@@ -30,7 +30,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-own-1",
             CallerEdge = new FakeOwnershipEdge("call-own-1"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -76,7 +75,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-conflict",
             CallerEdge = edge,
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         }));
 
@@ -92,19 +90,19 @@ public class CallSessionOwnershipTests
     public async Task CreateAsync_without_ownership_directory_works_unchanged()
     {
         // No ownership / no heartbeat — back-compat path.
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter());
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
             CallId = "call-no-own",
             CallerEdge = new FakeOwnershipEdge("call-no-own"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -121,7 +119,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-release",
             CallerEdge = new FakeOwnershipEdge("call-release"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -140,13 +137,14 @@ public class CallSessionOwnershipTests
     {
         var throwingOwnership = new ThrowingReleaseOwnershipDirectory();
         var heartbeat = new RecordingPodHeartbeat();
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter(),
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             ownership: throwingOwnership,
             heartbeat: heartbeat);
 
@@ -154,7 +152,6 @@ public class CallSessionOwnershipTests
         {
             CallId = "call-throw",
             CallerEdge = new FakeOwnershipEdge("call-throw"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -169,19 +166,19 @@ public class CallSessionOwnershipTests
     [Fact]
     public async Task EndAsync_without_ownership_directory_completes_cleanly()
     {
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var registry = new CallSessionRegistry();
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter());
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
             CallId = "call-no-own-end",
             CallerEdge = new FakeOwnershipEdge("call-no-own-end"),
-            Workflow = BuildWorkflow(),
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -192,7 +189,7 @@ public class CallSessionOwnershipTests
     private static (CallSessionFactory Factory, CallSessionRegistry Registry, InMemoryCallOwnershipDirectory Ownership, RecordingPodHeartbeat Heartbeat, MutableClusterIdentity Identity, ServiceProvider Services)
         CreateRig()
     {
-        var services = new ServiceCollection().BuildServiceProvider();
+        var services = BuildServicesWithFakeStrategy();
         var identity = new MutableClusterIdentity
         {
             ClusterId = "cluster-1",
@@ -208,33 +205,31 @@ public class CallSessionOwnershipTests
 
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new FakeOwnershipStrategyFactory()],
             registry,
-            new InMemoryCallQualityReporter(),
+            new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling),
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             ownership: ownership,
             heartbeat: heartbeat);
 
         return (factory, registry, ownership, heartbeat, identity, services);
     }
 
-    private static RealtimeIvrWorkflowDefinition BuildWorkflow() => new()
+    /// <summary>
+    /// Builds a service provider with <see cref="FakeOwnershipStrategy"/> registered as a
+    /// keyed transient <see cref="IConversationStrategy"/> at <see cref="AgentTier.RealtimeVoice"/>,
+    /// which is what every test in this file resolves via <c>PreferredTier</c>. Each call to
+    /// <c>CallSessionFactory.CreateAsync</c> resolves a fresh instance so dispose at session end
+    /// is one-to-one.
+    /// </summary>
+    private static ServiceProvider BuildServicesWithFakeStrategy()
     {
-        Name = "ownership-test",
-        BasePrompt = new RealtimePrompt(),
-        Steps =
-        [
-            new RealtimeIvrWorkflowStep
-            {
-                Id = "step-1",
-                ConversationState = new ConversationState
-                {
-                    Id = "step-1",
-                    Description = "test",
-                    Instructions = ["hi"]
-                }
-            }
-        ]
-    };
+        var collection = new ServiceCollection();
+        collection.AddKeyedTransient<IConversationStrategy>(
+            AgentTier.RealtimeVoice,
+            (_, _) => new FakeOwnershipStrategy());
+        return collection.BuildServiceProvider();
+    }
 
     private sealed class MutableClusterIdentity : IClusterIdentity
     {
@@ -282,19 +277,6 @@ public class CallSessionOwnershipTests
 
         public Task<int> ReapOrphansAsync(IPodLeaseStore podLeases, CancellationToken cancellationToken = default)
             => Task.FromResult(0);
-    }
-
-    private sealed class FakeOwnershipStrategyFactory : IConversationStrategyFactory
-    {
-        public AgentTier Tier => AgentTier.RealtimeVoice;
-
-        public ValueTask<IConversationStrategy> CreateAsync(
-            string callId,
-            IServiceProvider services,
-            RealtimeIvrWorkflowDefinition workflow,
-            IvrWorkflowState? restoreFrom,
-            CancellationToken cancellationToken = default)
-            => ValueTask.FromResult<IConversationStrategy>(new FakeOwnershipStrategy());
     }
 
     private sealed class FakeOwnershipStrategy : IConversationStrategy

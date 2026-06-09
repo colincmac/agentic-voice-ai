@@ -123,7 +123,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
                 =>
             {
                 var tools = options.Tools?.Select(tool => tool is AIFunction aiFunction
-                        ? new AuthorizingAgentFunction(this.InnerAgent, aiFunction, this._delegateFunc)
+                        ? new AuthorizingAgentFunction(this.InnerAgent, aiFunction, this._delegateFunc, this._scopedServices)
                         : tool)
                     .ToList();
                 return new RealtimeSessionOptions()
@@ -148,34 +148,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
         return options;
     }
 
-    //private RealtimeAgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
-    //{
-    //    var runOptions = options as RealtimeAgentRunOptions ?? new();
 
-    //    runOptions.SessionOptions ??= new LiveConversationSessionOptions();
-    //    runOptions.SessionOptions.Tools ??= [];
-
-    //    runOptions.SessionOptions.Tools = [.. ProcessTools(runOptions.SessionOptions.Tools), .. ProcessTools(_additionalTools)];
-
-
-    //    IEnumerable<AITool> ProcessTools(IEnumerable<AITool> tools)
-    //    {
-    //        foreach (var tool in tools)
-    //        {
-    //            if (tool is AIFunction funcTool)
-    //            {
-    //                var authorizedFunc = new AuthorizingAgentFunction(this, funcTool, _delegateFunc);
-    //                yield return authorizedFunc;
-    //            }
-    //            else
-    //            {
-    //                yield return tool;
-    //            }
-    //        }
-    //    }
-    //    ;
-    //    return runOptions;
-    //}
 
 
     public override object? GetService(Type serviceType, object? serviceKey = null) =>
@@ -189,12 +162,13 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
         private readonly ILogger<AuthorizingAgentFunction>? _logger;
         private readonly AIAgent _agent;
         private readonly AgentFunctionInvocationMiddleware? _next;
+        private readonly IServiceProvider? _scopedServices;
         // used to mark that this function follows the approval workflow
         //private readonly ApprovalRequiredAIFunction? _marker;
 
         public readonly List<IToolApprovalRequirement>? ToolRequirements;
 
-        public AuthorizingAgentFunction(AIAgent agent, AIFunction innerFunction, AgentFunctionInvocationMiddleware next) : base(innerFunction)
+        public AuthorizingAgentFunction(AIAgent agent, AIFunction innerFunction, AgentFunctionInvocationMiddleware next, IServiceProvider? scopedServices = null) : base(innerFunction)
         {
             _logger = GetService<ILoggerFactory>()?.CreateLogger<AuthorizingAgentFunction>();
             _agent = agent;
@@ -203,31 +177,55 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
                 .SelectMany(attr => ((IToolApprovalRequirementData)attr).GetRequirements())
                 .ToList();
             _next = next;
+            _scopedServices = scopedServices;
             //_marker = ToolRequirements is null or { Count: 0 } ? null : new ApprovalRequiredAIFunction(this);
         }
 
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            //if (ToolRequirements is null or { Count: 0 } || GetService<IToolApprovalHandlerProvider>() is not IToolApprovalHandlerProvider toolApprovalHandlerProvider)
-            //{
-            //    return await base.InvokeCoreAsync(arguments, cancellationToken);
-            //}
+            // The realtime client pipeline can set arguments.Services to the root
+            // IServiceProvider (the singleton-registered conversation client owns
+            // it), which throws when a tool tries to resolve scoped services like
+            // ICallSessionAccessor. AuthorizingRealtimeAIAgent is itself resolved
+            // inside the per-call DI scope, so _scopedServices points at that
+            // scope — forward it so tools can reach scoped state.
+            if (_scopedServices is not null)
+            {
+                arguments.Services = _scopedServices;
+            }
 
-            //var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>() ?? GetService<ClaimsPrincipal>();
-            //var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
-            //var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
+            if (ToolRequirements is { Count: > 0 })
+            {
+                var toolApprovalHandlerProvider = arguments.Services?.GetService<IToolApprovalHandlerProvider>()
+                    ?? GetService<IToolApprovalHandlerProvider>() as IToolApprovalHandlerProvider;
 
-            //foreach (var handler in handlers)
-            //{
-            //    await handler.HandleAsync(approvalContext).ConfigureAwait(false);
-            //}
+                if (toolApprovalHandlerProvider is not null)
+                {
+                    var invokingIdentity = arguments.Services?.GetService<ClaimsPrincipal>()
+                        ?? GetService<ClaimsPrincipal>() as ClaimsPrincipal;
+                    var approvalContext = new ToolApprovalContext(this, arguments, _agent, ToolRequirements, invokingIdentity);
+                    var handlers = await toolApprovalHandlerProvider.GetHandlersAsync(approvalContext).ConfigureAwait(false);
 
-            //if (!approvalContext.HasSucceeded)
-            //{
-            //    var failure = new ToolApprovalFailure(InnerFunction, arguments, [.. approvalContext.PendingRequirements], [.. approvalContext.FailureResponses], approvalContext.PendingRequirements is { Count: 0 });
-            //    _logger?.LogWarning("Function '{FunctionName}' invocation denied due to failed tool approval requirements.", InnerFunction.Name);
-            //    return failure.FailureResponseMessage.Text;
-            //}
+                    foreach (var handler in handlers)
+                    {
+                        await handler.HandleAsync(approvalContext).ConfigureAwait(false);
+                    }
+
+                    if (!approvalContext.HasSucceeded)
+                    {
+                        var failure = new ToolApprovalFailure(
+                            InnerFunction,
+                            arguments,
+                            [.. approvalContext.PendingRequirements],
+                            [.. approvalContext.FailureResponses],
+                            approvalContext.PendingRequirements is { Count: 0 });
+                        _logger?.LogWarning(
+                            "Function '{FunctionName}' invocation denied due to failed tool approval requirements.",
+                            InnerFunction.Name);
+                        return failure.FailureResponseMessage.Text;
+                    }
+                }
+            }
 
             if (_next is not null)
             {

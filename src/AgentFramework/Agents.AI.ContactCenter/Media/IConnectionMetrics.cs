@@ -5,7 +5,7 @@ namespace Agents.AI.ContactCenter.Media;
 /// enabling operators to estimate per-instance capacity and make scaling decisions.
 /// </summary>
 /// <remarks>
-/// Implementations should be lock-free or use <see cref="System.Threading.Interlocked"/>
+/// Implementations should be lock-free or use <see cref="Interlocked"/>
 /// counters on the hot path to avoid adding latency to audio routing.
 /// </remarks>
 public interface IConnectionMetrics

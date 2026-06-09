@@ -42,6 +42,7 @@
     <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.2.0-beta.8" />
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.9.0-beta.1" />
     <PackageVersion Include="Azure.AI.VoiceLive" Version="1.1.0-beta.3" />
+    <PackageVersion Include="Azure.AI.Speech.Transcription" Version="1.0.0" />
     <PackageVersion Include="Azure.Communication.CallAutomation" Version="1.6.0-beta.1" />
     <PackageVersion Include="Azure.Communication.Common" Version="1.4.0" />
     <PackageVersion Include="Azure.Communication.Identity" Version="1.4.0-beta.1" />
@@ -161,6 +162,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.15.3" />
+    <PackageVersion Include="Polly.Core" Version="8.6.6" />
     <PackageVersion Include="StackExchange.Redis" Version="2.11.0" />
     <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerUI" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Linq.Async" Version="6.0.3" />
@@ -169,6 +171,7 @@
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="$(AspNetCoreVersion)" />
+    <PackageVersion Include="YamlDotNet" Version="17.1.0" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 </Project>

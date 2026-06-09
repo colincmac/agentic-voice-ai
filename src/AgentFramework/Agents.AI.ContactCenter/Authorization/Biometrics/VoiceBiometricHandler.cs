@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Agents.AI.ContactCenter.Authorization.Biometrics;
 using Agents.AI.Extensions.ToolApproval;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;

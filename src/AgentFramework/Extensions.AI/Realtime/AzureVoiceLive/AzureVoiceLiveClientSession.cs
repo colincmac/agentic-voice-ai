@@ -40,20 +40,44 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     /// <summary>Initializes a new instance of the <see cref="AzureVoiceLiveClientSession"/> class from an already-connected session client.</summary>
     /// <param name="sessionClient">The connected SDK session client.</param>
     /// <param name="sessionTarget">The model target for metadata.</param>
-    internal AzureVoiceLiveClientSession(VoiceLiveSession sessionClient, SessionTarget sessionTarget)
+    /// <param name="initialOptions">
+    /// Optional initial <see cref="RealtimeSessionOptions"/> that were supplied to
+    /// <see cref="VoiceLiveClient.StartSessionAsync(SessionTarget, VoiceLiveSessionOptions, CancellationToken)"/>.
+    /// Used to seed <see cref="Options"/> so the property reflects the effective configuration
+    /// before any <c>session.created</c> / <c>session.updated</c> server event arrives.
+    /// </param>
+    internal AzureVoiceLiveClientSession(
+        VoiceLiveSession sessionClient,
+        SessionTarget sessionTarget,
+        RealtimeSessionOptions? initialOptions = null)
     {
         _sessionClient = Throw.IfNull(sessionClient);
         _sessionTarget = Throw.IfNull(sessionTarget);
         _metadata = new("azure_voice_live", defaultModelId: _sessionTarget.ToString());
+        Options = initialOptions;
     }
 
     private async Task UpdateSessionAsync(RealtimeSessionOptions options, CancellationToken cancellationToken)
     {
-        var sessionOptions = BuildSessionOptions(options, TryGetRawSessionOptions(options.RawRepresentationFactory?.Invoke()));
+        // Voice Live session.update is a PATCH: only the fields that are present are updated.
+        // Merge the incoming partial update into the current effective state so we never
+        // accidentally clear fields the caller didn't explicitly set on this update.
+        var effective = MergeOptions(Options, options);
+
+        // The model cannot be changed after the session has been initialized, so omit it
+        // from session.update payloads even if the merged state still carries the original value.
+        var sessionOptions = BuildSessionOptions(
+            effective,
+            TryGetRawSessionOptions(effective.RawRepresentationFactory?.Invoke()),
+            includeModel: false);
+
         await _sessionClient.ConfigureSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
 
-        Options = options;
+        // Optimistically reflect the merged state. The server's session.updated response
+        // (handled in HandleSessionEvent) will reconcile this with the authoritative view.
+        Options = effective;
     }
+
 
     /// <inheritdoc />
     public async Task SendAsync(RealtimeClientMessage message, CancellationToken cancellationToken = default)
@@ -229,11 +253,78 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         }
     }
 
-    private static VoiceLiveSessionOptions BuildSessionOptions(RealtimeSessionOptions options, VoiceLiveSessionOptions? seedOptions = null)
+    /// <summary>
+    /// Merges a partial <see cref="RealtimeSessionOptions"/> update into the current
+    /// effective options, preserving any field on <paramref name="current"/> that the
+    /// caller did not explicitly set on <paramref name="update"/>.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors Voice Live's <c>session.update</c> patch semantics: "Only the fields
+    /// that are present are updated." Treats <see langword="null"/> on <paramref name="update"/>
+    /// as "not provided" and falls back to <paramref name="current"/> for that property.
+    /// </remarks>
+    internal static RealtimeSessionOptions MergeOptions(RealtimeSessionOptions? current, RealtimeSessionOptions update)
+    {
+        _ = Throw.IfNull(update);
+
+        if (current is null)
+        {
+            return update;
+        }
+
+        return new RealtimeSessionOptions
+        {
+            SessionKind = update.SessionKind != default ? update.SessionKind : current.SessionKind,
+            Model = update.Model ?? current.Model,
+            Instructions = update.Instructions ?? current.Instructions,
+            InputAudioFormat = update.InputAudioFormat ?? current.InputAudioFormat,
+            TranscriptionOptions = update.TranscriptionOptions ?? current.TranscriptionOptions,
+            OutputAudioFormat = update.OutputAudioFormat ?? current.OutputAudioFormat,
+            Voice = update.Voice ?? current.Voice,
+            MaxOutputTokens = update.MaxOutputTokens ?? current.MaxOutputTokens,
+            OutputModalities = update.OutputModalities ?? current.OutputModalities,
+            ToolMode = update.ToolMode ?? current.ToolMode,
+            Tools = update.Tools ?? current.Tools,
+            VoiceActivityDetection = update.VoiceActivityDetection ?? current.VoiceActivityDetection,
+            RawRepresentationFactory = update.RawRepresentationFactory ?? current.RawRepresentationFactory,
+        };
+    }
+
+    /// <summary>
+    /// Builds the <see cref="VoiceLiveSessionOptions"/> sent on the initial
+    /// <see cref="VoiceLiveClient.StartSessionAsync(SessionTarget, VoiceLiveSessionOptions, CancellationToken)"/>
+    /// handshake. Unlike <see cref="UpdateSessionAsync"/>, this path is allowed to set
+    /// the model because the session has not yet been initialized.
+    /// </summary>
+    /// <param name="options">The caller-supplied realtime options.</param>
+    /// <param name="sessionTarget">The session target; used to fill in a default model when the caller did not specify one.</param>
+    internal static VoiceLiveSessionOptions BuildInitialSessionOptions(RealtimeSessionOptions options, SessionTarget sessionTarget)
+    {
+        _ = Throw.IfNull(options);
+        _ = Throw.IfNull(sessionTarget);
+
+        var seed = TryGetRawSessionOptions(options.RawRepresentationFactory?.Invoke());
+        var sessionOptions = BuildSessionOptions(options, seed, includeModel: true);
+
+        // Ensure the initial handshake always carries a model so Voice Live can pick
+        // the right backend. Falls back to the target's model when the caller did not
+        // explicitly set one.
+        if (string.IsNullOrEmpty(sessionOptions.Model) && !string.IsNullOrEmpty(sessionTarget.Model))
+        {
+            sessionOptions.Model = sessionTarget.Model;
+        }
+
+        return sessionOptions;
+    }
+
+    private static VoiceLiveSessionOptions BuildSessionOptions(
+        RealtimeSessionOptions options,
+        VoiceLiveSessionOptions? seedOptions = null,
+        bool includeModel = true)
     {
         var sessionOptions = seedOptions ?? new VoiceLiveSessionOptions();
 
-        if (options.Model is not null)
+        if (includeModel && options.Model is not null)
         {
             sessionOptions.Model = options.Model;
         }
@@ -642,6 +733,20 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         SessionUpdateConversationItemInputAudioTranscriptionFailed failed => MapInputTranscriptionFailed(failed),
         SessionUpdateConversationItemCreated created => MapConversationItem(created.EventId, created.Item, RealtimeServerMessageType.ResponseOutputItemAdded, created),
         SessionUpdateConversationItemRetrieved retrieved => MapConversationItem(retrieved.EventId, retrieved.Item, RealtimeServerMessageType.ResponseOutputItemDone, retrieved),
+        SessionUpdateInputAudioBufferSpeechStarted inputSpeechStarted => new InputAudioBufferSpeechRealtimeServerMessage(InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStarted)
+        {
+            MessageId = inputSpeechStarted.EventId,
+            ItemId = inputSpeechStarted.ItemId,
+            AudioStart = inputSpeechStarted.AudioStart,
+            RawRepresentation = inputSpeechStarted,
+        },
+        SessionUpdateInputAudioBufferSpeechStopped inputSpeechStopped => new InputAudioBufferSpeechRealtimeServerMessage(InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStopped)
+        {
+            MessageId = inputSpeechStopped.EventId,
+            ItemId = inputSpeechStopped.ItemId,
+            AudioEnd = inputSpeechStopped.AudioEnd,
+            RawRepresentation = inputSpeechStopped,
+        },
         SessionUpdateResponseMcpCallInProgress inProgress => MapMcpCallEvent(inProgress.EventId, inProgress.ItemId, inProgress.OutputIndex, new RealtimeServerMessageType("McpCallInProgress"), inProgress),
         SessionUpdateResponseMcpCallCompleted completed => MapMcpCallEvent(completed.EventId, completed.ItemId, completed.OutputIndex, new RealtimeServerMessageType("McpCallCompleted"), completed),
         SessionUpdateResponseMcpCallFailed failed => MapMcpCallEvent(failed.EventId, failed.ItemId, failed.OutputIndex, new RealtimeServerMessageType("McpCallFailed"), failed),
@@ -690,7 +795,10 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
     {
         if (session is not null)
         {
-            Options = MapSessionToOptions(session);
+            // Merge the server-reported state into the current effective options so the
+            // Options property always reflects the latest known configuration without
+            // losing client-side fields the response may not echo (for example, Tools).
+            Options = MergeOptions(Options, MapSessionToOptions(session));
         }
 
         return new RealtimeServerMessage
@@ -701,7 +809,7 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         };
     }
 
-    private RealtimeSessionOptions MapSessionToOptions(VoiceLiveSessionResponse session)
+    private static RealtimeSessionOptions MapSessionToOptions(VoiceLiveSessionResponse session)
     {
         List<string>? outputModalities = null;
         if (session.Modalities is { Count: > 0 } modalities)
@@ -719,19 +827,20 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
             };
         }
 
+        // Only project fields the SDK response actually carries. Anything left null here
+        // will be preserved from the existing Options by MergeOptions, matching Voice
+        // Live's "only fields that are present are updated" semantics.
         return new RealtimeSessionOptions
         {
             SessionKind = RealtimeSessionKind.Conversation,
             Model = session.Model,
             Instructions = session.Instructions,
-            MaxOutputTokens = session.MaxResponseOutputTokens.NumericValue,
+            MaxOutputTokens = session.MaxResponseOutputTokens?.NumericValue,
             OutputModalities = outputModalities,
             InputAudioFormat = MapSdkAudioFormat(session.InputAudioFormat, session.InputAudioSamplingRate),
             TranscriptionOptions = transcriptionOptions,
             OutputAudioFormat = MapSdkAudioFormat(session.OutputAudioFormat),
             Voice = GetVoiceName(session.Voice),
-            Tools = Options?.Tools,
-            ToolMode = Options?.ToolMode,
         };
     }
 

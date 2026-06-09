@@ -21,7 +21,8 @@ public sealed class InMemoryCallerDirectory : ICallerDirectory
         Seed(new CallerIdentity(
             UserId: "cust-001",
             DisplayName: "Jordan Reyes",
-            PhoneNumber: "+15551234567",
+            PhoneNumber: "+14123236796",
+            //PhoneNumber: "+15551234567",
             Email: "jordan.reyes@example.com",
             EntraObjectId: null,
             VerificationLevel: CallerVerificationLevel.AniMatch,
@@ -31,13 +32,16 @@ public sealed class InMemoryCallerDirectory : ICallerDirectory
             {
                 ["accountTier"] = "Premium",
                 ["preferredLanguage"] = "en-US",
-                ["pin"] = "4242"
+                ["pin"] = "4242",
+                ["balance"] = 8421.33m,
+                ["balancePending"] = 125.00m
             }));
 
         Seed(new CallerIdentity(
             UserId: "cust-002",
             DisplayName: "Sam Patel",
-            PhoneNumber: "+15559876543",
+            PhoneNumber: "+18146449033",
+            //PhoneNumber: "+15559876543",
             Email: "sam.patel@example.com",
             EntraObjectId: null,
             VerificationLevel: CallerVerificationLevel.AniMatch,
@@ -47,7 +51,9 @@ public sealed class InMemoryCallerDirectory : ICallerDirectory
             {
                 ["accountTier"] = "Standard",
                 ["preferredLanguage"] = "es-MX",
-                ["pin"] = "1357"
+                ["pin"] = "1357",
+                ["balance"] = 312.07m,
+                ["balancePending"] = 0m
             }));
     }
 

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Configuration;
 

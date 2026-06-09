@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Agents.AI.ContactCenter.Authentication;
+using Agents.AI.Extensions.AITools;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,7 +14,13 @@ namespace Showcase.Agent.VoiceAgent.Authentication;
 /// validator; the realtime workflow exposes <see cref="ConfirmIdentityTool"/> for the model to
 /// call once the caller has answered the PIN prompt.
 /// </summary>
-public static class PinValidationTools
+/// <remarks>
+/// Both tools route through <see cref="ICallerElevationDispatcher"/> — they set
+/// <see cref="PinAttempt.Digits"/> and dispatch the <c>Pin</c> authenticator. State is never
+/// mutated directly. The <see cref="RequiresCallerVerificationAttribute"/> ensures the caller
+/// has already cleared ANI lookup before a PIN attempt is even accepted.
+/// </remarks>
+public class PinValidationTools 
 {
     /// <summary>
     /// Build the validator tool the DTMF strategy invokes when the caller has finished
@@ -27,6 +34,7 @@ public static class PinValidationTools
         var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("ValidatePin");
 
         [Description("Validate the caller's entered PIN against their account on file. Returns success when the PIN matches and the caller is elevated to full verification.")]
+        [RequiresCallerVerification(CallerVerificationLevel.AniMatch, FailureMessage = "Caller must be identified by ANI before a PIN can be validated.")]
         AuthValidationResult ValidatePin(
             [Description("The PIN digits the caller supplied (with leading zeros preserved).")] string digits,
             IServiceProvider services)
@@ -46,6 +54,7 @@ public static class PinValidationTools
         var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("ConfirmIdentity");
 
         [Description("Verify the caller by checking the four-digit PIN they just spoke against the account on file. Call this only once the caller has stated their PIN clearly.")]
+        [RequiresCallerVerification(CallerVerificationLevel.AniMatch, FailureMessage = "Caller must be identified by ANI before a PIN can be validated.")]
         AuthValidationResult ConfirmIdentity(
             [Description("The four-digit PIN the caller spoke aloud.")] string pin,
             IServiceProvider services)
@@ -59,7 +68,7 @@ public static class PinValidationTools
         InMemoryCallerDirectory directory,
         IServiceProvider services,
         ILogger logger,
-        string authenticatorName)
+        string callId)
     {
         var state = services.GetRequiredService<CallerAuthenticationState>();
         if (state.Identity.UserId == "anonymous")
@@ -68,6 +77,34 @@ public static class PinValidationTools
             return new AuthValidationResult(false, "Caller not identified.");
         }
 
+        var dispatcher = services.GetService<ICallerElevationDispatcher>();
+        var attempt = services.GetService<PinAttempt>();
+        if (dispatcher is null || attempt is null)
+        {
+            logger.LogWarning(
+                "Falling back to direct validation: PinAuthenticator pipeline is not wired (dispatcher={Dispatcher}, attempt={Attempt})",
+                dispatcher is not null, attempt is not null);
+            return DirectValidate(digits, directory, state, logger, callId);
+        }
+
+        attempt.Digits = digits;
+        var result = dispatcher.DispatchAsync("Pin", callId).GetAwaiter().GetResult();
+        var pinStep = result.Steps.LastOrDefault(s => s.AuthenticatorName == "Pin");
+        return pinStep?.Outcome switch
+        {
+            AuthenticationOutcome.Authenticated => new AuthValidationResult(true, "Verified."),
+            AuthenticationOutcome.Failed failed => new AuthValidationResult(false, failed.Reason),
+            _ => new AuthValidationResult(false, "PIN validation did not run; check PinAuthenticator registration.")
+        };
+    }
+
+    private static AuthValidationResult DirectValidate(
+        string digits,
+        InMemoryCallerDirectory directory,
+        CallerAuthenticationState state,
+        ILogger logger,
+        string authenticatorName)
+    {
         var record = directory.FindByUserId(state.Identity.UserId);
         var expected = record?.Claims.TryGetValue("pin", out var pin) == true ? pin?.ToString() : null;
         if (string.IsNullOrEmpty(expected))
@@ -84,12 +121,12 @@ public static class PinValidationTools
 
         var elevated = state.Identity with
         {
-            VerificationLevel = CallerVerificationLevel.MultiFactor,
+            VerificationLevel = CallerVerificationLevel.KnowledgeBased,
             AuthenticatedBy = authenticatorName,
             AuthenticatedAt = DateTimeOffset.UtcNow
         };
         state.TryPromote(elevated);
-        logger.LogInformation("Caller {UserId} elevated to MultiFactor via {Authenticator}", state.Identity.UserId, authenticatorName);
+        logger.LogInformation("Caller {UserId} elevated to KnowledgeBased via {Authenticator}", state.Identity.UserId, authenticatorName);
         return new AuthValidationResult(true, "Verified.");
     }
 }

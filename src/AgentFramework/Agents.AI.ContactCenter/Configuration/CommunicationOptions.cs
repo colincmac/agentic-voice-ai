@@ -9,7 +9,6 @@ public class CommunicationOptions
     public bool ConfigureAcsTeamsIntegration { get; set; } = false;
     public required AcsOptions Acs { get; set; }
     public required TeamsOptions Teams { get; set; }
-    public ContactCenterOptions ContactCenterOptions { get; set; } = new ContactCenterOptions();
 }
 
 public class AcsOptions
@@ -21,6 +20,7 @@ public class AcsOptions
     public Uri AcsResourceEndpoint => new(ConnectionString.Split(';').First(s => s.StartsWith("endpoint=", StringComparison.OrdinalIgnoreCase)).Split('=')[1]);
     public string AcsApiVersion { get; set; } = "2025-06-30";
     public Guid GlobalID { get; set; }
+    public bool UseWebsocketForMediaStreaming { get; set; } = true;
 };
 
 public class TeamsOptions

@@ -3,6 +3,7 @@ using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Coordination;
 using Agents.AI.ContactCenter.Coordination.Core;
+using Agents.AI.ContactCenter.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

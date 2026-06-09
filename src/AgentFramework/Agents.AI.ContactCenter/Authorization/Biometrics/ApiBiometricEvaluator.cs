@@ -3,10 +3,8 @@ using Agents.AI.RealtimeVoice.Azure.Biometrics.Grpc;
 using Agents.AI.ContactCenter.Configuration;
 using Google.Protobuf;
 using Grpc.Core;
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Agents.AI.ContactCenter.Authorization.Biometrics;
 
 namespace Agents.AI.ContactCenter.Authorization.Biometrics;
 

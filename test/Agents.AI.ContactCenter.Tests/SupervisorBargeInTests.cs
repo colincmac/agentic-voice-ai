@@ -3,6 +3,7 @@ using Agents.AI.ContactCenter.IvrWorkflow;
 using Agents.AI.Extensions.RealtimeAgentHelpers.Prompting;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Configuration;
+using Agents.AI.ContactCenter.Tests.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 using Agents.AI.ContactCenter.Calling.Core;
 
@@ -194,29 +195,15 @@ internal sealed class CallFixture : IAsyncDisposable
 
     public static async Task<CallFixture> StartAsync(SupervisorMode supervisorMode)
     {
-        var workflow = new RealtimeIvrWorkflowDefinition
-        {
-            Name = "supervisor-test",
-            BasePrompt = new RealtimePrompt(),
-            Steps =
-            [
-                new RealtimeIvrWorkflowStep
-                {
-                    Id = "greeting",
-                    ConversationState = new ConversationState
-                    {
-                        Id = "greeting",
-                        Description = "test",
-                        Instructions = ["greet"]
-                    }
-                }
-            ]
-        };
-
         var strategy = new ControllableStrategy();
 
-        var services = new ServiceCollection().BuildServiceProvider();
-        var quality = new InMemoryCallQualityReporter();
+        // Register the test-double strategy as the keyed IConversationStrategy that the
+        // CallSessionFactory will resolve for AgentTier.RealtimeVoice.
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddKeyedSingleton<IConversationStrategy>(AgentTier.RealtimeVoice, strategy);
+        var services = serviceCollection.BuildServiceProvider();
+
+        var quality = new InMemoryCallQualityReporter(TestTelemetry.LoggerFactory, TestTelemetry.Calling);
         var registry = new CallSessionRegistry();
 
         var caller = new FakeCallerEdge("caller-1");
@@ -224,16 +211,16 @@ internal sealed class CallFixture : IAsyncDisposable
 
         var factory = new CallSessionFactory(
             services.GetRequiredService<IServiceScopeFactory>(),
-            [new ControllableStrategyFactory(strategy)],
             registry,
             quality,
+            TestTelemetry.LoggerFactory,
+            TestTelemetry.Calling,
             defaultObservers: []);
 
         var session = await factory.CreateAsync(new CallSessionRequest
         {
             CallId = "call-supervisor",
             CallerEdge = caller,
-            Workflow = workflow,
             PreferredTier = AgentTier.RealtimeVoice
         });
 
@@ -284,22 +271,6 @@ internal sealed class CallFixture : IAsyncDisposable
     {
         await Session.DisposeAsync();
     }
-}
-
-internal sealed class ControllableStrategyFactory : IConversationStrategyFactory
-{
-    private readonly ControllableStrategy _strategy;
-    public ControllableStrategyFactory(ControllableStrategy strategy) { _strategy = strategy; }
-
-    public AgentTier Tier => AgentTier.RealtimeVoice;
-
-    public ValueTask<IConversationStrategy> CreateAsync(
-        string callId,
-        IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
-        IvrWorkflowState? restoreFrom,
-        CancellationToken cancellationToken = default)
-        => ValueTask.FromResult<IConversationStrategy>(_strategy);
 }
 
 /// <summary>

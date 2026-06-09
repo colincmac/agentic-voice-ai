@@ -9,6 +9,7 @@ public class ContactCenterOptions
 
     [JsonIgnore]
     public AgentFunctionInvocationMiddleware? AgentFunctionInvocationMiddleware { get; set; } = null;
+
     public string? RealtimeAgentServiceKey { get; set; }
 
     /// <summary>
@@ -17,43 +18,18 @@ public class ContactCenterOptions
     public bool EnableEntraVerification { get; set; } = true;
 
     /// <summary>
-    /// Enable fraud detection monitoring
-    /// </summary>
-    public bool EnableFraudDetection { get; set; } = true;
-
-    /// <summary>
-    /// Enable voice biometric verification
-    /// </summary>
-    public bool EnableVoiceBiometrics { get; set; } = true;
-
-    /// <summary>
-    /// Enable background agent orchestration
-    /// </summary>
-    public bool EnableBackgroundAgents { get; set; } = true;
-
-    /// <summary>
-    /// Enable session-scoped tools
-    /// </summary>
-    public bool EnableSessionTools { get; set; } = true;
-
-    /// <summary>
     /// Enable voice approval middleware
     /// </summary>
     public bool EnableVoiceApproval { get; set; } = true;
 
     /// <summary>
-    /// Enable OpenTelemetry metrics
-    /// </summary>
-    public bool EnableMetrics { get; set; } = true;
-
-    /// <summary>
     /// Fraud detection options
     /// </summary>
-    public FraudDetectionOptions? FraudDetection { get; set; }
+    public FraudDetectionOptions? FraudDetection { get; set; } = new FraudDetectionOptions();
     /// <summary>
     /// Voice biometric options
     /// </summary>
-    public VoiceBiometricOptions? VoiceBiometrics { get; set; }
+    public VoiceBiometricOptions? VoiceBiometrics { get; set; } = new VoiceBiometricOptions();
 
     /// <summary>
     /// Agent tier degradation options for capacity-aware graceful degradation.
@@ -64,6 +40,7 @@ public class ContactCenterOptions
 }
 public sealed class FraudDetectionOptions
 {
+    public bool Enabled { get; set; } = false;
     public double HighRiskThreshold { get; set; } = 50.0;
     public double CriticalRiskThreshold { get; set; } = 75.0;
     public bool EnableRealTimeAlerts { get; set; } = true;
@@ -71,6 +48,8 @@ public sealed class FraudDetectionOptions
 }
 public sealed class VoiceBiometricOptions
 {
+    public bool Enabled { get; set; } = false;
+
     public int MinimumEnrollmentSamples { get; set; } = 3;
     public double VerificationThreshold { get; set; } = 0.85; // 85% confidence
     public double AnomalyThreshold { get; set; } = 0.6; // 60% anomaly score

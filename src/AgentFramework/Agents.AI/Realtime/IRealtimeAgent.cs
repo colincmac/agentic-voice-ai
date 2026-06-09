@@ -9,7 +9,7 @@ namespace Agents.AI.Realtime;
 
 public interface IRealtimeAgent
 {
-    ValueTask<RealtimeAIAgentSession> CreateRealtimeSessionAsync(
+    ValueTask<RealtimeAIAgentSession> CreateSessionAsync(
         RealtimeSessionOptions? sessionOptions = null,
         CancellationToken cancellationToken = default);
 

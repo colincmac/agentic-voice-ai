@@ -29,7 +29,7 @@ public interface ITierCeilingProvider
 {
     /// <summary>
     /// Cached active ceiling for the local cluster. Initially the configured
-    /// <see cref="Configuration.TierCeilingOptions.DefaultCeiling"/>; updated
+    /// <see cref="TierCeilingOptions.DefaultCeiling"/>; updated
     /// asynchronously when a Pub/Sub invalidation is received. Read on the
     /// answer path; never blocks.
     /// </summary>
