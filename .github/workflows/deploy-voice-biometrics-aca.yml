@@ -1,0 +1,50 @@
+name: Deploy Voice Biometrics to Azure Container Apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/python-services/voice-biometrics/**"
+      - ".github/workflows/deploy-voice-biometrics-aca.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SERVICE_PATH: src/python-services/voice-biometrics
+  IMAGE_REPOSITORY: voice-biometrics
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image to ACR
+        shell: bash
+        run: |
+          az acr build \
+            --registry "${{ secrets.ACR_NAME }}" \
+            --image "${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}" \
+            "${{ env.SERVICE_PATH }}"
+
+      - name: Deploy image to Azure Container App
+        shell: bash
+        run: |
+          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}"
+          az containerapp update \
+            --name "${{ secrets.AZURE_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --image "$IMAGE"

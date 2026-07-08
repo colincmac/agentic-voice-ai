@@ -108,6 +108,32 @@ Environment variables:
 
 
 
+\## GitHub Actions Deployment (Azure Container Apps)
+
+The workflow `.github/workflows/deploy-voice-biometrics-aca.yml` deploys this service to an existing Azure Container App by:
+
+1\. Building and pushing an image to Azure Container Registry (ACR) using `az acr build`
+
+2\. Updating the Container App image with `az containerapp update`
+
+Configure the following GitHub repository secrets:
+
+\- `AZURE_CLIENT_ID`
+
+\- `AZURE_TENANT_ID`
+
+\- `AZURE_SUBSCRIPTION_ID`
+
+\- `ACR_NAME`
+
+\- `ACR_LOGIN_SERVER` (for example: `myregistry.azurecr.io`)
+
+\- `AZURE_CONTAINER_APP_NAME`
+
+\- `AZURE_RESOURCE_GROUP`
+
+
+
 \## API
 
 
@@ -205,4 +231,3 @@ This service uses the \[SpeechBrain ECAPA-TDNN](https://huggingface.co/speechbra
 
 
 See repository root for license information.
-
