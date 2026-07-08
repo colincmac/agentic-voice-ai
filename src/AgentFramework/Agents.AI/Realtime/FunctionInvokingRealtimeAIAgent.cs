@@ -19,7 +19,7 @@ public class FunctionInvokingRealtimeAIAgent: DelegatingRealtimeAIAgent
     }
 
     protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(IEnumerable<ChatMessage> messages, AgentSession? session = null, AgentRunOptions? options = null, CancellationToken cancellationToken = default)
-    => this.InnerAgent.RunStreamingAsync(messages, session, this.AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
+    => this.InnerAgent.RunStreamingAsync(messages, session, AgentRunOptionsWithFunctionMiddleware(options), cancellationToken);
 
 
     private AgentRunOptions? AgentRunOptionsWithFunctionMiddleware(AgentRunOptions? options)
@@ -57,22 +57,7 @@ public class FunctionInvokingRealtimeAIAgent: DelegatingRealtimeAIAgent
                         ? new MiddlewareEnabledFunction(this.InnerAgent, aiFunction, this._delegateFunc)
                         : tool)
                     .ToList();
-                return new RealtimeSessionOptions()
-                {
-                    Tools = tools,
-                    InputAudioFormat = options.InputAudioFormat,
-                    Instructions = options.Instructions,
-                    MaxOutputTokens = options.MaxOutputTokens,
-                    Model = options.Model,
-                    OutputAudioFormat = options.OutputAudioFormat,
-                    OutputModalities = options.OutputModalities,
-                    RawRepresentationFactory = options.RawRepresentationFactory,
-                    SessionKind = options.SessionKind,
-                    ToolMode = options.ToolMode,
-                    TranscriptionOptions = options.TranscriptionOptions,
-                    Voice = options.Voice,
-                    VoiceActivityDetection = options.VoiceActivityDetection
-                };
+                return options.With(tools: tools);
             }).Build();
         };
 

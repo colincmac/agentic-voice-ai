@@ -1,6 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-using System.Diagnostics.CodeAnalysis;
-
 namespace Agents.AI.ContactCenter.Configuration;
 
 /// <summary>

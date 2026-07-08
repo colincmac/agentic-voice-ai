@@ -323,53 +323,21 @@ public class SmsOtpAuthenticatorTests
     }
 }
 
-public class MinimumVerificationGuardTests
+public class RequiresCallerVerificationAttributeTests
 {
     [Fact]
-    public async Task Passes_WhenLevelMeetsMinimum()
-    {
-        var workflowState = new IvrWorkflowState { VerificationLevel = CallerVerificationLevel.KnowledgeBased };
-        var guard = new MinimumVerificationGuard(CallerVerificationLevel.AniMatch);
-        var result = await guard.EvaluateAsync(workflowState);
-        Assert.True(result.Passed);
-    }
-
-    [Fact]
-    public async Task Fails_WhenLevelBelowMinimum()
-    {
-        var workflowState = new IvrWorkflowState { VerificationLevel = CallerVerificationLevel.None };
-        var guard = new MinimumVerificationGuard(CallerVerificationLevel.AniMatch);
-        var result = await guard.EvaluateAsync(workflowState);
-        Assert.False(result.Passed);
-        Assert.NotNull(result.FailureReason);
-    }
-}
-
-public class CallerVerificationApprovalHandlerTests
-{
-    // The handler's logic is straightforward: read CallerAuthenticationState off the tool's
-    // GetService chain and compare its level against the requirement. Building a real
-    // ToolApprovalContext requires constructing AIAgent + AIFunction subclasses with several
-    // abstract members; covering those code paths is exercised end-to-end through
-    // AuthorizingAgentFunction in the showcase. We unit-test the comparison directly here.
-
-    [Fact]
-    public void State_AboveOrEqualMinimum_Succeeds()
-    {
-        var state = new CallerAuthenticationState();
-        state.TryPromote(AuthenticationOrchestratorTests.MakeIdentity("u1", CallerVerificationLevel.KnowledgeBased));
-        Assert.True(state.Identity.VerificationLevel >= CallerVerificationLevel.AniMatch);
-    }
-
-    [Fact]
-    public void RequiresCallerVerificationAttribute_ExposesSingleRequirement()
+    public void HoldsMinimumLevelAndFailureMessage()
     {
         var attr = new RequiresCallerVerificationAttribute(CallerVerificationLevel.MultiFactor) { FailureMessage = "go away" };
-        var requirements = attr.GetRequirements().ToList();
-        var req = Assert.Single(requirements);
-        var typed = Assert.IsType<RequiresCallerVerificationRequirement>(req);
-        Assert.Equal(CallerVerificationLevel.MultiFactor, typed.MinimumLevel);
-        Assert.Equal("go away", typed.FailureMessage);
-        Assert.NotNull(typed.OnFailureResponse);
+        Assert.Equal(CallerVerificationLevel.MultiFactor, attr.MinimumLevel);
+        Assert.Equal("go away", attr.FailureMessage);
+    }
+
+    [Fact]
+    public void FailureMessageIsOptional()
+    {
+        var attr = new RequiresCallerVerificationAttribute(CallerVerificationLevel.AniMatch);
+        Assert.Equal(CallerVerificationLevel.AniMatch, attr.MinimumLevel);
+        Assert.Null(attr.FailureMessage);
     }
 }

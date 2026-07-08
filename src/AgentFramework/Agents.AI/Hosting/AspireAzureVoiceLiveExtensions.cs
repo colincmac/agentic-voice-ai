@@ -79,21 +79,18 @@ public static class AspireAzureVoiceLiveExtensions
 
     public class AzureVoiceLiveComponent
     {
-        // GenAI telemetry isn't stable so MEAI currently has source name of "Experimental.Microsoft.Extensions.AI".
-        // Listen to both names to ensure we capture telemetry from both stable and experimental versions.
-        // When MEAI removes experimental from the source name, Aspire will continue to work without changes.
-        protected static string[] ActivitySourceNames => ["Experimental.Microsoft.Extensions.AI", "Microsoft.Extensions.AI"];
-        protected static string[] MetricSourceNames => ["Experimental.Microsoft.Extensions.AI", "Microsoft.Extensions.AI"];
 
         protected IAzureClientBuilder<VoiceLiveClient, VoiceLiveClientOptions> AddClient(
-        AzureClientFactoryBuilder azureFactoryBuilder, AzureVoiceLiveSettings settings, string connectionName,
-        string configurationSectionName)
+            AzureClientFactoryBuilder azureFactoryBuilder,
+            AzureVoiceLiveSettings settings,
+            string connectionName,
+            string configurationSectionName)
         {
             return azureFactoryBuilder.AddClient<VoiceLiveClient, VoiceLiveClientOptions>((options, _, _) =>
             {
                 if (settings.Endpoint is null)
                 {
-                    throw new InvalidOperationException($"An OpenAIClient could not be configured. Ensure valid connection information was provided in 'ConnectionStrings:{connectionName}' or specify a '{nameof(AzureOpenAISettings.Endpoint)}' or '{nameof(AzureOpenAISettings.Key)}' in the '{configurationSectionName}' configuration section.");
+                    throw new InvalidOperationException($"A Voice Live client could not be configured. Ensure valid connection information was provided in 'ConnectionStrings:{connectionName}' or specify a '{nameof(AzureOpenAISettings.Endpoint)}' or '{nameof(AzureOpenAISettings.Key)}' in the '{configurationSectionName}' configuration section.");
                 }
                 else
                 {
@@ -105,7 +102,7 @@ public static class AspireAzureVoiceLiveExtensions
                     }
                     else
                     {
-    
+
                         return new VoiceLiveClient(settings.Endpoint, settings.Credential ?? new AzureCliCredential(), options);
                     }
                 }
@@ -195,17 +192,6 @@ public static class AspireAzureVoiceLiveExtensions
             //        timeout: default));
             //}
 
-            if (GetMetricsEnabled(settings))
-            {
-                builder.Services.AddOpenTelemetry()
-                    .WithMetrics(meterBuilder => meterBuilder.AddMeter(MetricSourceNames));
-            }
-
-            if (GetTracingEnabled(settings))
-            {
-                builder.Services.AddOpenTelemetry()
-                    .WithTracing(traceBuilder => traceBuilder.AddSource(ActivitySourceNames));
-            }
 
             return settings;
         }

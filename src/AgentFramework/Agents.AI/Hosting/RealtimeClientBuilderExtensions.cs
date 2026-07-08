@@ -219,9 +219,8 @@ public static class RealtimeClientBuilderExtensions
             ClientChatProvider.AzureVoiceLive => builder.AddKeyedAzureVoiceLiveClient(connectionName).AddKeyedConversationVoiceLiveClient(connectionName, connectionInfo.SelectedModel),
             _ => throw new NotSupportedException($"Unsupported provider: {connectionInfo.Provider}")
         };
-        // Add OpenTelemetry tracing for the ChatClient activity source
+
         liveConversationClientBuilder.UseOpenTelemetry();
-        builder.Services.AddOpenTelemetry().WithTracing(t => t.AddSource("Microsoft.Extensions.AI"));
 
         return liveConversationClientBuilder;
     }

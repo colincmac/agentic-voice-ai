@@ -8,7 +8,7 @@ namespace Agents.AI.RealtimeVoice.Azure.Tests.Proposed;
 
 /// <summary>
 /// Pins down the wire-level behavior of the production
-/// <see cref="AuthorizingAgentRealtimeBackend"/> adapter by testing its translation
+/// <see cref="AIAgentBackend"/> adapter by testing its translation
 /// step in isolation. Standing up a real <c>IRealtimeClient</c> for an end-to-end
 /// adapter test would require a substantial fake; the translation function carries
 /// the only logic specific to the new shape.
@@ -94,6 +94,19 @@ public class RealtimeBackendUpdateTranslatorTests
         Assert.True(transcript.IsFinal);
     }
 
+
+    [Fact]
+    public void RealtimeVadContent_is_dropped()
+    {
+        var update = new AgentResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents = [new RealtimeVadContent(VadEventType.InputSpeechStarted)]
+        };
+        var result = RealtimeBackendUpdateTranslator.Translate(update).ToList();
+        Assert.IsType<RealtimeBackendUpdate.UserSpeechStarted>(Assert.Single(result));
+    }
+
     [Fact]
     public void Whitespace_text_is_dropped()
     {
@@ -106,17 +119,6 @@ public class RealtimeBackendUpdateTranslatorTests
         Assert.Empty(RealtimeBackendUpdateTranslator.Translate(update));
     }
 
-    [Fact]
-    public void RealtimeVadContent_is_dropped()
-    {
-        var update = new AgentResponseUpdate
-        {
-            Role = ChatRole.Assistant,
-            Contents = [new RealtimeVadContent(VadEventType.InputSpeechStarted)]
-        };
-
-        Assert.Empty(RealtimeBackendUpdateTranslator.Translate(update));
-    }
 
     [Fact]
     public void Mixed_contents_translate_in_order()

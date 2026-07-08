@@ -123,7 +123,7 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
                 =>
             {
                 var tools = options.Tools?.Select(tool => tool is AIFunction aiFunction
-                        ? new AuthorizingAgentFunction(this.InnerAgent, aiFunction, this._delegateFunc)
+                        ? new AuthorizingAgentFunction(this.InnerAgent, aiFunction, this._delegateFunc, this._scopedServices)
                         : tool)
                     .ToList();
                 return new RealtimeSessionOptions()
@@ -162,12 +162,13 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
         private readonly ILogger<AuthorizingAgentFunction>? _logger;
         private readonly AIAgent _agent;
         private readonly AgentFunctionInvocationMiddleware? _next;
+        private readonly IServiceProvider? _scopedServices;
         // used to mark that this function follows the approval workflow
         //private readonly ApprovalRequiredAIFunction? _marker;
 
         public readonly List<IToolApprovalRequirement>? ToolRequirements;
 
-        public AuthorizingAgentFunction(AIAgent agent, AIFunction innerFunction, AgentFunctionInvocationMiddleware next) : base(innerFunction)
+        public AuthorizingAgentFunction(AIAgent agent, AIFunction innerFunction, AgentFunctionInvocationMiddleware next, IServiceProvider? scopedServices = null) : base(innerFunction)
         {
             _logger = GetService<ILoggerFactory>()?.CreateLogger<AuthorizingAgentFunction>();
             _agent = agent;
@@ -176,11 +177,23 @@ public class AuthorizingRealtimeAIAgent : DelegatingRealtimeAIAgent
                 .SelectMany(attr => ((IToolApprovalRequirementData)attr).GetRequirements())
                 .ToList();
             _next = next;
+            _scopedServices = scopedServices;
             //_marker = ToolRequirements is null or { Count: 0 } ? null : new ApprovalRequiredAIFunction(this);
         }
 
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
+            // The realtime client pipeline can set arguments.Services to the root
+            // IServiceProvider (the singleton-registered conversation client owns
+            // it), which throws when a tool tries to resolve scoped services like
+            // ICallSessionAccessor. AuthorizingRealtimeAIAgent is itself resolved
+            // inside the per-call DI scope, so _scopedServices points at that
+            // scope — forward it so tools can reach scoped state.
+            if (_scopedServices is not null)
+            {
+                arguments.Services = _scopedServices;
+            }
+
             if (ToolRequirements is { Count: > 0 })
             {
                 var toolApprovalHandlerProvider = arguments.Services?.GetService<IToolApprovalHandlerProvider>()

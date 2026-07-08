@@ -1,101 +1,101 @@
 using System.Threading.Channels;
-using Agents.AI.ContactCenter.IvrWorkflow;
-using Agents.AI.ContactCenter.Telemetry;
+using Agents.AI.ContactCenter.Calling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-using Agents.AI.ContactCenter.Calling;
 
 namespace Agents.AI.ContactCenter.Authentication;
 
 /// <summary>
-/// Shared helper that runs the registered <see cref="IAuthenticationOrchestrator"/> for a
-/// strategy at call start, projects each authenticator step into a <see cref="StrategyEvent"/>
-/// on the supplied writer, and returns a <see cref="ConversationContext"/> populated with the
-/// resolved caller identity. Used by every <see cref="IConversationStrategy"/> that wants to
-/// surface caller authentication identically (Realtime, DTMF streaming, DTMF verb, …).
+/// Call-start helper invoked by every <see cref="IConversationStrategy"/> implementation
+/// from <c>StartAsync</c> (before the workflow's initial stage is entered). Runs the
+/// per-call <see cref="IAuthenticationOrchestrator"/> chain against the scoped
+/// <see cref="CallerAuthenticationState"/> using the caller-edge metadata supplied on the
+/// <see cref="StrategyStartContext"/>, then mirrors the resulting authenticator steps onto
+/// the strategy's event channel.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Event-emission shape is intentionally identical to
+/// <see cref="CallerElevationDispatcher.DispatchAsync"/>:
+/// <list type="bullet">
+///   <item><description><see cref="AuthenticationOutcome.Authenticated"/> → <c>CallerIdentified</c>.</description></item>
+///   <item><description><see cref="AuthenticationOutcome.Failed"/> → <c>CallerAuthenticationFailed</c>.</description></item>
+///   <item><description><see cref="AuthenticationOutcome.NeedsChallenge"/> → <c>CallerAuthenticationChallenge</c>.</description></item>
+/// </list>
+/// A single <c>CallerVerificationLevelChanged</c> is emitted at the end when the strongest
+/// achieved <see cref="CallerVerificationLevel"/> moves from the pre-run value. This keeps
+/// <see cref="ICallObserver"/> consumers (e.g. <c>CallerAuthStateObserver</c>) unable to tell
+/// call-start runs from mid-call elevations apart.
+/// </para>
+/// <para>
+/// When the per-call DI scope does not contain an <see cref="IAuthenticationOrchestrator"/>
+/// or a <see cref="CallerAuthenticationState"/> (i.e. the host never called
+/// <c>AddCallerAuthentication()</c>), the runner is a no-op and returns an empty
+/// <see cref="AuthenticationRunResult"/>. Exceptions thrown by the orchestrator are caught
+/// and logged so a misbehaving authenticator never blocks the strategy from starting.
+/// </para>
+/// </remarks>
 public static class CallerAuthenticationRunner
 {
     /// <summary>
-    /// Resolve the orchestrator from <paramref name="services"/>, run it once, and emit
-    /// per-step <see cref="StrategyEvent"/>s on <paramref name="events"/>.
+    /// Resolve the orchestrator + state from <paramref name="context"/>.<see cref="StrategyStartContext.Services"/>,
+    /// run the chain once with the caller-edge metadata in scope, and mirror the resulting steps
+    /// onto <paramref name="events"/>.
     /// </summary>
-    /// <param name="services">Per-call DI scope.</param>
-    /// <param name="callId">Call identifier (typically the ACS connection id).</param>
-    /// <param name="callerMetadata">
-    /// Caller-edge metadata. When <see langword="null"/> (e.g. the strategy was prewarmed before
-    /// the edge attached) authentication is skipped and an empty <see cref="ConversationContext"/>
-    /// is returned.
-    /// </param>
-    /// <param name="events">Channel writer the strategy uses to surface events to the call session.</param>
-    /// <param name="workflowState">
-    /// Optional. When supplied, the resolved <see cref="CallerVerificationLevel"/> is also written to
-    /// <see cref="IvrWorkflowState"/> so step transitions / guards that read it pick up the value.
-    /// </param>
-    /// <param name="logger">Logger. Required.</param>
-    /// <param name="cancellationToken">Token observed throughout.</param>
-    /// <returns>
-    /// A <see cref="ConversationContext"/> with caller name / id / verification level filled in (using the
-    /// instance registered in DI when present, otherwise a new instance). Strategies forward this
-    /// to <see cref="IIvrWorkflowNavigator.BuildCurrentStepPrompt"/> so prompts can address the
-    /// caller by name.
-    /// </returns>
-    public static async Task<ConversationContext> RunAsync(
+    /// <param name="context">Per-call strategy startup context. Provides the call id, caller metadata, and DI scope.</param>
+    /// <param name="events">Optional writer for <see cref="StrategyEvent"/>s. When non-null the runner emits the same events as <see cref="CallerElevationDispatcher"/>.</param>
+    /// <param name="logger">Optional logger. Defaults to <see cref="NullLogger.Instance"/> when omitted.</param>
+    /// <param name="cancellationToken">Cancellation token for the orchestrator run.</param>
+    /// <returns>The aggregate <see cref="AuthenticationRunResult"/> from the orchestrator, or an empty result when auth is not wired.</returns>
+    public static async Task<AuthenticationRunResult> RunAsync(
+        StrategyStartContext context,
         IServiceProvider services,
-        string callId,
-        CallEdgeMetadata? callerMetadata,
-        ChannelWriter<StrategyEvent> events,
-        ILogger logger,
-        IvrWorkflowState? workflowState = null,
+        ChannelWriter<StrategyEvent>? events = null,
+        ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(events);
-        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var log = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
         var orchestrator = services.GetService<IAuthenticationOrchestrator>();
         var state = services.GetService<CallerAuthenticationState>();
         if (orchestrator is null || state is null)
         {
-            return BuildConversationContext(services, CallerIdentity.Anonymous);
+            log.LogDebug(
+                "CallerAuthenticationRunner: skipping call-start authentication for call {CallId} (orchestrator={Orchestrator}, state={State}).",
+                context.CallId, orchestrator is not null, state is not null);
+            return new AuthenticationRunResult(CallerIdentity.Anonymous, []);
         }
-
-        if (callerMetadata is null)
-        {
-            logger.LogDebug("Skipping caller authentication: no caller metadata for call {CallId}", callId);
-            return BuildConversationContext(services, state.Identity);
-        }
-
-        var telemetry = services.GetRequiredService<CallingTelemetry>();
-
-        using var authSpan = telemetry.StartChildActivity("contact_center.strategy.authenticate", callId);
 
         var previousLevel = state.Identity.VerificationLevel;
-        var tags = workflowState?.CurrentStepName is { Length: > 0 } stepName
-            ? (IReadOnlyDictionary<string, string>)new Dictionary<string, string> { ["ivr.step"] = stepName }
-            : null;
-        var context = new AuthenticationContext(
-            CallId: callId,
-            CallerMetadata: callerMetadata,
+        var authContext = new AuthenticationContext(
+            CallId: context.CallId,
+            CallerMetadata: context.CallerMetadata,
             CurrentIdentity: state.Identity,
-            Services: services,
-            Tags: tags);
+            Services: services);
 
         AuthenticationRunResult result;
         try
         {
-            result = await orchestrator.AuthenticateAsync(context, state, cancellationToken).ConfigureAwait(false);
+            result = await orchestrator.AuthenticateAsync(authContext, state, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            CallingActivitySource.SetError(authSpan, ex);
-            logger.LogWarning(ex, "Caller authentication threw for call {CallId}", callId);
-            await events.WriteAsync(
-                new StrategyEvent.CallerAuthenticationFailed("(orchestrator)", ex.Message, DateTimeOffset.UtcNow),
-                cancellationToken).ConfigureAwait(false);
-            return BuildConversationContext(services, state.Identity);
+            log.LogWarning(
+                ex,
+                "CallerAuthenticationRunner: orchestrator threw during call-start authentication for call {CallId}; continuing with current identity '{Identity}'.",
+                context.CallId, state.Identity.UserId);
+            return new AuthenticationRunResult(state.Identity, []);
+        }
+
+        if (events is null)
+        {
+            return result;
         }
 
         foreach (var step in result.Steps)
@@ -107,11 +107,13 @@ public static class CallerAuthenticationRunner
                         new StrategyEvent.CallerIdentified(authenticated.Identity, step.AuthenticatorName, step.At),
                         cancellationToken).ConfigureAwait(false);
                     break;
+
                 case AuthenticationOutcome.Failed failed:
                     await events.WriteAsync(
                         new StrategyEvent.CallerAuthenticationFailed(step.AuthenticatorName, failed.Reason, step.At),
                         cancellationToken).ConfigureAwait(false);
                     break;
+
                 case AuthenticationOutcome.NeedsChallenge challenge:
                     await events.WriteAsync(
                         new StrategyEvent.CallerAuthenticationChallenge(challenge.Challenge, step.At),
@@ -127,23 +129,6 @@ public static class CallerAuthenticationRunner
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (workflowState is not null)
-        {
-            workflowState.SetVerificationLevel(state.Identity.VerificationLevel);
-        }
-
-        authSpan?.SetTag("caller.verification_level", state.Identity.VerificationLevel.ToString());
-        authSpan?.SetTag("caller.user_id", state.Identity.UserId);
-
-        return BuildConversationContext(services, state.Identity);
-    }
-
-    private static ConversationContext BuildConversationContext(IServiceProvider services, CallerIdentity identity)
-    {
-        var context = services.GetService<ConversationContext>() ?? new ConversationContext();
-        context.CallerName = identity.DisplayName;
-        context.CallerId = identity.UserId;
-        context.VerificationLevel = identity.VerificationLevel;
-        return context;
+        return result;
     }
 }

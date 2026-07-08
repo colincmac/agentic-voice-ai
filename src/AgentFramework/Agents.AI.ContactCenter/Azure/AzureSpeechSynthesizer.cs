@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Agents.AI.ContactCenter.Media.Audio;
-using Azure.Identity;
+using Agents.AI.ContactCenter.Media.Audio.Resilience;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -167,6 +167,12 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
                             details.Reason,
                             details.ErrorCode,
                             details.ErrorDetails);
+
+                        if (details.Reason == CancellationReason.Error)
+                        {
+                            faulted = true;
+                            throw new SpeechSdkException(details.ErrorCode, details.ErrorDetails);
+                        }
                     }
 
                     yield break;
@@ -263,4 +269,6 @@ public sealed class AzureSpeechSynthesizer : ISpeechSynthesizer, IDisposable
 
         return ssmlDoc.ToString(SaveOptions.DisableFormatting);
     }
+
+
 }

@@ -11,6 +11,9 @@ public static class RealtimeSessionOptionsExtensions
     /// Creates a new <see cref="RealtimeSessionOptions"/> instance by cloning the current options
     /// and optionally overwriting individual properties.
     /// </summary>
+    /// <remarks>
+    /// Session options are immutable, so this method allows you to create a modified copy of the options without changing the original instance.
+    /// </remarks>
     public static RealtimeSessionOptions With(
         this RealtimeSessionOptions? options,
         RealtimeSessionKind? sessionKind = null,

@@ -28,10 +28,12 @@ public sealed class ConfigureOptionsRealtimeClient : DelegatingRealtimeClient
     {
         _configureOptions = Throw.IfNull(configure);
     }
+
     // <inheritdoc/>
-    public override Task<IRealtimeClientSession> CreateSessionAsync(RealtimeSessionOptions? options = null, CancellationToken cancellationToken = default)
+    public override async Task<IRealtimeClientSession> CreateSessionAsync(RealtimeSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
-        return base.CreateSessionAsync(Configure(options), cancellationToken);
+        var innerSession = await base.CreateSessionAsync(Configure(options), cancellationToken).ConfigureAwait(false);
+        return new ConfigureOptionsRealtimeClientSession(innerSession, _configureOptions);
     }
 
     /// <summary>Creates and configures the <see cref="RealtimeSessionOptions"/> to pass along to the inner client.</summary>

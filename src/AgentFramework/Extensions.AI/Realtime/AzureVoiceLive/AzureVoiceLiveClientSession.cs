@@ -733,6 +733,20 @@ public sealed class AzureVoiceLiveClientSession : IRealtimeClientSession
         SessionUpdateConversationItemInputAudioTranscriptionFailed failed => MapInputTranscriptionFailed(failed),
         SessionUpdateConversationItemCreated created => MapConversationItem(created.EventId, created.Item, RealtimeServerMessageType.ResponseOutputItemAdded, created),
         SessionUpdateConversationItemRetrieved retrieved => MapConversationItem(retrieved.EventId, retrieved.Item, RealtimeServerMessageType.ResponseOutputItemDone, retrieved),
+        SessionUpdateInputAudioBufferSpeechStarted inputSpeechStarted => new InputAudioBufferSpeechRealtimeServerMessage(InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStarted)
+        {
+            MessageId = inputSpeechStarted.EventId,
+            ItemId = inputSpeechStarted.ItemId,
+            AudioStart = inputSpeechStarted.AudioStart,
+            RawRepresentation = inputSpeechStarted,
+        },
+        SessionUpdateInputAudioBufferSpeechStopped inputSpeechStopped => new InputAudioBufferSpeechRealtimeServerMessage(InputAudioBufferSpeechRealtimeServerMessage.InputAudioBufferSpeechStopped)
+        {
+            MessageId = inputSpeechStopped.EventId,
+            ItemId = inputSpeechStopped.ItemId,
+            AudioEnd = inputSpeechStopped.AudioEnd,
+            RawRepresentation = inputSpeechStopped,
+        },
         SessionUpdateResponseMcpCallInProgress inProgress => MapMcpCallEvent(inProgress.EventId, inProgress.ItemId, inProgress.OutputIndex, new RealtimeServerMessageType("McpCallInProgress"), inProgress),
         SessionUpdateResponseMcpCallCompleted completed => MapMcpCallEvent(completed.EventId, completed.ItemId, completed.OutputIndex, new RealtimeServerMessageType("McpCallCompleted"), completed),
         SessionUpdateResponseMcpCallFailed failed => MapMcpCallEvent(failed.EventId, failed.ItemId, failed.OutputIndex, new RealtimeServerMessageType("McpCallFailed"), failed),

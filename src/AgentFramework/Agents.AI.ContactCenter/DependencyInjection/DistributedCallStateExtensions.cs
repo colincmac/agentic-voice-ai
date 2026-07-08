@@ -59,7 +59,7 @@ public static class DistributedCallStateExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var hostBuilder = builder.Builder;
+        var hostBuilder = builder.HostApplicationBuilder;
 
         switch (backend)
         {

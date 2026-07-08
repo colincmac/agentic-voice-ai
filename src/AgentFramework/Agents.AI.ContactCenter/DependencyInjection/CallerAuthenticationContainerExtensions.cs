@@ -1,6 +1,5 @@
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.ToolApproval;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -33,10 +32,6 @@ public static class CallerAuthenticationContainerExtensions
 
         // Always-present fallback so the orchestrator never enumerates an empty list.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ICallerAuthenticator, AnonymousCallerAuthenticator>());
-
-        // Per-tool gating: the ToolApproval handler that evaluates [RequiresCallerVerification(level)]
-        // attributes against the per-call CallerAuthenticationState.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IToolApprovalHandler, CallerVerificationApprovalHandler>());
 
         return builder;
     }

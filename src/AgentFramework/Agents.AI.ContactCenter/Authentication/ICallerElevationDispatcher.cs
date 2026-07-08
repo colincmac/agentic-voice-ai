@@ -11,8 +11,7 @@ namespace Agents.AI.ContactCenter.Authentication;
 /// state, and (when a <see cref="ChannelWriter{T}"/> is supplied) emits
 /// <see cref="StrategyEvent.CallerVerificationLevelChanged"/> / <see cref="StrategyEvent.CallerIdentified"/>
 /// / <see cref="StrategyEvent.CallerAuthenticationFailed"/> / <see cref="StrategyEvent.CallerAuthenticationChallenge"/>
-/// centrally — keeping the event surface identical to what
-/// <see cref="CallerAuthenticationRunner"/> already produces at call start.
+/// centrally.
 /// </summary>
 public interface ICallerElevationDispatcher
 {
@@ -29,8 +28,8 @@ public interface ICallerElevationDispatcher
     /// <see langword="null"/>. ANI-style authenticators won't run without it.
     /// </param>
     /// <param name="events">
-    /// Optional per-call strategy event writer. When supplied, the dispatcher emits the same
-    /// strategy events as <see cref="CallerAuthenticationRunner"/>. When <see langword="null"/>
+    /// Optional per-call strategy event writer. When supplied, the dispatcher emits
+    /// caller authentication strategy events. When <see langword="null"/>
     /// the dispatcher relies on <see cref="CallerAuthenticationState.IdentityChanged"/> for
     /// downstream observers.
     /// </param>

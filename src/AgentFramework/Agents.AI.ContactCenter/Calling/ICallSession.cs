@@ -110,38 +110,22 @@ public enum SupervisorMode
 public interface ICallSessionFactory
 {
     Task<ICallSession> CreateAsync(CallSessionRequest request, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Pre-build the strategy (and its scope) for an upcoming call so all expensive work —
-    /// realtime backend connect, navigator construction, initial system-prompt push, first-prompt
-    /// TTS — happens in parallel with the platform's media-channel handshake. The next
-    /// <see cref="CreateAsync"/> call with the same <see cref="CallSessionPrewarmRequest.CallId"/>
-    /// claims the prewarmed entry instead of building from scratch.
-    /// </summary>
-    /// <remarks>
-    /// Safe to call fire-and-forget from the IncomingCall webhook. Orphaned entries (where
-    /// <see cref="CreateAsync"/> never claims them) are evicted and disposed automatically.
-    /// </remarks>
-    Task PrewarmAsync(CallSessionPrewarmRequest request, CancellationToken cancellationToken = default);
 }
 
-public sealed record CallSessionPrewarmRequest
-{
-    public required string CallId { get; init; }
-    public required RealtimeIvrWorkflowDefinition Workflow { get; init; }
-
-    /// <summary>Override tier resolution. When null, defaults to <see cref="AgentTier.DtmfOnly"/>.</summary>
-    public AgentTier? PreferredTier { get; init; }
-}
 
 public sealed record CallSessionRequest
 {
     public required string CallId { get; init; }
     public required ICallEdge CallerEdge { get; init; }
-    public required RealtimeIvrWorkflowDefinition Workflow { get; init; }
 
     /// <summary>Override tier resolution. When null, the registered <c>IAgentTierResolver</c> picks.</summary>
     public AgentTier? PreferredTier { get; init; }
+
+    /// <summary>
+    /// The call workflow to drive this call. When null, the strategy's registered default
+    /// workflow id is used, falling back to the single registered workflow when unambiguous.
+    /// </summary>
+    public string? WorkflowId { get; init; }
 
     /// <summary>Observers to start with the call. Defaults from DI are added on top.</summary>
     public IReadOnlyList<ICallObserver>? Observers { get; init; }
@@ -158,22 +142,6 @@ public interface ICallSessionRegistry
     IReadOnlyCollection<ICallSession> ActiveSessions { get; }
 
     Task<bool> RemoveAsync(string callId, CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// Builds an <see cref="IConversationStrategy"/> for a specific <see cref="AgentTier"/>.
-/// One factory per tier, registered in DI. Replaces today's <c>IAgentTransportFactory</c>.
-/// </summary>
-public interface IConversationStrategyFactory
-{
-    AgentTier Tier { get; }
-
-    ValueTask<IConversationStrategy> CreateAsync(
-        string callId,
-        IServiceProvider services,
-        RealtimeIvrWorkflowDefinition workflow,
-        IvrWorkflowState? restoreFrom,
-        CancellationToken cancellationToken = default);
 }
 
 public sealed record TransferRequest(

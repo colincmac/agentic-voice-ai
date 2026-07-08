@@ -49,19 +49,6 @@ public interface IConversationStrategy : IAsyncDisposable
 
     Task StartAsync(StrategyStartContext context, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Optional hook to perform expensive, edge-independent setup ahead of <see cref="StartAsync"/>.
-    /// Implementations may connect upstream sessions, build the IVR navigator, push the initial
-    /// system prompt / tool surface, and pre-synthesize the first prompt — anything that does not
-    /// require live caller audio or DTMF channels.
-    /// </summary>
-    /// <remarks>
-    /// Called by <c>CallSessionFactory.PrewarmAsync</c> while ACS is still negotiating the media
-    /// channel, so the strategy is ready to interact the moment <see cref="StartAsync"/> is invoked.
-    /// The default is a no-op for strategies that have no useful warm-up work.
-    /// </remarks>
-    ValueTask PrewarmAsync(IServiceProvider services, CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;
 
     Task StopAsync(CancellationToken cancellationToken = default);
 
@@ -86,9 +73,6 @@ public sealed record StrategyStartContext
 
     public required ChannelReader<DtmfTone> InboundDtmf { get; init; }
 
-    /// <summary>Call-scoped DI for resolving agents, recognizers, synthesizers.</summary>
-    public required IServiceProvider Services { get; init; }
-
     /// <summary>
     /// Snapshot of the caller-edge metadata (phone number, display name, server call id).
     /// Strategies pass this into authenticators and may include it in observability events.
@@ -96,8 +80,15 @@ public sealed record StrategyStartContext
     /// </summary>
     public CallEdgeMetadata? CallerMetadata { get; init; }
 
-    /// <summary>Existing workflow state to resume from (null on initial create).</summary>
-    public IvrWorkflowState? RestoreFrom { get; init; }
+    /// <summary>
+    /// The per-call DI scope's <see cref="IServiceProvider"/>. Used by composite/fallback
+    /// strategies to resolve inner <see cref="IConversationStrategy"/> instances keyed by
+    /// <see cref="AgentTier"/>, and by strategies that need to resolve per-call services
+    /// (e.g. <c>CallerAuthenticationState</c>, <c>IvrWorkflowState</c>) on demand.
+    /// Per-call workflow state is shared across tier swaps via the scoped
+    /// <see cref="IvrWorkflowState"/> registration in the same scope.
+    /// </summary>
+    public required IServiceProvider Services { get; init; }
 }
 
 public enum StrategyKind

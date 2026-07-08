@@ -1,4 +1,3 @@
-using System;
 using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.Media.Audio;
 using Microsoft.Extensions.AI;

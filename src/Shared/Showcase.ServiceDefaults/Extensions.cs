@@ -48,7 +48,7 @@ public static class Extensions
 
     public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        builder.UseMicrosoftOpenTelemetry(opt => opt.Exporters = ExportTarget.AzureMonitor | ExportTarget.Console);
+        builder.UseMicrosoftOpenTelemetry();
 
         return builder;
     }

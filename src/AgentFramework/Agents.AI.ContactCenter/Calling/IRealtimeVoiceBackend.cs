@@ -100,5 +100,17 @@ public abstract record RealtimeBackendUpdate(DateTimeOffset At)
         string? CallId,
         DateTimeOffset At) : RealtimeBackendUpdate(At);
 
+    public sealed record FunctionResult(
+        string CallId,
+        object? Result,
+        DateTimeOffset At) : RealtimeBackendUpdate(At);
+
+    /// <summary>
+    /// Emitted when the realtime model's server-side VAD detects the caller has started
+    /// speaking. Used by streaming strategies to interrupt (barge-in) any in-flight agent
+    /// audio so the caller isn't talked over.
+    /// </summary>
+    public sealed record UserSpeechStarted(DateTimeOffset At) : RealtimeBackendUpdate(At);
+
     public sealed record Faulted(Exception Exception, string Message, DateTimeOffset At) : RealtimeBackendUpdate(At);
 }

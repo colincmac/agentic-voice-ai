@@ -69,7 +69,7 @@ builder.AddKeyedConversationClient("voicelive")
 builder.AddRealtimeAIAgent(
     name: "TriageAgent",
     configurationSection: builder.Configuration.GetSection("TriageAgent"),
-    liveConversationClientKey: "voicelive");
+    realtimeClientKey: "voicelive");
 builder.Services.AddHttpLogging();
 var app = builder.Build();
 app.UseHttpLogging();
@@ -110,11 +110,10 @@ async Task StartAsync(CancellationToken ct)
     using var microphoneInput = MicrophoneAudioStream.Start();
 
     loggerFactory.CreateLogger("Playground").LogInformation("Starting voice live conversation...");
-    var thread = await agent.CreateRealtimeSessionAsync(null, ct);
+    var thread = await agent.CreateSessionAsync(null, ct);
     IEnumerable<ChatMessage> messages = [];
     RealtimeAgentRunOptions runOptions = new RealtimeAgentRunOptions()
     {
-        InitiateConversation = true
     };
     var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
 

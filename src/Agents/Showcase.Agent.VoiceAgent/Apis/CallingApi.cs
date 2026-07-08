@@ -12,12 +12,12 @@ using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
 using Microsoft.AspNetCore.Mvc;
+using Showcase.Agent.VoiceAgent.Workflow;
 
 namespace Showcase.Agent.VoiceAgent.Apis;
 
 /// <summary>
-/// ACS Call Automation endpoints. The answer mode is selected by the registered
-/// <see cref="RealtimeIvrWorkflowDefinition"/>'s <see cref="AgentTier"/>:
+/// ACS Call Automation endpoints.
 /// <list type="bullet">
 ///   <item><see cref="AgentTier.RealtimeVoice"/> — answers with a bidirectional media WebSocket;
 ///         the WSS handler builds <see cref="AcsCallerStreamEdge"/> and starts the session.</item>
@@ -32,6 +32,9 @@ public static class CallingApi
     public const string CALLBACK_PATH = "/automation/callbacks";
     public const string MEDIA_STREAMING_PATH_WSS = "/automation/media/wss";
 
+    public const string DEFAULT_WORKFLOW_ID = ShowcaseWorkflowIds.AuthenticatedRealtimeBank;
+    public const AgentTier DEFAULT_AGENT_TIER = AgentTier.RealtimeVoice;
+
     public static void MapCallAutomation(this IEndpointRouteBuilder endpoints, [StringSyntax("Route")] string path = "calling")
     {
         var routeGroup = endpoints.MapGroup(path).AllowAnonymous();
@@ -41,9 +44,8 @@ public static class CallingApi
             [FromBody] EventGridEvent[] incomingEvents,
             CancellationToken cancellationToken = default) =>
         {
-            // Tier comes from the registered workflow definition (driven by YAML
-            // strategy.primary). 
-            var workflowTier = services.Workflow.Tier;
+            // Tier comes from the showcase's CallEntryConfig (preferred tier for new calls;
+            // composite fallback handles degradation per ADR).
             var useStreaming = services.Options.Value.Acs.UseWebsocketForMediaStreaming;
 
             foreach (var evt in incomingEvents)
@@ -68,8 +70,8 @@ public static class CallingApi
                         incoming.FromCommunicationIdentifier?.RawId,
                         incoming.ToCommunicationIdentifier?.RawId,
                         incoming.ServerCallId,
-                        services.Workflow.Name,
-                        workflowTier);
+                        CallingApi.DEFAULT_WORKFLOW_ID,
+                        CallingApi.DEFAULT_AGENT_TIER);
 
                     var callbackUri = new Uri(
                         services.Options.Value.Acs.CallBackUri,
@@ -193,7 +195,7 @@ public static class CallingApi
                 webSocket = await httpContext.WebSockets.AcceptWebSocketAsync();
                 logger.LogInformation(
                     "Media WebSocket established for CallConnectionId={CallConnectionId}, Tier={Tier}",
-                    callConnectionId, services.Workflow.Tier);
+                    callConnectionId, CallingApi.DEFAULT_AGENT_TIER);
 
                 // Pod-pinned bi-di stream — claim streaming ownership before the
                 // session starts so the very first mid-call callback can find us.
@@ -229,7 +231,7 @@ public static class CallingApi
 
                 var callId = $"call_{callConnectionId}";
                 var session = await StartCallSessionAsync(
-                    services, callId, edge, logger, "Streaming", httpContext.RequestAborted)
+                    services, callId, edge, httpContext.RequestAborted)
                     .ConfigureAwait(false);
 
                 await WaitForCallEndAsync(session, httpContext.RequestAborted);
@@ -431,37 +433,32 @@ public static class CallingApi
 
         var callId = $"call_{callConnection.CallConnectionId}";
         await StartCallSessionAsync(
-            services, callId, edge, services.Logger, "Verb-mode", cancellationToken)
+            services, callId, edge, cancellationToken)
             .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Shared session-start path for both verb and streaming modes. Builds a
     /// <see cref="CallSessionRequest"/> whose <see cref="CallSessionRequest.PreferredTier"/>
-    /// matches the registered workflow's <see cref="RealtimeIvrWorkflowDefinition.Tier"/>,
-    /// so the DI-resolved <c>IConversationStrategyFactory</c> for that tier (typically the
-    /// composite chain registered last) is selected automatically.
+    /// is taken from the showcase <see cref="CallEntryConfig"/>; the keyed
+    /// <see cref="IConversationStrategy"/> registered for that tier (typically the composite
+    /// chain registered last) is resolved automatically from the per-call DI scope.
     /// </summary>
     private static async Task<ICallSession> StartCallSessionAsync(
         CallingServices services,
         string callId,
         ICallEdge edge,
-        ILogger logger,
-        string modeLabel,
         CancellationToken cancellationToken)
     {
-        var tier = services.Workflow.Tier;
         var session = await services.SessionFactory.CreateAsync(new CallSessionRequest
         {
             CallId = callId,
             CallerEdge = edge,
-            Workflow = services.Workflow,
-            PreferredTier = tier,
+            PreferredTier = DEFAULT_AGENT_TIER,
+            WorkflowId = DEFAULT_WORKFLOW_ID,
         }, cancellationToken).ConfigureAwait(false);
 
         await session.StartAsync(cancellationToken).ConfigureAwait(false);
-        logger.LogInformation(
-            "{Mode} call session {CallId} started ({Tier})", modeLabel, callId, tier);
         return session;
     }
 

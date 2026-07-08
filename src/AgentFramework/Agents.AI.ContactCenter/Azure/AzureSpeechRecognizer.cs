@@ -1,10 +1,9 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.Media.Audio.Resilience;
 using Agents.AI.ContactCenter.Media.Transcription;
-using Azure.Identity;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using Microsoft.Extensions.AI;
@@ -348,7 +347,7 @@ public sealed class AzureSpeechRecognizer : ISpeechRecognizer
         if (e.Reason == CancellationReason.Error)
         {
             _logger.LogError("Recognition error: ErrorCode={ErrorCode} Details={Details}", e.ErrorCode, e.ErrorDetails);
-            _transcriptChannel?.Writer.TryComplete(new InvalidOperationException($"Speech recognition error: {e.ErrorCode} - {e.ErrorDetails}"));
+            _transcriptChannel?.Writer.TryComplete(new SpeechSdkException(e.ErrorCode, e.ErrorDetails));
         }
     }
 

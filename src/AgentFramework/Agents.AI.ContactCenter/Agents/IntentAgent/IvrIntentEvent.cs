@@ -1,4 +1,3 @@
-using System;
 using Agents.AI.ContactCenter.Media.Transcription;
 
 namespace Agents.AI.ContactCenter.Agents.IntentAgent;

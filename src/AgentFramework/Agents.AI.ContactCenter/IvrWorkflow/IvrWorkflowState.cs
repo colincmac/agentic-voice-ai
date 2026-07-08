@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Media.Analysis;
-using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
 namespace Agents.AI.ContactCenter.IvrWorkflow;
@@ -20,6 +19,9 @@ public sealed class IvrWorkflowState
 
     private readonly Lock _lock = new();
     private string? _workflowId;
+    private string? _currentStepName;
+    private int _currentStepIndex = -1;
+    private DateTimeOffset? _stepStartedAt;
     /// <summary>
     /// Gets a thread-safe snapshot of the transcript messages.
     /// </summary>
@@ -97,16 +99,69 @@ public sealed class IvrWorkflowState
     public string? SessionId { get; init; }
 
     /// <summary>
-    /// Gets the name of the currently executing step.
+    /// Gets or sets the id of the currently executing stage.
     /// </summary>
-    public string? CurrentStepName { get; set; }
+    public string? CurrentStepName
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _currentStepName;
+            }
+        }
+        set
+        {
+            lock (_lock)
+            {
+                _currentStepName = value;
+            }
+            LastModifiedAt = DateTimeOffset.UtcNow;
+        }
+    }
 
 
     /// <summary>
-    /// Gets the index of the currently executing step.
+    /// Gets or sets the index of the currently executing step.
     /// </summary>
-    public int CurrentStepIndex { get; set; } = -1;
-    public DateTimeOffset? StepStartedAt { get; set; }
+    public int CurrentStepIndex
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _currentStepIndex;
+            }
+        }
+        set
+        {
+            lock (_lock)
+            {
+                _currentStepIndex = value;
+            }
+            LastModifiedAt = DateTimeOffset.UtcNow;
+        }
+    }
+
+    /// <summary>When the current step was entered.</summary>
+    public DateTimeOffset? StepStartedAt
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _stepStartedAt;
+            }
+        }
+        set
+        {
+            lock (_lock)
+            {
+                _stepStartedAt = value;
+            }
+            LastModifiedAt = DateTimeOffset.UtcNow;
+        }
+    }
     public string? CurrentPrompt { get; set; }
 
     /// <summary>

@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 using Agents.AI.ContactCenter.Calling;
 
 namespace Agents.AI.ContactCenter.Authentication;

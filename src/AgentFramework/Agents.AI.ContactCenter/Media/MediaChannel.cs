@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
 using Agents.AI.Extensions.Helpers.Streaming;
 
 namespace Agents.AI.ContactCenter.Media;

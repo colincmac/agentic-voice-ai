@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Agents.AI.ContactCenter.Agents.IntentAgent;
 
 /// <summary>

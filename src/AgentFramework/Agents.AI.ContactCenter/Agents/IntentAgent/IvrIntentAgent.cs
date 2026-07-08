@@ -1,16 +1,12 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Channels;
-using System.Threading.Tasks;
 using Agents.AI.ContactCenter.Media.Audio;
-using Agents.AI.ContactCenter.Media.Transcription;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Shared.Diagnostics;
@@ -88,6 +84,43 @@ public sealed class IvrIntentAgent : AIAgent
         _speechRecognizer = speechRecognizer;
         _options = options ?? new IvrIntentAgentOptions();
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<IvrIntentAgent>();
+    }
+
+    /// <summary>
+    /// DI-friendly constructor. When this agent is registered as a keyed service, the
+    /// container injects the registration key via <paramref name="serviceKey"/> and this
+    /// constructor resolves the matching keyed <see cref="IChatClient"/>. When the agent
+    /// is registered without a key, <paramref name="serviceKey"/> is <see langword="null"/>
+    /// and the default (non-keyed) <see cref="IChatClient"/> is resolved instead.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider used to resolve the chat client.</param>
+    /// <param name="serviceKey">
+    /// The key this agent was registered under, or <see langword="null"/> when registered
+    /// as a non-keyed service. Supplied automatically by the DI container.
+    /// </param>
+    /// <param name="speechRecognizer">Optional speech recognizer (see other constructor).</param>
+    /// <param name="options">Optional agent configuration.</param>
+    /// <param name="loggerFactory">Optional logger factory.</param>
+    public IvrIntentAgent(
+        IServiceProvider serviceProvider,
+        [ServiceKey] object? serviceKey = null,
+        ISpeechRecognizer? speechRecognizer = null,
+        IvrIntentAgentOptions? options = null,
+        ILoggerFactory? loggerFactory = null)
+        : this(
+            ResolveChatClient(serviceProvider, serviceKey),
+            speechRecognizer,
+            options,
+            loggerFactory)
+    {
+    }
+
+    private static IChatClient ResolveChatClient(IServiceProvider serviceProvider, object? serviceKey)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        return serviceKey is null
+            ? serviceProvider.GetRequiredService<IChatClient>()
+            : serviceProvider.GetRequiredKeyedService<IChatClient>(serviceKey);
     }
 
     /// <inheritdoc/>

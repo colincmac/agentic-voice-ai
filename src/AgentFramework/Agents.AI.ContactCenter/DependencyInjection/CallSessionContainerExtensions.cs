@@ -1,23 +1,14 @@
-using Agents.AI.ContactCenter.Agents.IntentAgent;
 using Agents.AI.ContactCenter.AITools;
+using Agents.AI.ContactCenter.Authentication;
 using Agents.AI.ContactCenter.Calling;
 using Agents.AI.ContactCenter.Calling.Core;
 using Agents.AI.ContactCenter.Calling.Strategies.Composite;
-using Agents.AI.ContactCenter.Calling.Strategies.Dtmf;
-using Agents.AI.ContactCenter.Calling.Strategies.Nlu;
-using Agents.AI.ContactCenter.Calling.Strategies.RealtimeVoice;
 using Agents.AI.ContactCenter.Configuration;
 using Agents.AI.ContactCenter.Coordination;
-using Agents.AI.ContactCenter.Media.Audio;
+using Agents.AI.ContactCenter.IvrWorkflow;
+using Agents.AI.ContactCenter.IvrWorkflow.Catalog;
 using Agents.AI.ContactCenter.Telemetry;
-using Agents.AI.Extensions.AITools;
-using Agents.AI.Extensions.RealtimeAgentHelpers;
-using Agents.AI.Extensions.SessionManagement;
-using Agents.AI.Extensions.ToolApproval;
-using Agents.AI.Realtime;
 using Azure.Communication.CallAutomation;
-using Microsoft.Agents.AI.Hosting;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -91,10 +82,6 @@ public static class CallSessionContainerExtensions
 
         builder.Services.ConfigureOpenTelemetryMeterProvider((sp, builder) =>
             builder.AddMeter(CallingActivitySource.MeterName));
-        //builder.Services
-        //    .AddOpenTelemetry()
-        //    .WithMetrics(metrics => metrics.AddMeter(CallingActivitySource.MeterName))
-        //    .WithTracing(tracing => tracing.AddSource(CallingActivitySource.ActivitySourceName));
 
         return builder;
     }
@@ -120,11 +107,22 @@ public static class CallSessionContainerExtensions
         services.TryAddScoped<CallSessionAccessor>();
         services.TryAddScoped<ICallSessionAccessor>(sp => sp.GetRequiredService<CallSessionAccessor>());
 
+        // Per-call workflow selection, bound by CallSessionFactory before the strategy is built.
+        services.TryAddScoped<CallWorkflowSelection>();
+
+        // Per-call workflow state and caller-auth state, shared across composite tier swaps
+        // because every inner strategy in the same call scope resolves the same instance.
+        // The previous design threaded state via a `restoreFrom` ctor parameter on the (now
+        // deleted) IConversationStrategyFactory; scoped registration is the equivalent that
+        // works naturally with keyed DI.
+        services.TryAddScoped<IvrWorkflowState>();
+        services.TryAddScoped<CallerAuthenticationState>();
+
         services.TryAddSingleton<ICallSessionFactory, CallSessionFactory>();
 
-
-
         builder.AddCallSessionContainerTelemetry();
+
+
         return new CallSessionContainerBuilder(builder);
 
     }
@@ -134,142 +132,13 @@ public sealed class CallSessionContainerBuilder
 {
     public CallSessionContainerBuilder(IHostApplicationBuilder builder)
     {
-        Builder = builder;
+        HostApplicationBuilder = builder;
     }
 
-    public IHostApplicationBuilder Builder { get; }
+    public IHostApplicationBuilder HostApplicationBuilder { get; }
 
-    public IServiceCollection Services => Builder.Services;
+    public IServiceCollection Services => HostApplicationBuilder.Services;
 
-    /// <summary>
-    /// Registers the Tier 0 realtime voice strategy. Resolves the production
-    /// <see cref="AuthorizingRealtimeAIAgent"/> at session-create time and wraps
-    /// it in <see cref="AuthorizingAgentRealtimeBackend"/>.
-    /// </summary>
-    /// <param name="realtimeAgentServiceKey">
-    /// Optional keyed-service key for the underlying <see cref="RealtimeAIAgent"/>.
-    /// When set, resolves the agent registered under that key (e.g. <c>"TriageAgent"</c>).
-    /// When null, resolves the unkeyed <see cref="RealtimeAIAgent"/>.
-    /// </param>
-    public CallSessionContainerBuilder AddRealtimeVoiceStrategy(
-        string? realtimeAgentServiceKey = null,
-        RealtimeAgentRunOptions? runOptions = null,
-        AgentFunctionInvocationMiddleware? middlewareOverride = null)
-    {
-        Services.TryAddScoped<IAgentSessionRegistry, AgentSessionRegistry>();
-        Services.TryAddSingleton<IToolApprovalStore, InMemoryToolApprovalStore>();
-        Services.TryAddScoped<IToolApprovalHandlerProvider, ToolApprovalHandlerProvider>();
-
-        Services.TryAddScoped(sp =>
-        {
-            var agent = !string.IsNullOrEmpty(realtimeAgentServiceKey)
-                ? sp.GetRequiredKeyedService<RealtimeAIAgent>(realtimeAgentServiceKey)
-                : sp.GetRequiredService<RealtimeAIAgent>();
-
-            var registry = sp.GetRequiredService<IAgentSessionRegistry>();
-            var toolCollections = sp.GetServices<IAIToolCollection>();
-
-            return new AuthorizingRealtimeAIAgent(
-                agent,
-                registry,
-                delegateFunc: middlewareOverride,
-                toolCollections,
-                sp);
-        });
-
-        Services.AddTransient<IRealtimeVoiceBackend>(sp =>
-        {
-            var agent = sp.GetRequiredService<AuthorizingRealtimeAIAgent>();
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-            return new AuthorizingAgentRealtimeBackend(agent, runOptions: runOptions, loggerFactory);
-        });
-        Services.AddSingleton<IConversationStrategyFactory, RealtimeVoiceStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the streaming DTMF strategy. Pairs with
-    /// <see cref="AcsCallerStreamEdge"/> and emits locally synthesized PCM through the
-    /// bidirectional media WebSocket. Requires an <see cref="Media.Audio.ISpeechSynthesizer"/>
-    /// to be registered separately for prompt playback.
-    /// </summary>
-    public CallSessionContainerBuilder AddDtmfStreamingStrategy()
-    {
-        Services.AddSingleton<IConversationStrategyFactory, DtmfStreamingStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the verb-based DTMF strategy. Pairs with
-    /// <see cref="AcsCallAutomationEdge"/> and emits SpeakText + CollectDtmf
-    /// directives instead of locally synthesized PCM. Requires no
-    /// <see cref="Media.Audio.ISpeechSynthesizer"/>
-    /// since the platform handles TTS via attached Cognitive Services.
-    /// </summary>
-    public CallSessionContainerBuilder AddDtmfVerbStrategy()
-    {
-        Services.AddSingleton<IConversationStrategyFactory, DtmfVerbStrategyFactory>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the default <see cref="DashboardProjectionObserver"/> so dashboard
-    /// snapshots are populated from <see cref="StrategyEvent"/>s.
-    /// </summary>
-    public CallSessionContainerBuilder AddDashboardProjectionObserver()
-    {
-        Services.AddSingleton<ICallObserver, DashboardProjectionObserver>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers <see cref="CallControlTools"/> as a scoped <see cref="IAIToolCollection"/>
-    /// so the realtime agent can hang up or transfer the live call. Resolves the
-    /// scoped <see cref="ICallSessionAccessor"/> bound by <c>CallSessionFactory</c>,
-    /// so this only works inside the per-call DI scope.
-    /// </summary>
-    public CallSessionContainerBuilder AddCallControlTools()
-    {
-        Services.AddScoped<IAIToolCollection, CallControlTools>();
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the Tier 3 NLU strategy (<see cref="NluConversationStrategy"/>). Requires an
-    /// <see cref="Agents.AI.ContactCenter.Agents.IntentAgent.IvrIntentAgent"/> (which owns
-    /// speech recognition + JSON intent classification) and
-    /// <see cref="Media.Audio.ISpeechSynthesizer"/> to be registered separately.
-    /// </summary>
-    public CallSessionContainerBuilder AddNluStrategy(string? chatClientServiceKey = null, Action<IvrIntentAgentOptions>? configureOptions = null)
-    {
-        var options = new IvrIntentAgentOptions();
-        configureOptions?.Invoke(options);
-
-        Services
-            .AddOptions<IvrIntentAgentOptions>()
-            .Configure(o => configureOptions?.Invoke(o))
-            .ValidateDataAnnotations()
-            .ValidateOnStart(); 
-
-        Builder.AddAIAgent(options.Name, (sp, key) =>
-        {
-            var chatClient = chatClientServiceKey is null
-                ? sp.GetRequiredService<IChatClient>()
-                : sp.GetRequiredKeyedService<IChatClient>(chatClientServiceKey);
-
-            var recognizer = sp.GetService<ISpeechRecognizer>();
-            var resolvedOptions = sp.GetRequiredService<IOptions<IvrIntentAgentOptions>>().Value;
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-
-            return new IvrIntentAgent(chatClient, recognizer, resolvedOptions, loggerFactory);
-        });
-
-        Services.TryAddSingleton<IvrIntentAgent>(sp => sp.GetRequiredKeyedService<IvrIntentAgent>(options.Name));
-
-        Services.AddSingleton<IConversationStrategyFactory, NluConversationStrategyFactory>();
-        
-        return this;
-    }
 
     /// <summary>
     /// Registers a transfer escalation target so strategies that emit
@@ -283,25 +152,28 @@ public sealed class CallSessionContainerBuilder
     }
 
     /// <summary>
-    /// Registers a <see cref="CompositeFallbackStrategy"/> at <paramref name="topTier"/>. The composite
-    /// shadows any individual factory at the top tier (last-registered wins) and walks the
-    /// <paramref name="orderedTiers"/> chain on each inner strategy fault, preserving
-    /// <see cref="IvrWorkflowState"/> via <c>restoreFrom</c>. Per-call scoped services
-    /// (e.g. <c>CallerAuthenticationState</c>) are shared across every tier in the chain.
+    /// Registers a <see cref="CompositeFallbackStrategy"/> as the keyed <see cref="IConversationStrategy"/>
+    /// for <paramref name="topTier"/>. The composite shadows any single-tier registration at the
+    /// same key (last-registered wins in MEDI) and walks the <paramref name="orderedTiers"/> chain
+    /// on each inner strategy fault, resolving each inner strategy from the per-call scope via
+    /// <c>GetRequiredKeyedService&lt;IConversationStrategy&gt;(tier)</c>. Per-call
+    /// <see cref="IvrWorkflowState"/> survives swaps because it's registered as scoped in the
+    /// call scope and every inner strategy reads the same instance.
     /// </summary>
     /// <param name="topTier">
-    /// The tier the call session factory will look up. Must be the first entry of
+    /// The tier <see cref="CallSessionFactory"/> will resolve. Must be the first entry of
     /// <paramref name="orderedTiers"/>.
     /// </param>
     /// <param name="orderedTiers">
     /// Ordered fallback chain — first tier is the primary; subsequent tiers are tried in order
-    /// when the active inner faults.
+    /// when the active inner faults. Tiers without a matching keyed registration are skipped
+    /// (with a warning) so the chain remains usable as the host adds tiers incrementally.
     /// </param>
     /// <remarks>
-    /// Register the inner factories (e.g. <see cref="AddRealtimeVoiceStrategy"/>,
-    /// <see cref="AddNluStrategy"/>, <see cref="AddDtmfStreamingStrategy"/>,
-    /// <see cref="AddDtmfVerbStrategy"/>) BEFORE calling this
-    /// method so the composite can resolve them at call-create time.
+    /// Register the inner strategies (e.g. <see cref="CallWorkflowStrategyExtensions.AddRealtimeCallWorkflowStrategy"/>,
+    /// <see cref="CallWorkflowStrategyExtensions.AddNluCallWorkflowStrategy"/>,
+    /// <see cref="CallWorkflowStrategyExtensions.AddDtmfCallWorkflowStrategy"/>) BEFORE calling
+    /// this method so the composite can resolve them at call-create time.
     /// </remarks>
     public CallSessionContainerBuilder AddCompositeFallbackStrategy(AgentTier topTier, params AgentTier[] orderedTiers)
     {
@@ -309,8 +181,18 @@ public sealed class CallSessionContainerBuilder
         {
             throw new ArgumentException("Provide at least one tier in the fallback chain.", nameof(orderedTiers));
         }
-        Services.AddSingleton<IConversationStrategyFactory>(_ =>
-            new CompositeFallbackStrategyFactory(topTier, orderedTiers));
+        if (orderedTiers[0] != topTier)
+        {
+            throw new ArgumentException(
+                $"The first ordered tier ({orderedTiers[0]}) must match topTier ({topTier}).",
+                nameof(orderedTiers));
+        }
+
+        // Snapshot to defend against caller mutation of the params array after registration.
+        var snapshot = orderedTiers.ToArray();
+
+        Services.AddKeyedTransient<IConversationStrategy>(topTier, (sp, _) =>
+            new CompositeFallbackStrategy(snapshot, sp.GetService<ILoggerFactory>()));
         return this;
     }
 
@@ -344,18 +226,45 @@ public sealed class CallSessionContainerBuilder
     {
         if (useRedis)
         {
-            Builder.AddRedisCallOwnershipDirectory();
-            Builder.AddRedisWebhookIdempotencyStore();
-            Builder.AddRedisPodHeartbeat();
-            Builder.AddHttpWebhookForwarder();
+            HostApplicationBuilder.AddRedisCallOwnershipDirectory();
+            HostApplicationBuilder.AddRedisWebhookIdempotencyStore();
+            HostApplicationBuilder.AddRedisPodHeartbeat();
+            HostApplicationBuilder.AddHttpWebhookForwarder();
         }
         else
         {
-            Builder.AddInMemoryCallOwnershipDirectory();
-            Builder.AddInMemoryWebhookIdempotencyStore();
-            Builder.AddInMemoryPodHeartbeat();
-            Builder.AddInMemoryWebhookForwarder();
+            HostApplicationBuilder.AddInMemoryCallOwnershipDirectory();
+            HostApplicationBuilder.AddInMemoryWebhookIdempotencyStore();
+            HostApplicationBuilder.AddInMemoryPodHeartbeat();
+            HostApplicationBuilder.AddInMemoryWebhookForwarder();
         }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Register the call-control verbs (<c>hang_up_call</c> and <c>transfer_call</c>)
+    /// from <see cref="CallControlTools"/> on the <see cref="IvrWorkflow.Tools.IIvrToolRegistry"/>
+    /// keyed by <paramref name="agentKey"/>. Both tools require a per-call DI scope (they
+    /// reach the live <c>ICallSession</c> via <see cref="ICallSessionAccessor"/>), so they
+    /// are registered with <see cref="ServiceLifetime.Scoped"/>.
+    /// </summary>
+    /// <param name="agentKey">DI service key shared with the realtime agent registration.</param>
+    public CallSessionContainerBuilder AddCallControlTools(string agentKey)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(agentKey);
+
+        Services.TryAddScoped<CallControlTools>();
+        Services.AddIvrTool(
+            agentKey,
+            CallControlTools.HangUpToolName,
+            sp => CallControlTools.BuildHangUpTool(sp.GetRequiredService<CallControlTools>()),
+            ServiceLifetime.Scoped);
+        Services.AddIvrTool(
+            agentKey,
+            CallControlTools.TransferToolName,
+            sp => CallControlTools.BuildTransferTool(sp.GetRequiredService<CallControlTools>()),
+            ServiceLifetime.Scoped);
 
         return this;
     }
